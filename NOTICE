@@ -1,0 +1,29 @@
+QuotaBar
+Copyright 2026 QuotaBar contributors
+Previously distributed as AIUsage Lite, copyright 2026 AIUsage Lite contributors.
+
+This product includes software derived from AIUsage by sylearn and contributors.
+Original project: https://github.com/sylearn/AIUsage
+Source revision: e3502ea77b79c2ef5b88f33e36231f156243a86b
+Original license: Apache License, Version 2.0 (included in LICENSE).
+
+The files in Sources/UsageCore/Upstream and the selected ClaudeSubscriptionTests
+derive from AIUsage. Modifications include removing proxy/server and OAuth refresh
+code, adding memory-only read-only quota fetches, isolating storage paths, extracting
+shared data types, and extending the streaming JSON projection for Codex usage.
+The QuotaBar projection skips unused conversation and tool metadata while preserving
+numeric usage fields, and daily aggregation avoids per-event string formatting.
+New application UI, scheduling, keychain integration, and local usage aggregation
+are provided as part of this independent lightweight adaptation.
+The activity cards in Sources/QuotaBar/ActivityView.swift adapt the upstream
+DashboardView+Heatmap.swift layout, calendar grid, and tooltip presentation.
+Colors and provider symbols use QuotaBar's shared application theme.
+CodexLogo.png, ClaudeLogo.svg, and GeminiLogo.png are the unmodified provider
+logos from the upstream assets.
+The data adapter uses QuotaBar's bounded local token reports without proxy ledgers.
+Codex browser sign-in now delegates to the locally installed official Codex CLI
+in an isolated temporary home. App-owned OAuth refresh and rotation persistence
+are implemented separately, using the public Codex client parameters also present
+in the upstream Codex provider. Imported CLI files remain read-only.
+
+No CLIProxyAPI, Sparkle, browser runtime, or upstream sponsor assets are bundled.

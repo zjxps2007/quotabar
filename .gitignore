@@ -1,0 +1,17 @@
+.build/
+.swiftpm/
+.DS_Store
+artifacts/
+*.xcuserstate
+
+# Local configuration, credentials and signing material
+.env
+.env.*
+!.env.example
+.codex/
+auth.json
+oauth_creds.json
+Credentials/
+*.key
+*.p12
+*.mobileprovision
