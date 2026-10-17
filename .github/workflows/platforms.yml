@@ -1,0 +1,58 @@
+name: Native platforms
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  macos:
+    runs-on: macos-15
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Existing Swift suites and shared contract
+        run: bash scripts/test.sh
+      - name: Build application and Dashboard helper
+        run: bash scripts/build.sh
+      - name: Packaged Claude callback
+        run: python3 scripts/check-statusline.py
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: macos-validation
+          path: artifacts/tests.log
+  windows:
+    runs-on: windows-2025
+    timeout-minutes: 25
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@v6
+        with:
+          global-json-file: windows/global.json
+      - name: Build and synthetic integration tests
+        run: ./windows/scripts/test.ps1
+      - name: Self-contained x64 package
+        run: ./windows/scripts/package.ps1
+      - name: Packaged callback on PowerShell and Git Bash
+        run: |
+          $env:QUOTABAR_TEST_HELPER = Join-Path $PWD 'artifacts/QuotaBar-Windows-x64/StatusLine/QuotaBar.StatusLine.exe'
+          ./windows/scripts/test.ps1 -NoBuild
+      - name: Packaged Dashboard lifetime and parent crash cleanup
+        run: ./windows/scripts/smoke.ps1
+      - uses: actions/upload-artifact@v7
+        with:
+          name: windows-x64-prototype
+          path: |
+            artifacts/QuotaBar-*-Windows-x64.zip
+            artifacts/windows/packaged-probe.json
+            artifacts/windows/*-light.png
+            artifacts/windows/*-dark.png
+          if-no-files-found: error

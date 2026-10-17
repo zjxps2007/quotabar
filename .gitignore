@@ -2,6 +2,10 @@
 .swiftpm/
 .DS_Store
 artifacts/
+.tools/
+**/bin/
+**/obj/
+.vs/
 *.xcuserstate
 
 # Local configuration, credentials and signing material

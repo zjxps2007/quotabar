@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><OutputType>WinExe</OutputType><UseWindowsForms>true</UseWindowsForms><ApplicationManifest>app.manifest</ApplicationManifest><ApplicationIcon>../../assets/QuotaBar.ico</ApplicationIcon></PropertyGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="../../../shared/assets/CodexLogo.png" LogicalName="QuotaBar.CodexLogo.png" />
+    <EmbeddedResource Include="../../../shared/assets/GeminiLogo.png" LogicalName="QuotaBar.GeminiLogo.png" />
+    <EmbeddedResource Include="../../assets/ClaudeLogo.png" LogicalName="QuotaBar.ClaudeLogo.png" />
+    <ProjectReference Include="../QuotaBar.Core/QuotaBar.Core.csproj" />
+    <ProjectReference Include="../QuotaBar.Windows/QuotaBar.Windows.csproj" />
+    <ProjectReference Include="../QuotaBar.Protocol/QuotaBar.Protocol.csproj" />
+  </ItemGroup>
+</Project>

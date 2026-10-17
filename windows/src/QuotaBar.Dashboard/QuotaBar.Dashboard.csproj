@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><OutputType>WinExe</OutputType><UseWPF>true</UseWPF><ApplicationIcon>../../assets/QuotaBar.ico</ApplicationIcon></PropertyGroup>
+  <ItemGroup>
+    <Resource Include="../../assets/QuotaBar.ico" Link="Assets/QuotaBar.ico" />
+    <Resource Include="../../../shared/assets/CodexLogo.png" Link="Assets/CodexLogo.png" />
+    <Resource Include="../../../shared/assets/ClaudeLogo.svg" Link="Assets/ClaudeLogo.svg" />
+    <Resource Include="../../../shared/assets/GeminiLogo.png" Link="Assets/GeminiLogo.png" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="../QuotaBar.Core/QuotaBar.Core.csproj" />
+    <ProjectReference Include="../QuotaBar.Protocol/QuotaBar.Protocol.csproj" />
+  </ItemGroup>
+</Project>

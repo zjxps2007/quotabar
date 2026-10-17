@@ -1,5 +1,7 @@
 # 경량화 설계
 
+플랫폼 분리 이후 기존 Swift 구현은 `macos/`에 있습니다. 이 문서의 아래 항목은 기존 macOS 동작을 설명합니다. Windows 구조와 검증은 [Windows 검증 기록](WINDOWS_VALIDATION.md), 공통 목표는 [플랫폼 계획](PLATFORM_PLAN.md)을 참고하세요. Windows 모니터·Dashboard·Claude callback은 별도 실행 파일이며 익명 파이프와 현재 사용자 전용 저장소로 연결합니다.
+
 기준: sylearn/AIUsage `e3502ea77b79c2ef5b88f33e36231f156243a86b`, 2026-10-16 확인.
 
 0.2.2부터 제품·Swift 패키지·실행 파일 이름은 QuotaBar입니다. 데이터 경로 `~/Library/Application Support/AIUsage Lite`와 앱 식별자 `com.aiusage.lite`는 기존 계정, 로그인 파일, 단일 인스턴스 잠금의 호환을 위해 유지합니다. 이전 검증 기록에 등장하는 AIUsage Lite는 이 앱의 이전 이름입니다.

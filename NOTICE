@@ -7,7 +7,7 @@ Original project: https://github.com/sylearn/AIUsage
 Source revision: e3502ea77b79c2ef5b88f33e36231f156243a86b
 Original license: Apache License, Version 2.0 (included in LICENSE).
 
-The files in Sources/UsageCore/Upstream and the selected ClaudeSubscriptionTests
+The files in macos/Sources/UsageCore/Upstream and the selected ClaudeSubscriptionTests
 derive from AIUsage. Modifications include removing proxy/server and OAuth refresh
 code, adding memory-only read-only quota fetches, isolating storage paths, extracting
 shared data types, and extending the streaming JSON projection for Codex usage.
@@ -15,7 +15,7 @@ The QuotaBar projection skips unused conversation and tool metadata while preser
 numeric usage fields, and daily aggregation avoids per-event string formatting.
 New application UI, scheduling, keychain integration, and local usage aggregation
 are provided as part of this independent lightweight adaptation.
-The activity cards in Sources/QuotaBar/ActivityView.swift adapt the upstream
+The activity cards in macos/Sources/QuotaBar/ActivityView.swift adapt the upstream
 DashboardView+Heatmap.swift layout, calendar grid, and tooltip presentation.
 Colors and provider symbols use QuotaBar's shared application theme.
 CodexLogo.png, ClaudeLogo.svg, and GeminiLogo.png are the unmodified provider
@@ -27,3 +27,11 @@ are implemented separately, using the public Codex client parameters also presen
 in the upstream Codex provider. Imported CLI files remain read-only.
 
 No CLIProxyAPI, Sparkle, browser runtime, or upstream sponsor assets are bundled.
+
+Windows provider parsing, subscription status line preservation and local usage
+aggregation in windows/src/QuotaBar.Core and windows/src/QuotaBar.Windows port the
+corresponding QuotaBar/AIUsage rules. Windows DPAPI/ACL storage, native tray and WPF
+processes are new platform implementations. Shared synthetic fixtures exercise
+both native implementations. shared/assets retains the existing logo originals.
+Windows self-contained builds include Microsoft's .NET and Windows Desktop runtime
+files with their runtime package licenses and notices under licenses/.
