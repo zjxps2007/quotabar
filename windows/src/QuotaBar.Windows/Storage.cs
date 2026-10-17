@@ -60,7 +60,11 @@ public static class PrivateFiles
         string temp = Path.Combine(folder, "." + Guid.NewGuid() + ".tmp");
         try
         {
-            using (var file = new FileStream(temp, FileMode.CreateNew, FileAccess.Write, FileShare.None)) { file.Write(data); file.Flush(true); }
+            // Elevated tokens can otherwise create files owned by the Administrators group.
+            var acl = new FileSecurity(); acl.SetOwner(User); acl.SetAccessRuleProtection(true, false);
+            acl.AddAccessRule(new FileSystemAccessRule(User, FileSystemRights.FullControl, AccessControlType.Allow));
+            using (var file = new FileInfo(temp).Create(FileMode.CreateNew, FileSystemRights.Write, FileShare.None, 4096, FileOptions.None, acl))
+            { file.Write(data); file.Flush(true); }
             File.Move(temp, path, true);
         }
         finally { if (File.Exists(temp)) File.Delete(temp); }

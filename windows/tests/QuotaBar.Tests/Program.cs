@@ -1,4 +1,6 @@
 using System.Diagnostics;
+using System.Security.AccessControl;
+using System.Security.Principal;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -48,8 +50,19 @@ await suite.Run("unknown quota and refresh deadlines", () =>
 await suite.Run("DPAPI persistence rotation deletion and size bounds", () =>
 {
     var vault = new SecretVault(suite.Paths); var id = Guid.NewGuid(); var original = Fixtures.Auth();
-    vault.Save(id, original); Suite.Check(vault.Load(id)!.SequenceEqual(original));
-    Suite.Check(!Encoding.UTF8.GetString(File.ReadAllBytes(Path.Combine(suite.Paths.Credentials, id + ".bin"))).Contains("fixture-refresh"));
+    foreach (var bytes in new[] { original, Fixtures.Auth(access: "rotated-access") })
+    {
+        vault.Save(id, bytes); Suite.Check(vault.Load(id)!.SequenceEqual(bytes));
+        var file = new FileInfo(Path.Combine(suite.Paths.Credentials, id + ".bin"));
+        var acl = file.GetAccessControl();
+        Suite.Check(PrivateFiles.User.Equals(acl.GetOwner(typeof(SecurityIdentifier))), "Credential owner must be the current user, including elevated runs.");
+        Suite.Check(acl.AreAccessRulesProtected, "Credential ACL must not inherit access.");
+        var rules = acl.GetAccessRules(true, true, typeof(SecurityIdentifier)).Cast<FileSystemAccessRule>().ToArray();
+        Suite.Check(rules.Length == 1 && rules[0].IdentityReference.Equals(PrivateFiles.User) && rules[0].AccessControlType == AccessControlType.Allow
+            && rules[0].FileSystemRights == FileSystemRights.FullControl, "Only the current user may access the credential.");
+        Suite.Check(!Encoding.UTF8.GetString(File.ReadAllBytes(file.FullName)).Contains("fixture-refresh"));
+        original = bytes;
+    }
     Suite.Throws<IOException>(() => vault.Save(id, new byte[1_048_577])); Suite.Check(vault.Load(id)!.SequenceEqual(original));
     vault.Delete(id); Suite.Check(vault.Load(id) == null); return Task.CompletedTask;
 });

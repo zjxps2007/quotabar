@@ -61,7 +61,7 @@ Mac의 `AppTheme.swift`, `AppLogo.swift`, `Views.swift`, `ActivityView.swift`를
 | --- | --- |
 | Release 빌드 | 경고 0, 오류 0 |
 | 합성 통합 검사 | **30 통과, 0 실패** |
-| 인증·로그인 | DPAPI 왕복·회전·삭제, 과대 입력 거부, 하드링크 거부, 격리된 가짜 CLI 성공·실패·취소·정리 |
+| 인증·로그인 | DPAPI 왕복·회전·삭제, 생성·교체 후 현재 사용자 소유자와 전용 ACL, 과대 입력 거부, 하드링크 거부, 격리된 가짜 CLI 성공·실패·취소·정리 |
 | 계정 경계 | 워크스페이스 분리, 요청별 bearer/계정 헤더, 캐시 금지, 다른 CLI 계정으로 바뀌었을 때 기존 snapshot 보존 |
 | OAuth 오류 | 동시 요청 12개를 1회 갱신으로 병합, 저장 실패 후 같은 회전 결과 재저장, 삭제 후 늦게 도착한 인증 재생성 방지, revoked 재시도 중단 |
 | Claude callback | 배포 helper를 실제 PowerShell 및 Git Bash에서 실행, 공백·한글·작은따옴표 경로, 한글·이모지 stdin/stdout 바이트와 종료 코드 7 보존, 설정 복원, 사용자 수정 보존, 오래된 연결 세대 제외 |
@@ -75,7 +75,9 @@ Mac의 `AppTheme.swift`, `AppLogo.swift`, `Views.swift`, `ActivityView.swift`를
 
 마지막 배포 실행 검사의 `packaged-probe.json`에서 `passed=true`, `dashboardRunning=false`, `wpfLoadedInMonitor=false`, `parentCrashCleanup=true`, `selfContained=true`를 확인했다. `trayMenu`의 클릭·닫기·스크롤·갱신·명령 검사도 모두 `true`다. Dashboard 종료 후 `trayText="16"`, `trayVisibleAfterDashboardClose=true`, 현재 배율의 `trayPixelSize=24`도 확인했다. 샘플 메뉴와 창을 열고 닫은 직후 단일 관측은 private bytes 26,894,336, working set 84,353,024였다. 이는 실계정 장시간 대기 성능 측정이 아니며 macOS의 `phys_footprint`와 직접 비교하지 않는다.
 
-최종 ZIP을 공백·한글이 있는 새 경로에 추출한 상태에서도 UI·프로세스 검사와 30개 통합 검사를 통과했다. 런타임 라이선스 포함도 확인했다. ZIP은 154,137,209 bytes이며 SHA-256은 `BBB0A0EC8AC3E3F349CC0D2CBB359EF3387762FC345E21D59F48A3A1C1E42622`이다.
+우클릭 메뉴 구현 당시 ZIP을 공백·한글이 있는 새 경로에 추출한 상태에서도 UI·프로세스 검사와 30개 통합 검사를 통과했다. 런타임 라이선스 포함도 확인했다. 해당 로컬 검증본은 154,137,209 bytes이며 SHA-256은 `BBB0A0EC8AC3E3F349CC0D2CBB359EF3387762FC345E21D59F48A3A1C1E42622`이다. GitHub 릴리즈 배포본의 해시는 릴리즈에 첨부한 `SHA256SUMS.txt`를 기준으로 확인한다.
+
+릴리즈 준비 중 Windows CI에서 인증 파일의 소유자가 현재 사용자와 달라 DPAPI 읽기·재시작 검사가 실패하는 문제를 발견했다. 임시 파일을 생성할 때부터 현재 사용자 소유자와 상속을 차단한 전용 ACL을 지정하도록 수정했다. 인증 생성과 토큰 교체 후의 소유자·권한을 검사하며, 기존 소유자·하드링크 거부 검사는 유지한다. 수정 후 로컬 30개 통합 검사를 통과했다.
 
 로그와 화면은 로컬 `artifacts/windows/`의 `tests.log`, `packaged-probe.json`, `*-light.png`, `*-dark.png`에 생성된다. 합성 데이터만 사용하며 저장소에는 포함하지 않는다.
 
@@ -83,7 +85,7 @@ Mac의 `AppTheme.swift`, `AppLogo.swift`, `Views.swift`, `ActivityView.swift`를
 
 이동 전 SHA-256과 비교해 기존 소스·리소스·테스트 **44개 파일의 내용이 모두 동일**함을 확인했다. `Package.swift`의 내용도 유지했다. `com.aiusage.lite`, Dashboard bundle ID와 기존 `AIUsage Lite` 데이터 경로는 변경하지 않았다. 빌드·테스트·callback·벤치마크 스크립트만 새 위치와 루트 `artifacts/` 경로에 맞췄으며 기존 루트 명령은 wrapper로 유지한다. Bash 문법 검사도 통과했다.
 
-공통 로그 fixture를 읽는 `SharedContractTests.swift`를 추가했다. **이 Windows 환경에서는 Mac 빌드와 기존 77개 + 새 계약 테스트를 실행하지 않았다.** `.github/workflows/platforms.yml`에 Mac 빌드·Swift 검사·패키징된 callback과 Windows 검사·패키징을 추가했지만 원격 CI 실행은 아직 하지 않았다. Mac 내부의 `PlatformMac` 재분리는 회귀 실행 환경 확보 후 진행하도록 남겼다.
+공통 로그 fixture를 읽는 `SharedContractTests.swift`를 추가했다. Windows 호스트에서 Mac 빌드를 직접 실행하지 않았지만, [GitHub Actions의 macOS 검사](https://github.com/zjxps2007/quotabar/actions/runs/39048230236/job/117441194988)에서 기존 Swift 검사·공통 계약·앱 및 Dashboard 빌드·패키징된 Claude callback이 통과했다. `.github/workflows/platforms.yml`이 양쪽 플랫폼의 검사와 빌드를 실행한다. Mac 내부의 `PlatformMac` 재분리는 아직 진행하지 않았다.
 
 ## 배포본 구성과 재현
 
@@ -105,7 +107,7 @@ ACL/DPAPI 검사와 Git Bash는 제한 토큰 환경에서 접근 거부가 발�
 
 - Windows 실계정 Codex 브라우저 로그인·장시간 토큰 회전, Claude 실제 세션 callback 발생, 현재 허용되는 Gemini 조직 계정의 quota.
 - 실제 절전·복귀, 여러 모니터 사이 DPI 전환, 장시간 CPU·메모리·전력 측정. 스케줄 계산과 전원 이벤트 연결은 구현했으나 수동 환경 검증은 별도다.
-- Mac에서 디렉터리 이동 이후 빌드·회귀 테스트·기존 계정 업그레이드 실행.
+- Mac에서 기존 계정을 사용하는 앱 업그레이드 수동 실행.
 - Windows ARM64, WSL 프로필, Authenticode 서명, 설치·업데이트 배포.
 
 Gemini 개인용 및 조직 상품의 서비스 종료·계약 정책은 [Google 공식 안내](https://docs.cloud.google.com/gemini/docs/codeassist/sunset)를 따른다. 로컬 parser가 통과했다는 사실로 실계정 서비스 가용성을 보장하지 않는다.

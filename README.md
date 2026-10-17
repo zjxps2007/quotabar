@@ -12,6 +12,8 @@ macOS: SwiftUI/AppKit · macOS 14 이상. Windows: .NET 10 · WinForms 트레이
 
 ## Windows 시제품 실행
 
+[Windows 0.2.2 프리뷰 다운로드](https://github.com/zjxps2007/quotabar/releases/tag/v0.2.2)에서 `QuotaBar-0.2.2-Windows-x64.zip`을 받으세요.
+
 배포 ZIP 전체를 고정된 폴더에 풀고 `QuotaBar.Monitor.exe`를 실행합니다. 트레이를 **우클릭**하면 계정별 잔여량·리셋 시간 메뉴가 열리고 Dashboard로 이동할 수 있습니다. 트레이 좌클릭·더블클릭은 동작하지 않습니다. 창을 닫으면 화면 프로세스만 종료됩니다. .NET 런타임은 배포 ZIP에 포함됩니다.
 
 소스에서 빌드하려면 .NET 10 SDK와 PowerShell 7을 준비합니다.
@@ -23,7 +25,7 @@ macOS: SwiftUI/AppKit · macOS 14 이상. Windows: .NET 10 · WinForms 트레이
 .\windows\scripts\package.ps1
 ```
 
-일반 실행은 `run.ps1`에서 `-Demo`를 생략합니다. 계정 연결·저장소·알려진 제한은 [Windows 안내](windows/README.md)를 참고하세요. Windows x64 시제품이며 실계정 브라우저 로그인과 Mac 회귀 실행은 별도 검증이 필요합니다.
+일반 실행은 `run.ps1`에서 `-Demo`를 생략합니다. 계정 연결·저장소·알려진 제한은 [Windows 안내](windows/README.md)를 참고하세요. Windows x64 시제품이며 실계정 브라우저 로그인은 별도 검증이 필요합니다. macOS 빌드·회귀 검사는 GitHub Actions에서 통과했습니다.
 
 ## macOS 실행
 
