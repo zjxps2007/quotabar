@@ -52,6 +52,14 @@ jobs:
       - name: Install, reinstall, launch and uninstall
         run: ./windows/scripts/test-installer.ps1
       - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: windows-validation-logs
+          path: |
+            artifacts/windows/tests.log
+            artifacts/windows/installer-test-*/*.log
+          if-no-files-found: warn
+      - uses: actions/upload-artifact@v7
         with:
           name: windows-x64-prototype
           path: |

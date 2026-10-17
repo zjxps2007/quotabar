@@ -14,6 +14,7 @@ if (-not [IO.Path]::GetFullPath($destination).StartsWith($artifactRoot, [StringC
 New-Item -ItemType Directory -Path $testRoot | Out-Null
 $group = 'QuotaBar Installer Test ' + [Guid]::NewGuid().ToString('N')
 $shortcutPath = Join-Path ([Environment]::GetFolderPath('Programs')) ($group + '\QuotaBar.lnk')
+if (-not ('ShortcutReader' -as [type])) { Add-Type -Path (Join-Path $PSScriptRoot 'ShortcutReader.cs') }
 $payload = Get-Content -LiteralPath (Join-Path $repo 'artifacts\windows\installer-payload-path.txt') -Raw
 $files = @(Get-ChildItem -LiteralPath $payload -Recurse -File | ForEach-Object {
     [pscustomobject]@{ Relative = [IO.Path]::GetRelativePath($payload, $_.FullName); Hash = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash }
@@ -41,10 +42,9 @@ try {
         $registration = Get-ItemProperty -LiteralPath $registryPath
         if ($registration.InstallLocation.TrimEnd('\') -ne $destination -or $registration.DisplayVersion -ne $metadata.version) { throw 'Installed application registration mismatch.' }
         if (-not (Test-Path -LiteralPath $shortcutPath)) { throw 'Start menu shortcut missing.' }
-        $shell = New-Object -ComObject WScript.Shell
-        $shortcut = $shell.CreateShortcut($shortcutPath)
-        try { if ($shortcut.TargetPath -ne (Join-Path $destination 'QuotaBar.Monitor.exe')) { throw 'Start menu shortcut points to the wrong executable.' } }
-        finally { [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($shortcut); [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($shell) }
+        $shortcutTarget = [ShortcutReader]::ReadTarget($shortcutPath)
+        $expectedTarget = Join-Path $destination 'QuotaBar.Monitor.exe'
+        if ($shortcutTarget -ne $expectedTarget) { throw "Start menu shortcut target mismatch. Expected: $expectedTarget Actual: $shortcutTarget" }
         foreach ($file in $files) {
             if ((Get-FileHash -LiteralPath (Join-Path $destination $file.Relative) -Algorithm SHA256).Hash -ne $file.Hash) { throw "Installed file mismatch: $($file.Relative)" }
         }
