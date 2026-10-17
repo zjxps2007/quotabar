@@ -91,7 +91,15 @@ Mac의 `AppTheme.swift`, `AppLogo.swift`, `Views.swift`, `ActivityView.swift`를
 
 `artifacts/QuotaBar-0.2.2-Windows-x64.zip`은 .NET 런타임을 포함한다. 압축을 풀고 루트의 `QuotaBar.Monitor.exe`를 실행한다. 기존 버전이 실행 중이면 먼저 트레이에서 종료한다. 로컬 실행 파일은 `package.ps1 -OutputFolder QuotaBar-Windows-x64-compact`로 기존 실행 폴더와 분리한 `artifacts/QuotaBar-Windows-x64-compact/QuotaBar.Monitor.exe`에 준비했다. 배포 폴더의 883개 파일이 최종 ZIP과 동일함을 SHA-256으로 확인했다.
 
-`Dashboard/`, `StatusLine/`의 런타임 파일을 루트로 합치면 안 된다. 최초 평면 번들 검사에서 Core의 작은 `WindowsBase.dll`이 WPF 파일을 덮어써 Dashboard 시작이 실패했으며, 프로세스별 폴더 분리 후 배포 실행 검사를 통과했다. 런타임 배포 크기는 Mac 앱보다 크며 이 시제품은 아직 설치 프로그램·서명·자동 업데이트를 제공하지 않는다.
+`Dashboard/`, `StatusLine/`의 런타임 파일을 루트로 합치면 안 된다. 최초 평면 번들 검사에서 Core의 작은 `WindowsBase.dll`이 WPF 파일을 덮어써 Dashboard 시작이 실패했으며, 프로세스별 폴더 분리 후 배포 실행 검사를 통과했다. 런타임 배포 크기는 Mac 앱보다 크며 Authenticode 서명·자동 업데이트는 아직 제공하지 않는다.
+
+### Windows 설치 EXE
+
+`package-installer.ps1`은 검증된 ZIP을 Inno Setup 7.1.0으로 묶어 `QuotaBar-0.2.2-Windows-x64-Setup.exe`를 만든다. 한국어·영어와 시스템 라이트·다크 테마를 지원하며, 관리자 권한 없이 기본 `%LOCALAPPDATA%\Programs\QuotaBar`에 설치한다. 시작 메뉴와 Windows 앱 제거 항목을 등록하고, 바탕 화면 바로가기는 선택 사항이다. 사용자 데이터 폴더를 삭제하는 규칙은 포함하지 않는다. Claude 연결은 제거 전에 앱에서 해제해야 한다.
+
+`test-installer.ps1`로 한글·공백 경로의 신규 설치와 같은 버전 재설치, 설치된 883개 파일의 SHA-256, 시작 메뉴 대상, 설치된 helper를 사용하는 30개 통합 검사, 트레이·Dashboard 실행 및 프로세스 정리를 확인했다. 제거 후 설치 파일·등록 정보·시작 메뉴가 없어지고 설치 폴더에 사용자가 추가한 파일은 남는 것도 확인했다. 실제 계정 데이터는 테스트에 사용하지 않았다.
+
+기존 `v0.2.2` ZIP의 앱 파일을 그대로 설치하며 릴리즈 태그와 ZIP을 교체하지 않는다. `installer-build-info.json`은 앱 소스 커밋과 설치 스크립트 소스 커밋을 구분하고 `SHA256SUMS-installer.txt`는 EXE와 해당 빌드 정보의 해시를 제공한다. CI에도 EXE 빌드·설치·재설치·제거 검사를 추가했다.
 
 ```powershell
 .\windows\scripts\test.ps1
@@ -108,6 +116,6 @@ ACL/DPAPI 검사와 Git Bash는 제한 토큰 환경에서 접근 거부가 발�
 - Windows 실계정 Codex 브라우저 로그인·장시간 토큰 회전, Claude 실제 세션 callback 발생, 현재 허용되는 Gemini 조직 계정의 quota.
 - 실제 절전·복귀, 여러 모니터 사이 DPI 전환, 장시간 CPU·메모리·전력 측정. 스케줄 계산과 전원 이벤트 연결은 구현했으나 수동 환경 검증은 별도다.
 - Mac에서 기존 계정을 사용하는 앱 업그레이드 수동 실행.
-- Windows ARM64, WSL 프로필, Authenticode 서명, 설치·업데이트 배포.
+- Windows ARM64, WSL 프로필, Authenticode 서명, 자동 업데이트, 다른 버전 간 설치 업그레이드.
 
 Gemini 개인용 및 조직 상품의 서비스 종료·계약 정책은 [Google 공식 안내](https://docs.cloud.google.com/gemini/docs/codeassist/sunset)를 따른다. 로컬 parser가 통과했다는 사실로 실계정 서비스 가용성을 보장하지 않는다.

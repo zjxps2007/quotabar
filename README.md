@@ -1,132 +1,58 @@
 # QuotaBar
 
-**Native macOS menu bar and Windows tray apps for monitoring Codex, Claude, and Gemini usage.**
+**AI 코딩 도구의 남은 사용량을 메뉴바와 트레이에서 확인하세요.**
 
-[sylearn/AIUsage](https://github.com/sylearn/AIUsage)의 Provider 조회 기능을 분리한 사용량 추적기입니다. **Codex · Claude · Gemini 다중 계정 모니터링과 Dashboard**에 집중합니다. 기존 macOS 앱은 `macos/`, Windows 시제품은 `windows/`, 공통 계약·로고·버전은 `shared/`에 있습니다.
+QuotaBar는 **Codex · Claude · Gemini**의 계정별 잔여 한도와 초기화 시간을 한곳에서 보여주는 데스크톱 앱입니다. 여러 계정을 오가며 사용량을 확인하는 대신, 작업 중인 화면에서 남은 한도를 살펴보고 필요할 때 Dashboard를 열 수 있습니다.
 
-macOS: SwiftUI/AppKit · macOS 14 이상. Windows: .NET 10 · WinForms 트레이 + 별도 WPF 화면. 두 플랫폼 모두 외부 애플리케이션 패키지 의존성 없이 빌드합니다.
+**[Windows 설치 EXE 다운로드](https://github.com/zjxps2007/quotabar/releases/download/v0.2.2/QuotaBar-0.2.2-Windows-x64-Setup.exe)** · [릴리즈 노트](https://github.com/zjxps2007/quotabar/releases/tag/v0.2.2) · [macOS 사용 안내](macos/README.md)
 
-상단바 모니터는 계속 실행하고, Dashboard는 열 때만 별도 화면 프로세스로 실행합니다. 창을 닫으면 화면 메모리를 반환하며 계정 조회와 토큰 자동 갱신은 계속됩니다. 로컬 사용 활동은 창을 다시 열 때 읽습니다.
+![QuotaBar Windows Dashboard](docs/images/windows-dashboard.png)
 
-기존 Mac의 Codex 2계정 대기 메모리 측정은 [macOS 검증 기록](docs/VALIDATION.md)에 있습니다. Windows의 합성 테스트와 프로세스 검증은 [Windows 검증 기록](docs/WINDOWS_VALIDATION.md)에 따로 기록합니다. 두 OS의 메모리 지표와 실계정 조건은 직접 비교하지 않습니다.
+*Windows 다크 모드의 샘플 화면입니다. 표시된 계정과 사용량은 미리보기 데이터입니다.*
 
-## Windows 시제품 실행
+## 주요 기능
 
-[Windows 0.2.2 프리뷰 다운로드](https://github.com/zjxps2007/quotabar/releases/tag/v0.2.2)에서 `QuotaBar-0.2.2-Windows-x64.zip`을 받으세요.
+- **남은 사용량을 한눈에:** 계정별 한도, 남은 비율, 초기화 시각을 확인합니다.
+- **여러 계정을 함께 관리:** 개인·업무 계정을 연결하고 이름 변경, 일시 정지, 개별 새로고침을 할 수 있습니다.
+- **메뉴바와 트레이 표시:** 표시할 계정을 선택하고, 창을 닫아도 남은 사용량을 계속 확인합니다.
+- **사용 활동 돌아보기:** Codex·Claude의 로컬 기록을 바탕으로 오늘·이번 달 토큰과 최근 26주 활동을 보여줍니다.
+- **라이트·다크 테마:** macOS와 Windows에서 같은 디자인으로 사용하며 시스템 테마를 따를 수 있습니다.
+- **필요할 때 여는 Dashboard:** 상세 창을 닫으면 화면 프로세스가 종료되고 사용량 모니터링은 계속됩니다.
 
-배포 ZIP 전체를 고정된 폴더에 풀고 `QuotaBar.Monitor.exe`를 실행합니다. 트레이를 **우클릭**하면 계정별 잔여량·리셋 시간 메뉴가 열리고 Dashboard로 이동할 수 있습니다. 트레이 좌클릭·더블클릭은 동작하지 않습니다. 창을 닫으면 화면 프로세스만 종료됩니다. .NET 런타임은 배포 ZIP에 포함됩니다.
+## 다운로드
 
-소스에서 빌드하려면 .NET 10 SDK와 PowerShell 7을 준비합니다.
-
-```powershell
-.\windows\scripts\build.ps1
-.\windows\scripts\run.ps1 -Demo
-.\windows\scripts\test.ps1
-.\windows\scripts\package.ps1
-```
-
-일반 실행은 `run.ps1`에서 `-Demo`를 생략합니다. 계정 연결·저장소·알려진 제한은 [Windows 안내](windows/README.md)를 참고하세요. Windows x64 시제품이며 실계정 브라우저 로그인은 별도 검증이 필요합니다. macOS 빌드·회귀 검사는 GitHub Actions에서 통과했습니다.
-
-## macOS 실행
-
-```sh
-git clone https://github.com/zjxps2007/quotabar.git
-cd quotabar
-bash scripts/build.sh
-open "artifacts/QuotaBar.app"
-```
-
-Xcode Command Line Tools의 Swift 5.9 이상이 필요합니다. 현재 Mac의 아키텍처로 빌드합니다. 빌드한 앱을 원하는 위치에 둔 뒤 계정을 연결하세요. 서명은 로컬 실행용 ad-hoc 서명이며 공증된 배포 앱은 아닙니다.
-
-계정에 접근하지 않는 미리보기:
-
-```sh
-open -n "artifacts/QuotaBar.app" --args --demo
-```
-
-미리보기에는 명확하게 표시된 샘플 데이터가 나옵니다. 실제 로그인·로그·네트워크를 읽거나 저장하지 않습니다. 실제 모드와 동시에 실행하면 두 메뉴바 항목이 표시될 수 있으므로 미리보기는 확인 후 종료하세요.
-
-### AIUsage Lite에서 업데이트
-
-0.2.2부터 앱 이름은 **QuotaBar**입니다. 이전 앱을 종료한 뒤 `QuotaBar.app`을 실행하세요. 계정·로그인·설정·중복 실행 잠금을 유지하기 위해 앱 식별자 `com.aiusage.lite`와 기존 데이터 폴더를 계속 사용합니다. Codex와 Gemini 계정을 다시 가져올 필요는 없습니다. Claude 연결은 실행 파일 경로를 사용하므로 새 앱에서 같은 CLI 설정 폴더를 한 번 다시 연결하세요.
-
-## macOS 유지 기능
-
-- **앱 테마:** 블랙·화이트 기반이며 **설정 → 화면 모드**에서 **시스템 설정 따르기 / 라이트 / 다크**를 선택합니다. 앱 창과 상단바 팝업에 즉시 적용하고 재실행 후에도 유지합니다. 기본값은 시스템 설정 따르기입니다. 공통 배경·사이드바·버튼·설정과 앱 아이콘을 무채색으로 맞추고, 선택한 메뉴는 반대 색상의 글자로 구분합니다.
-- **앱 로고:** 세 개의 상승 막대 모양을 Dock·사이드바·상단바·팝업·앱 정보에 공통으로 사용합니다. 하나의 `AppMark.svg`에서 macOS 아이콘과 화면 로고를 만들며, 상단바는 같은 모양의 단색 심볼로 표시합니다.
-- **Provider 디자인:** Codex·Claude·Gemini의 로고를 표시하고 각각 보라·파랑, 주황, 파란색 강조색을 사용합니다. Codex 팔레트는 참고 프로젝트의 UI 색상이며 공식 지정색을 의미하지 않습니다. Gemini 로고는 원본의 다색 별이며 계정 카드·사용 활동·상단바 팝업에서 같은 로고와 색상 규칙을 공유합니다. Provider 색상과 잔여량 부족·오류의 경고색은 공통 앱 테마와 구분합니다.
-- **Dashboard:** 모니터링 계정 수, 확인이 필요한 계정, 계정별 잔여량·리셋 시각, 상단바 표시 선택, 오늘·이번 달 토큰, 26주 활동 히트맵과 날짜별 모델 상세.
-- **Providers & Accounts:** 계정 추가, 별칭, 검색, Provider·연결 확인 필요 필터, 로그인·연결 상태, 개별 새로고침, 모니터링 일시 정지, 삭제. 잔여량 차트와 상단바 표시 스위치는 Dashboard에만 표시합니다.
-- **설정:** 화면 모드, Dock 아이콘 표시 여부, 상단바 표시 형식과 미리보기, 자동 조회 간격, 로컬 통계 수집, 데이터 저장 위치, 앱 버전과 업데이트 안내.
-- **Dock 및 상단바:** 설정에서 **Dock에 앱 아이콘 표시**를 끄면 상단바로 앱을 사용할 수 있습니다. 상단바 표시 형식은 **이름 + 잔여량 / 잔여량만 / 아이콘만** 중에서 선택하며 바로 적용하고 재실행 후에도 유지합니다. 잔여량만 선택하면 Codex · Claude · Gemini 순서로 표시하고, 상단바 팝업에서 계정별 상세와 Dashboard·설정 열기를 제공합니다. 기본값은 Dock 표시와 이름 + 잔여량입니다.
-- **Quota:** 계정별 잔여량, 리셋 시각, 구독 정보, 마지막 데이터 시각. 실패해도 마지막 성공 값을 유지하고 이전 값임을 표시합니다.
-- **메뉴바:** 상단에 `Codex 38% · Claude 16% · Gemini 84%`처럼 남은 사용량을 표시합니다. Dashboard의 각 계정 카드에서 **상단바에 표시**를 켜거나 끌 수 있습니다. 표시를 끄더라도 Dashboard와 사용량 조회는 유지되며 선택은 앱 재시작 후에도 저장됩니다. Provider마다 표시 대상으로 선택한 활성 계정·기간 중 가장 낮은 잔여율이며, 메뉴를 열면 `Codex(계정)` 형식으로 계정별 모든 기간의 수치를 확인할 수 있습니다. `*`는 표시 중인 계정의 최신 값 확인 필요, `—`는 조회된 잔여량 없음을 뜻합니다. 일시 정지한 계정은 제외합니다. 모두 숨겨도 앱 메뉴는 남아 Dashboard를 다시 열 수 있습니다.
-- **로컬 통계:** Codex·Claude JSONL에서 토큰 필드만 읽습니다. 캐시 토큰 중복, 누적 기록, 복사된 세션, 분기 세션을 구분합니다.
-
-## macOS 계정 연결
-
-**Providers & Accounts** 탭의 오른쪽 위 **계정 연결**에서 시작합니다. 기존 계정의 재로그인·모니터링 켜기/끄기와 삭제도 이 탭에서 관리합니다. 계정 카드의 연결 상태는 잔여량 부족과 구분하며, 사용량 부족 경고는 Dashboard에서 확인합니다.
-
-| Provider | 연결 방법 | 동작 및 제한 |
+| 플랫폼 | 설치 방법 | 현재 제공 형태 |
 | --- | --- | --- |
-| Codex | 앱에서 **ChatGPT로 로그인** → 기본 브라우저에서 로그인 완료 | 앱 전용 로그인 파일에 저장하고 토큰을 자동 갱신합니다. 기존 파일 가져오기도 지원합니다. API 키의 결제 사용량은 대상이 아닙니다. |
-| Claude | 로그인한 CLI 설정 폴더 선택 | 공식 `statusLine`의 5시간·주간 quota 스냅샷을 읽습니다. 연결 허용 체크 후 기존 status line을 감싸며, Claude에서 메시지를 보낸 뒤 데이터가 들어옵니다. 계정마다 별도 설정 폴더가 필요합니다. |
-| Gemini | `~/.gemini/oauth_creds.json` 또는 별도 계정 파일 선택 | Code Assist Standard / Enterprise의 Pro·Flash·Flash Lite 잔여량. 개인용 Google 로그인은 지원 종료 상태입니다. |
+| Windows 10/11 x64 | [설치 EXE](https://github.com/zjxps2007/quotabar/releases/download/v0.2.2/QuotaBar-0.2.2-Windows-x64-Setup.exe) · [포터블 ZIP](https://github.com/zjxps2007/quotabar/releases/download/v0.2.2/QuotaBar-0.2.2-Windows-x64.zip) | 0.2.2 프리뷰 |
+| macOS 14 이상 | [빌드·실행 안내](macos/README.md#macos-실행) | 소스에서 빌드 |
 
-Gemini 지원 범위는 [Google 공식 안내](https://developers.google.com/gemini-code-assist/docs/deprecations/code-assist-individuals)를 참고하세요. Google AI Pro / Ultra 구독과 Code Assist Standard / Enterprise는 다른 상품입니다.
+Windows 설치 파일에는 .NET 런타임이 포함되어 있습니다. 관리자 권한 없이 현재 사용자에게 설치되며, 시작 메뉴에서 **QuotaBar**를 실행할 수 있습니다. Windows ARM64와 WSL 계정은 아직 지원하지 않습니다.
 
-Codex 브라우저 로그인에는 설치된 공식 Codex 실행 파일을 사용합니다. Codex CLI 또는 ChatGPT 데스크톱 앱을 자동으로 찾으며, 사용자가 터미널을 조작할 필요는 없습니다. 로그인 중에만 별도 프로세스와 비공개 임시 `CODEX_HOME`을 사용하고, 완료·실패·취소·시간 초과 시 정리합니다. 비밀번호 입력, OAuth callback 및 검증은 공식 로그인 기능이 처리합니다. 기존 CLI의 로그인 파일은 읽거나 변경하지 않습니다.
+## 시작하기
 
-앱에서 로그인한 Codex 계정에는 **자동 갱신** 표시가 붙습니다. 조회 전 토큰이 만료되었거나 5분 이내 만료 예정이면 갱신하고, 인증 거부 시 한 번 더 갱신해 조회합니다. 새 refresh token은 다음 사용량 요청 전에 앱 전용 파일에 저장합니다. 같은 계정의 동시 갱신을 합치며, 정상 모드의 중복 앱 실행도 막습니다. 앱 실행 중에만 동작하며, 로그인이 해제되었거나 refresh token까지 만료되면 **앱에서 로그인**으로 다시 연결해야 합니다.
+1. 앱을 설치하고 **QuotaBar**를 실행합니다.
+2. **Providers & Accounts → 계정 연결**에서 사용할 계정을 추가합니다.
+3. **Dashboard**에서 잔여량을 확인하고 메뉴바·트레이에 표시할 계정을 선택합니다.
 
-기존 Codex 파일 연결은 **앱에서 로그인** 버튼으로 같은 계정·워크스페이스에 다시 로그인하면 자동 갱신으로 전환됩니다. 카드 ID와 이름은 유지됩니다. CLI와 공유하는 refresh token을 앱이 임의로 회전시키지 않도록, 파일 연결 상태에서는 계속 CLI가 갱신한 파일만 읽습니다.
+Windows에서는 트레이 아이콘을 **우클릭**하면 사용량과 **Dashboard 열기 · 종료**가 표시됩니다. 트레이 숫자 `38`은 사용량이 **38% 남았다**는 뜻입니다. 좌클릭과 더블클릭은 동작하지 않습니다.
 
-Codex 파일 가져오기와 Gemini의 로그인 JSON도 **이 Mac의 사용자 전용 파일**에 저장됩니다. 원본 CLI 파일의 계정이 일치할 때만 새 인증을 반영합니다. 원본 파일이 다른 계정으로 바뀌면 보관된 로그인을 사용합니다. Gemini 토큰은 직접 갱신하지 않으므로 만료 시 CLI에서 로그인하고 새로고침하거나 파일을 재연결해야 합니다. 같은 계정을 다시 연결하면 중복 카드 대신 기존 연결을 갱신합니다.
+## 지원하는 연결
 
-0.2.1부터 조회·로그인·자동 갱신에 키체인을 사용하지 않습니다. 로그인 파일은 별도 암호화 없이 폴더 `0700`·파일 `0600` 권한으로 보호하므로 같은 macOS 사용자로 실행되는 프로그램은 읽을 수 있습니다. 이전 버전의 키체인 인증은 최초 실행 때 승인창 없이 읽을 수 있는 항목만 이전합니다. 이전할 수 없는 계정은 카드의 **앱에서 로그인**을 한 번 진행하세요. 계정 카드와 이름은 유지되며, 이후 자동 조회에서 키체인 승인을 반복 요청하지 않습니다.
+| 서비스 | 연결 방법 |
+| --- | --- |
+| Codex | 공식 CLI를 이용한 브라우저 로그인 또는 기존 로그인 파일 연결 |
+| Claude Code | 로그인한 CLI 설정 폴더의 status line 연결 |
+| Gemini | Code Assist에서 현재 허용하는 계정의 로그인 파일 연결 |
 
-Claude는 로그인 토큰을 가져오지 않습니다. 연결한 설정 폴더가 프로필의 단위입니다. 같은 폴더에서 다른 계정으로 로그인하면 해당 프로필의 quota가 바뀔 수 있으므로 계정별 폴더를 유지하세요. CLI가 `rate_limits`를 제공하지 않는 버전·세션에서는 대기 상태를 표시합니다. API 경유 세션에는 구독 quota가 없을 수 있습니다. 앱을 옮긴 경우 해당 폴더를 다시 연결해 helper 경로를 갱신하세요. 삭제 시 기존 status line 명령을 복구하며, 사용자가 이후 수정한 명령을 덮어쓰지 않습니다.
+서비스와 계정 유형에 따라 제공되는 한도가 다릅니다. 로컬 활동 통계는 이 기기의 기록이며 계정별 청구 사용량과는 다를 수 있습니다. 계정 연결 조건과 프리뷰의 지원 범위는 [Windows 안내](windows/README.md)와 [macOS 안내](macos/README.md)를 참고하세요.
 
-## macOS 경량화 방식
+## 사용법과 개발 문서
 
-- 앱 하나에서 직접 조회합니다. QuotaServer, 상주 HTTP listener, 프록시, CPA Gateway, Claude Science, API node 관리, 호출 분석, 자동 업데이트 프레임워크를 포함하지 않습니다. Codex 브라우저 로그인 동안에만 공식 로그인 프로세스가 임시 localhost callback을 엽니다.
-- 동시에 최대 3개 계정만 조회하고 같은 계정의 중복 요청은 합칩니다.
-- 기본 조회 주기는 5분이며 창을 닫거나 숨기면 최소 15분으로 늘어납니다. 시스템 잠자기 중에는 조회를 취소합니다.
-- 상단바만 켜져 있을 때는 다음 조회 시각까지 확인용 반복 타이머를 실행하지 않습니다. 창을 닫으면 화면·로그 파서 캐시를 해제하고 사용이 끝난 메모리를 반환합니다.
-- 로컬 로그 스캔은 Dashboard 창이 보일 때만 최대 5분 간격으로 실행합니다. 바뀌지 않은 파일은 재사용합니다.
-- 로그 본문은 스트림에서 건너뛰고 토큰·날짜·모델·세션 식별 정보만 메모리에 보관합니다. 파일 캐시는 최대 128개, 2만 사용량 이벤트이며 창을 닫으면 해제합니다. 한 번의 통계 처리는 25만 이벤트까지이며 초과 시 불완전 통계 안내를 표시합니다.
-- 사용량과 관계없는 기록의 날짜 파싱과 도구 메타데이터 보관을 생략합니다. 표시 기간의 날짜 경계를 한 번 계산하고, 중복 검사에는 임시 문자열 대신 값 자체를 사용합니다. 로컬 통계가 같으면 활동 히트맵의 재계산도 건너뜁니다.
+- [Windows 설치·계정 연결·소스 빌드](windows/README.md)
+- [macOS 실행·계정 연결·설정](macos/README.md)
+- [플랫폼 구조와 구현 계획](docs/PLATFORM_PLAN.md)
+- [Windows 검증 기록](docs/WINDOWS_VALIDATION.md) · [macOS 검증 기록](docs/VALIDATION.md)
 
-기능 범위를 줄였으므로 원본 전체와 기능 동등한 포크는 아닙니다. 원본 대비 조사 결과와 제외 범위는 [경량화 설계](docs/ARCHITECTURE.md)에 정리했습니다.
+## 라이선스와 출처
 
-macOS/Windows 소스 분리와 단계별 목표는 [플랫폼 구현 계획](docs/PLATFORM_PLAN.md), Windows 시제품의 현재 구현·검증·남은 범위는 [Windows 검증 기록](docs/WINDOWS_VALIDATION.md)에 정리했습니다.
-
-## macOS 데이터 범위
-
-로컬 토큰은 **이 Mac의 기기 단위 기록**입니다. 현재 로그인한 계정에 임의로 귀속시키지 않습니다. API 비용·구독 청구 금액으로 환산하지 않습니다. Gemini의 로컬 토큰 통계는 포함하지 않습니다. 원본 로그를 삭제하면 해당 기록은 통계에서 사라지며, 이 앱은 별도의 영구 로그 데이터베이스를 만들지 않습니다. 분기 원본이 없거나 손상된 기록은 경고와 함께 표시합니다.
-
-사용 활동은 등록된 Claude·Codex만 Provider별 카드로 표시합니다. 같은 Provider에 여러 계정을 등록해도 카드는 하나이며 모니터링 일시 정지나 상단바 표시 선택과는 독립적입니다. 이번 주를 포함한 26주를 월요일부터 배치하며, 월·요일 눈금과 구독 카드에 맞춘 색상(Claude 주황색, Codex 보라·파랑 계열), 오늘 테두리, 총 토큰·활동일·최대 사용일을 제공합니다. 날짜에 포인터를 올리거나 클릭하면 모델별 입력·출력·캐시 토큰을 확인할 수 있습니다. 등록된 Provider의 기록이 없으면 빈 상태를 표시하고, 지원하는 Provider가 하나도 등록되지 않았으면 사용 활동 영역을 숨깁니다.
-
-- 설정: `~/Library/Application Support/AIUsage Lite/settings.json`
-- Claude 연결 및 스냅샷: 같은 폴더의 `ClaudeProfiles/`
-- 로그인 파일: 같은 폴더의 `Credentials/<계정 UUID>.json` (폴더 `0700`, 파일 `0600`)
-
-데이터 폴더의 `AIUsage Lite`는 이전 버전과의 호환을 위한 이름입니다. 저장소에는 소스·리소스·테스트·문서만 포함하며 로컬 계정 파일과 `artifacts/`의 빌드·측정 결과는 포함하지 않습니다.
-
-원본 AIUsage와 저장소를 공유하지 않습니다. 계정 삭제는 이 앱의 로그인 파일·카드·스냅샷을 제거하며 숨긴 계정 목록을 남기지 않습니다. 이전 버전의 키체인 항목은 파일 이전과 설정 저장이 성공한 뒤 승인창 없이 삭제를 시도합니다. 접근이 거부된 예전 항목은 키체인에 남을 수 있지만, 앱에서 다시 읽거나 갱신하지 않습니다.
-
-## macOS 검증
-
-```sh
-bash scripts/test.sh
-```
-
-격리된 임시 폴더와 합성 로그인 데이터로 계정 식별, 캐시 격리, quota 변환, 로그 집계, Claude status line 설치·복구를 검증합니다. 실제 계정 로그인과 서비스 응답은 사용자의 계정 연결 후 확인해야 합니다. 빌드·테스트·실행 측정 결과는 [검증 기록](docs/VALIDATION.md)을 참고하세요.
-
-테스트에는 Swift Testing이 포함된 Swift 6 이상 도구 체인을 사용합니다. 패키징된 Claude callback은 `python3 scripts/check-statusline.py`로 따로 검증할 수 있습니다.
-
-`bash scripts/benchmark-local-usage.sh`는 실제 계정·로그에 접근하지 않고 합성 로그로 최초 스캔과 캐시 재조회를 각각 3회 측정합니다. 2026-10-17 최적화에서는 약 28 MB·25개 파일의 최초 스캔 중앙값이 3.22초에서 1.30초, 캐시 재조회는 20.97 ms에서 11.95 ms로 줄었으며 전체 집계 결과의 해시는 동일했습니다. 이 Mac의 샘플 측정이며 실제 로그 크기와 기기에 따라 달라집니다.
-
-## 라이선스
-
-Apache-2.0. 원본 소스 기준: `e3502ea77b79c2ef5b88f33e36231f156243a86b`. 재사용 파일의 출처와 변경 내역은 [NOTICE](NOTICE)에 기록했습니다.
+[Apache-2.0](LICENSE). [sylearn/AIUsage](https://github.com/sylearn/AIUsage)의 Provider 조회 기능에서 출발한 프로젝트입니다. 재사용 파일의 출처와 변경 내역은 [NOTICE](NOTICE)에 정리했습니다.

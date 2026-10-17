@@ -47,11 +47,18 @@ jobs:
           ./windows/scripts/test.ps1 -NoBuild
       - name: Packaged Dashboard lifetime and parent crash cleanup
         run: ./windows/scripts/smoke.ps1
+      - name: Per-user Windows EXE installer
+        run: ./windows/scripts/package-installer.ps1
+      - name: Install, reinstall, launch and uninstall
+        run: ./windows/scripts/test-installer.ps1
       - uses: actions/upload-artifact@v7
         with:
           name: windows-x64-prototype
           path: |
             artifacts/QuotaBar-*-Windows-x64.zip
+            artifacts/QuotaBar-*-Windows-x64-Setup.exe
+            artifacts/windows/installer-build-info.json
+            artifacts/windows/installer-validation.json
             artifacts/windows/packaged-probe.json
             artifacts/windows/*-light.png
             artifacts/windows/*-dark.png

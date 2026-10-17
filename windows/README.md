@@ -2,9 +2,13 @@
 
 Windows 10/11 x64용 네이티브 트레이 시제품입니다. macOS 앱과 별도 구현이며 Windows ARM64 및 WSL 계정은 아직 지원하지 않습니다.
 
-## 실행
+## 설치와 실행
 
-배포 ZIP 전체를 고정된 폴더에 풀고 `QuotaBar.Monitor.exe`를 실행합니다. .NET 런타임이 포함되어 별도 설치가 필요 없습니다. 파일 하나만 옮기지 마세요.
+[Windows 설치 EXE](https://github.com/zjxps2007/quotabar/releases/download/v0.2.2/QuotaBar-0.2.2-Windows-x64-Setup.exe)를 실행한 뒤 시작 메뉴에서 **QuotaBar**를 엽니다. 한국어·영어 설치 마법사를 제공하며 관리자 권한을 요청하지 않습니다. 기본 설치 위치는 `%LOCALAPPDATA%\Programs\QuotaBar`이고, 계정·설정 데이터는 별도 `%LOCALAPPDATA%\QuotaBar`에 저장합니다. .NET 런타임이 포함되어 별도 설치가 필요 없습니다.
+
+같은 설치 파일을 다시 실행해 재설치할 수 있습니다. 업데이트나 제거 전에는 트레이에서 앱을 종료하세요. **Windows 설정 → 앱 → 설치된 앱 → QuotaBar → 제거**로 삭제할 수 있으며 계정·설정 데이터는 남습니다. Claude를 연결했다면 제거 전에 앱에서 연결을 해제하세요.
+
+포터블 ZIP도 계속 제공합니다. ZIP 전체를 고정된 폴더에 풀고 `QuotaBar.Monitor.exe`를 실행합니다. 파일 하나만 옮기지 마세요.
 
 `Dashboard/`와 `StatusLine/`에는 각 프로세스의 런타임이 있습니다. WPF와 기본 .NET 런타임의 동명 파일이 충돌하므로 폴더 내용을 합치지 마세요.
 
@@ -58,7 +62,13 @@ macOS와 같은 흑백 테마, 앱·서비스 로고, 서비스별 색상, 둥�
 .\windows\scripts\probe.ps1
 .\windows\scripts\run.ps1 -Demo
 .\windows\scripts\package.ps1
+.\windows\scripts\package-installer.ps1
+.\windows\scripts\test-installer.ps1
 ```
+
+`package-installer.ps1`은 ZIP을 사용자별 설치 EXE로 묶습니다. 공식 Inno Setup 7.1.0을 해시·게시자 서명 확인 후 `.tools/`에 포터블로 준비하며 시스템에 컴파일러를 등록하지 않습니다. `-PackagePath`와 `-ExpectedPackageSha256`으로 이미 배포한 ZIP을 지정할 수 있습니다. 앱 파일은 ZIP과 동일하게 유지하고 설치 프로그램의 소스 커밋은 `artifacts/windows/installer-build-info.json`에 따로 기록합니다.
+
+`test-installer.ps1`은 격리된 한글 경로에 설치·재설치하고, 시작 메뉴·파일 해시·앱 실행을 검사한 뒤 테스트 설치를 제거합니다. 같은 사용자의 기존 QuotaBar 설치가 등록되어 있으면 중단하므로 별도 테스트 계정을 사용하세요.
 
 기존 배포 앱이 실행 중일 때는 먼저 트레이에서 종료하거나 `package.ps1 -OutputFolder QuotaBar-Windows-x64-new`처럼 별도 출력 폴더를 지정하세요. 새 폴더의 앱을 사용하기 전에는 기존 앱을 종료해야 합니다.
 

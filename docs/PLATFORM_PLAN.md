@@ -200,7 +200,7 @@ CLI 홈은 `CODEX_HOME`, `CLAUDE_CONFIG_DIR`를 우선하고 기본값은 사용
 
 macOS CI는 Swift 6 이상으로 기존 suite와 패키징 검사를 수행한다. Windows CI는 .NET 10 SDK를 고정하고 합성 fixture·모의 CLI/HTTP·실제 로컬 파이프·callback을 검증한다. 실계정 검증은 사용자 환경에서 별도로 기록하며 CI에 인증 파일을 넣지 않는다. `.gitignore`에는 `bin/`, `obj/`, `.vs/`와 패키징 산출물을 추가한다.
 
-Windows 첫 패키지는 런타임을 포함한 x64 폴더형 ZIP으로 만들고 개발 SDK 설치 없이 실행되는지 검사한다. helper는 안정적인 상대 위치에 둔다. 이후 사용자별 설치 프로그램을 추가하며 공개 정식 배포에서는 Authenticode 서명과 업데이트/제거 시 callback 복구를 검증한다. Mac은 현재 ad-hoc 서명과 공개 배포용 서명·공증을 구별해 기록한다. Apache-2.0 LICENSE와 NOTICE는 두 패키지에 모두 포함한다.
+Windows 첫 패키지는 런타임을 포함한 x64 폴더형 ZIP으로 만들고 개발 SDK 설치 없이 실행되는지 검사한다. helper는 안정적인 상대 위치에 둔다. 0.2.2 프리뷰에 사용자별 설치 EXE를 추가했으며 신규 설치·같은 버전 재설치·제거를 검증한다. 공개 정식 배포에서는 Authenticode 서명과 다른 버전 간 업데이트, 제거 시 callback 복구를 추가 검증한다. 현재 Claude 연결은 제거 전에 앱에서 해제한다. Mac은 현재 ad-hoc 서명과 공개 배포용 서명·공증을 구별해 기록한다. Apache-2.0 LICENSE와 NOTICE는 두 패키지에 모두 포함한다.
 
 ## 성능 기준과 이번 확인 범위
 
