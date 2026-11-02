@@ -80,7 +80,7 @@ public sealed class SettingsStore(AppPaths paths)
         var result = Json.Read<Settings>(PrivateFiles.ReadBounded(path, 4 * 1024 * 1024));
         if (result.SchemaVersion != 1 || result.Accounts == null || result.Accounts.Count > 50 || result.Accounts.Any(a => a == null || a.Id == Guid.Empty || !Enum.IsDefined(a.Provider) || string.IsNullOrWhiteSpace(a.Identity) || string.IsNullOrWhiteSpace(a.Name)) || result.Accounts.Select(a => a.Id).Distinct().Count() != result.Accounts.Count)
             throw new IOException("설정 형식이 지원되지 않습니다. 원본 파일을 보존했습니다.");
-        return result with { RefreshSeconds = new[] { 60, 300, 900, 1800 }.Contains(result.RefreshSeconds) ? result.RefreshSeconds : 300,
+        return result with { RefreshSeconds = RefreshSchedule.Intervals.Contains(result.RefreshSeconds) ? result.RefreshSeconds : 300,
             Appearance = new[] { "system", "light", "dark" }.Contains(result.Appearance) ? result.Appearance : "system",
             TrayDisplayMode = new[] { "remaining", "icon" }.Contains(result.TrayDisplayMode) ? result.TrayDisplayMode : "remaining" };
     }

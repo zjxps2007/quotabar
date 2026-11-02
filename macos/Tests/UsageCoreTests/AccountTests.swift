@@ -91,6 +91,7 @@ final class AccountTests{
             checkEqual(settings.accounts.count, 1)
             checkEqual(settings.accounts.first?.identity, "p:u")
             checkEqual(settings.refreshSeconds, 900)
+            checkTrue(settings.isAutoRefreshEnabled)
             checkFalse(settings.scanLocalLogs)
         }
     }
@@ -98,5 +99,14 @@ final class AccountTests{
         checkNil(QuotaHTTP.session.configuration.urlCache)
         checkEqual(QuotaHTTP.session.configuration.requestCachePolicy, .reloadIgnoringLocalCacheData)
         checkEqual(QuotaHTTP.request(url: URL(string: "https://example.invalid")!, timeout: 1).value(forHTTPHeaderField: "Cache-Control"), "no-cache, no-store, max-age=0")
+    }
+    @Test func testAutomaticRefreshPreferenceRoundTripsWithoutLosingInterval() throws {
+        var settings = LiteSettings()
+        settings.refreshSeconds = 3600
+        settings.autoRefresh = false
+        let restored = try JSONDecoder().decode(LiteSettings.self, from: JSONEncoder().encode(settings))
+        checkFalse(restored.isAutoRefreshEnabled)
+        checkEqual(restored.refreshSeconds, 3600)
+        checkTrue(LiteSettings().isAutoRefreshEnabled)
     }
 }

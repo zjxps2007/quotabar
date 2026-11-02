@@ -2,6 +2,33 @@
 
 확인일: 2026-10-16, 후속 검증 2026-10-17 (Asia/Seoul). Apple Silicon, macOS 27.0.1, Apple Swift 6.4 / Command Line Tools 환경입니다. 최신 산출물은 QuotaBar 0.2.2 arm64이며 최소 배포 대상은 macOS 14입니다. 과거 기록의 AIUsage Lite는 이 앱의 이전 이름입니다. `artifacts/` 경로는 검증 당시의 로컬 기록이며 Git 저장소에는 포함하지 않습니다.
 
+## 자동 새로고침 및 로그인 시 실행 (2026-11-02)
+
+- macOS·Windows 설정에 자동 새로고침 켜기/끄기와 1·5·15·30·60분 선택을 추가했습니다. 창을 닫아도 선택한 간격을 유지하고, 끄면 예약 조회와 절전 복귀 조회를 중단합니다. 시작 시 1회 조회와 수동 새로고침은 유지합니다. 구버전 설정은 자동 새로고침 켜짐으로 읽습니다.
+- 로그인 시 자동 실행은 사용자가 켤 때만 등록합니다. macOS는 Service Management의 등록·승인 상태를 표시하며, Windows는 현재 사용자 Run 항목에 실행 경로와 `--background`를 등록합니다. 로그인 시작에서는 Dashboard를 열지 않습니다. 미리보기 모드는 시스템 등록을 변경하지 않습니다.
+- macOS **90개 테스트 / 13개 suite**, Release 앱·Dashboard helper 패키징, strict 서명, 패키징된 Claude callback 검사가 통과했습니다. 자동 실행은 주입한 모의 서비스로 등록·해제·승인 대기·실패를 검사하고, 합성 Apple event로 로그인 시작을 구분했습니다.
+- Windows 솔루션을 .NET SDK 10.0.402로 macOS에서 교차 빌드했으며 경고·오류가 없습니다. 설정 기본값·왕복 저장·선택 주기·자동 조회 중단·표시 상태 전달 계약을 별도 실행해 통과했습니다. Windows x64 자체 포함 실행 패키지도 생성했습니다.
+- 실제 OS 로그인 항목 등록·재부팅, Windows의 레지스트리·설치 제거 통합 검사와 새 설정 화면의 시각 검증은 이번 환경에서 완료하지 않았습니다. Windows 전용 회귀 검사는 기존 Windows CI에 포함됩니다. 화면 도구가 이전에 실행 중인 앱을 선택했으므로 새 버전의 화면 검증 결과로 간주하지 않았습니다.
+- 로컬 로그: `artifacts/startup-macos-tests.log`, `artifacts/startup-macos-build.log`, `artifacts/startup-statusline.log`, `artifacts/startup-windows-build.log`, `artifacts/startup-windows-contract.log`, `artifacts/startup-windows-publish.log`.
+
+## macOS 로그 파서·상태 반영 최적화 (2026-11-02)
+
+Apple Silicon, macOS 27.0.1, Apple Swift 6.4.2에서 검증했습니다. JSON projection을 행당 버퍼 하나로 변경하고, ISO 8601 formatter 선택·직전 타임스탬프 재사용·동일한 Dashboard 상태의 Published 대입 생략을 적용했습니다.
+
+기존 `scripts/benchmark-local-usage.sh`의 합성 로그 25개, 28,139,158 bytes, 사용량 기록 8,448개를 사용했습니다. 변경 전후를 같은 최적화 옵션으로 빌드하고 다른 빌드 작업이 끝난 뒤 번갈아 두 번 실행했습니다. 각 실행의 3회 스캔을 합한 6개 표본의 중앙값입니다. 첫 스캔은 파서 캐시가 빈 상태이며 OS 파일 캐시를 비우는 측정은 아닙니다.
+
+| 항목 | 변경 전 | 변경 후 |
+| --- | ---: | ---: |
+| 첫 스캔 | 1,322.44ms | 737.49ms (**44.2% 감소**) |
+| 파싱 캐시 사용 | 14.21ms | 13.91ms |
+| 집계 토큰 / 일별 행 | 880,640 / 14 | 880,640 / 14 |
+
+모든 실행의 보고서 SHA-256은 `0e521613c83a0ea71984ca38217a02d38d69a2bd4ff543619cac900117d15fa9`로 동일했습니다. 합성 로그에 대한 결과이며 실제 계정의 장시간 성능·메모리 측정이나 Windows 검증은 포함하지 않습니다.
+
+- 전체 **83개 테스트 / 12개 suite** 통과. 추가 5개는 날짜 파싱 호환성과 정밀도, 반복·잘못된 타임스탬프, 중첩 필드·이스케이프·null 보존, 크기 제한·손상 행 이후 복구, 잘못된 컨테이너의 scalar 처리입니다.
+- 릴리스 앱·Dashboard helper 패키징, strict 서명 검사, 패키징된 Claude callback 검사를 통과했습니다. sandbox 안에서 정상 PNG의 `iconutil` 변환이 실패하여 같은 빌드 스크립트를 sandbox 밖에서 다시 실행했습니다. 기존 keychain 호환 API와 SwiftPM native 빌드 옵션의 deprecated 경고는 남아 있습니다.
+- 원시 측정값은 `artifacts/optimization-comparison.json`, 검증 로그는 `artifacts/optimization-tests.log`, `artifacts/optimization-build.log`, `artifacts/optimization-statusline.log`에 있습니다.
+
 ## QuotaBar 이름 변경 및 저장소 준비 (2026-10-17)
 
 - Swift 패키지·실행 파일·앱 파일·Dashboard helper·리소스 번들과 화면 이름을 QuotaBar로 변경했습니다. 산출물은 `artifacts/QuotaBar.app`, `artifacts/QuotaBar-macos-arm64.zip`입니다.

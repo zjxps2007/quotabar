@@ -14,6 +14,8 @@ public sealed class MonitorService : IDisposable
     private readonly CodexSessions sessions;
     private readonly ClaudeConnection claude;
     private readonly CodexLogin login;
+    private readonly ILaunchAtLogin launchAtLogin;
+    private LaunchAtLoginState launchAtLoginState;
     private readonly LocalUsageScanner scanner = new();
     private readonly SemaphoreSlim workers = new(3);
     private readonly Dictionary<Guid, CancellationTokenSource> requests = [];
@@ -28,11 +30,13 @@ public sealed class MonitorService : IDisposable
     private TaskCompletionSource? loginFinished;
     public Settings Settings { get; private set; }
     public event Action? Changed;
-    public MonitorService(AppPaths paths, ProviderClient? providerClient = null)
+    public MonitorService(AppPaths paths, ProviderClient? providerClient = null, ILaunchAtLogin? launchAtLogin = null)
     {
         client = providerClient ?? new();
+        this.launchAtLogin = launchAtLogin ?? new LaunchAtLogin();
         Paths = paths; PrivateFiles.EnsureDirectory(paths.Root); store = new(paths); vault = new(paths);
         Settings = store.Load(); claude = new(paths); login = new(paths); sessions = new(vault, client.Refresh);
+        RefreshLaunchAtLogin();
         string cache = Path.Combine(paths.Root, "snapshots.json");
         if (File.Exists(cache))
             try { foreach (var pair in Json.Read<Dictionary<Guid, Snapshot>>(PrivateFiles.ReadBounded(cache, 2 * 1024 * 1024)))
@@ -40,7 +44,7 @@ public sealed class MonitorService : IDisposable
             catch (Exception e) when (e is IOException or JsonException) { message = "이전 사용량 캐시를 읽지 못했습니다. 새로고침하면 다시 저장합니다."; }
     }
     public DisplayState State() => new(Settings, new(snapshots), new(errors), new(loading), message, false, activity, scanning, loginToken != null,
-        Paths.Root, Enum.GetValues<Provider>().ToDictionary(p => p.ToString().ToLowerInvariant(), AppPaths.DefaultPath));
+        Paths.Root, Enum.GetValues<Provider>().ToDictionary(p => p.ToString().ToLowerInvariant(), AppPaths.DefaultPath), launchAtLoginState);
     private void Notify() { if (!disposed) Changed?.Invoke(); }
     public static string Explain(Exception error) => error switch {
         UsageException e => e.Message, OperationCanceledException => "작업을 취소했습니다.", HttpRequestException => "서버에 연결하지 못했습니다. 네트워크를 확인하세요.",
@@ -49,13 +53,26 @@ public sealed class MonitorService : IDisposable
         IOException => "파일을 읽거나 저장하지 못했습니다. 경로, 권한과 여유 공간을 확인하세요.", _ => "작업을 완료하지 못했습니다. 다시 시도하세요." };
     public void SetMessage(string? text) { message = text; Notify(); }
     private void Save(Settings value) { store.Save(value); Settings = value; Notify(); }
-    public void Preferences(int seconds, string theme, bool scan, bool taskbar, string? trayDisplay = null)
+    public void Preferences(int seconds, string theme, bool scan, bool taskbar, string? trayDisplay = null, bool? autoRefresh = null)
     {
         trayDisplay ??= Settings.TrayDisplayMode;
-        if (!new[] { 60, 300, 900, 1800 }.Contains(seconds) || !new[] { "system", "light", "dark" }.Contains(theme)
+        if (!RefreshSchedule.Intervals.Contains(seconds) || !new[] { "system", "light", "dark" }.Contains(theme)
             || !new[] { "remaining", "icon" }.Contains(trayDisplay)) throw new UsageException("settings", "지원하는 설정 값을 선택하세요.");
-        Save(Settings with { RefreshSeconds = seconds, Appearance = theme, ScanLocalLogs = scan, ShowTaskbarIcon = taskbar, TrayDisplayMode = trayDisplay });
+        Save(Settings with { RefreshSeconds = seconds, AutoRefresh = autoRefresh ?? Settings.AutoRefresh, Appearance = theme,
+            ScanLocalLogs = scan, ShowTaskbarIcon = taskbar, TrayDisplayMode = trayDisplay });
         if (!scan) { StopScan(); activity = null; Notify(); }
+    }
+    public void RefreshLaunchAtLogin()
+    {
+        try { launchAtLoginState = launchAtLogin.State; }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or System.Security.SecurityException)
+        { launchAtLoginState = LaunchAtLoginState.Unavailable; }
+        Notify();
+    }
+    public void SetLaunchAtLogin(bool enabled)
+    {
+        try { launchAtLogin.SetEnabled(enabled); }
+        finally { RefreshLaunchAtLogin(); }
     }
     public void Edit(Guid id, string name, bool enabled, bool tray)
     {

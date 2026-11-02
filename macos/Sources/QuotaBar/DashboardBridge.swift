@@ -135,7 +135,11 @@ final class DashboardHost {
         case .refresh(let id): if let value = account(id) { store.refresh(value) }
         case .toggle(let id): if let value = account(id) { store.toggle(value) }
         case .remove(let id): if let value = account(id) { store.remove(value) }
-        case .interval(let value): if [60, 300, 900, 1800].contains(value) { store.setInterval(value) }
+        case .interval(let value): store.setInterval(value)
+        case .autoRefresh(let value): store.setAutoRefresh(value)
+        case .launchAtLogin(let value): store.setLaunchAtLogin(value)
+        case .refreshLaunchAtLogin: store.refreshLaunchAtLogin()
+        case .openLoginItemsSettings: store.openLoginItemsSettings()
         case .appearance(let value): store.setAppearance(value)
         case .dockIcon(let value): store.setDockIconVisible(value)
         case .menuBarMode(let value): store.setMenuBarDisplayMode(value)

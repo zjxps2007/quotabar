@@ -644,17 +644,41 @@ struct PreferencesView: View {
                 }.frame(maxWidth: .infinity, alignment: .leading).card()
                 VStack(alignment: .leading, spacing: 18) {
                     Label("모니터링", systemImage: "arrow.triangle.2.circlepath").font(.headline)
+                    Toggle("자동 새로고침", isOn: Binding(get: { store.settings.isAutoRefreshEnabled }, set: store.setAutoRefresh))
+                        .toggleStyle(.switch)
                     HStack {
-                        VStack(alignment: .leading, spacing: 4) { Text("자동 새로고침"); Text("창을 닫으면 최소 15분 간격으로 조회합니다.").font(.caption).foregroundStyle(.secondary) }
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("조회 간격")
+                            Text("창을 닫아도 선택한 주기로 계정 사용량을 조회합니다.").font(.caption).foregroundStyle(.secondary)
+                        }
                         Spacer()
                         Picker("조회 간격", selection: Binding(get: { store.settings.refreshSeconds }, set: store.setInterval)) {
-                            Text("1분").tag(60); Text("5분").tag(300); Text("15분").tag(900); Text("30분").tag(1800)
-                        }.labelsHidden().frame(width: 130)
+                            ForEach(RefreshSchedule.intervals, id: \.self) { seconds in
+                                Text("\(seconds / 60)분").tag(seconds)
+                            }
+                        }.labelsHidden().frame(width: 130).disabled(!store.settings.isAutoRefreshEnabled)
                     }
+                    Text("자동 새로고침을 꺼도 앱 시작 시 한 번 조회하며, 수동 새로고침은 계속 사용할 수 있습니다.")
+                        .font(.caption).foregroundStyle(.secondary)
                     Divider()
                     Toggle(isOn: Binding(get: { store.settings.scanLocalLogs }, set: store.setScanLogs)) {
                         VStack(alignment: .leading, spacing: 4) { Text("로컬 토큰 통계"); Text("Dashboard가 열려 있을 때만 로그를 확인합니다. 대화 본문은 저장하지 않습니다.").font(.caption).foregroundStyle(.secondary) }
                     }.toggleStyle(.switch)
+                }.frame(maxWidth: .infinity, alignment: .leading).card()
+                VStack(alignment: .leading, spacing: 14) {
+                    Label("시작", systemImage: "power").font(.headline)
+                    Toggle("로그인 시 자동 실행", isOn: Binding(get: { store.launchAtLogin.isRegistered }, set: store.setLaunchAtLogin))
+                        .toggleStyle(.switch).disabled(store.launchAtLogin == .unavailable)
+                    Text("Mac 재시동 후 로그인하면 Dashboard를 열지 않고 상단바에서 시작합니다.")
+                        .font(.caption).foregroundStyle(.secondary)
+                    if store.launchAtLogin == .requiresApproval {
+                        Text("macOS 로그인 항목 설정에서 QuotaBar의 실행을 허용해 주세요.")
+                            .font(.caption).foregroundStyle(.secondary)
+                        Button("로그인 항목 설정 열기", action: store.openLoginItemsSettings)
+                    } else if store.launchAtLogin == .unavailable {
+                        Text("빌드된 QuotaBar.app에서 자동 실행을 설정할 수 있습니다.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
                 }.frame(maxWidth: .infinity, alignment: .leading).card()
                 VStack(alignment: .leading, spacing: 12) {
                     Label("데이터 저장", systemImage: "lock.shield").font(.headline)
@@ -679,6 +703,10 @@ struct PreferencesView: View {
                     }.buttonStyle(.plain)
                 }.frame(maxWidth: .infinity, alignment: .leading).card()
             }.padding(.horizontal, 28).padding(.bottom, 28)
+        }
+        .onAppear { store.refreshLaunchAtLogin() }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            store.refreshLaunchAtLogin()
         }
     }
 }

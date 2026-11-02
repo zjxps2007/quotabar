@@ -56,6 +56,22 @@ final class LocalUsageTests{
         let result = try await LocalUsageScanner().scan(codexRoots: [], claudeRoots: [root], now: now, timeZone: zone)
         checkEqual(result.tokens(on: "2026-10-16"), 180)
     }
+    @Test func testRepeatedTimestampsPreserveDistinctEventsAndSkipInvalidDates() async throws {
+        let root = try directory(); defer { try? FileManager.default.removeItem(at: root) }
+        var rows: [[String: Any]] = []
+        for (index, time) in ["2026-10-15T23:59:59.123Z", "2026-10-15T23:59:59.123Z",
+                              "invalid", "invalid", "2026-10-16T09:00:00+09:00",
+                              "2026-10-16T09:00:00+09:00", "2026-10-15T23:59:59.123Z"].enumerated() {
+            var row = claude("response-\(index)", input: 100, output: 30)
+            row["timestamp"] = time
+            rows.append(row)
+        }
+        try write(rows, to: root.appendingPathComponent("timestamps.jsonl"))
+        let result = try await LocalUsageScanner().scan(codexRoots: [], claudeRoots: [root], now: now, timeZone: zone)
+        checkEqual(result.tokens(on: "2026-10-15"), 540)
+        checkEqual(result.tokens(on: "2026-10-16"), 360)
+        checkTrue(result.warnings.isEmpty)
+    }
     @Test func testLargeConversationBodyIsSkipped() async throws {
         let root = try directory(); defer { try? FileManager.default.removeItem(at: root) }
         try write([claude("response", input: 100, output: 30, content: String(repeating: "SENSITIVE", count: 400_000))], to: root.appendingPathComponent("one.jsonl"))

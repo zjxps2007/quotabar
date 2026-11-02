@@ -104,7 +104,8 @@ internal sealed partial class DashboardWindow
     private void Preferences(Settings value)
     {
         state = state! with { Settings = value }; Render();
-        Send("preferences", new { seconds = value.RefreshSeconds, theme = value.Appearance, scan = value.ScanLocalLogs, taskbar = value.ShowTaskbarIcon, trayDisplay = value.TrayDisplayMode });
+        Send("preferences", new { seconds = value.RefreshSeconds, autoRefresh = value.AutoRefresh, theme = value.Appearance,
+            scan = value.ScanLocalLogs, taskbar = value.ShowTaskbarIcon, trayDisplay = value.TrayDisplayMode });
     }
     private void SettingsPage()
     {
@@ -149,18 +150,36 @@ internal sealed partial class DashboardWindow
         var displayCard = Card(display); displayCard.Margin = new Thickness(0, 0, 0, 20); body.Children.Add(displayCard);
 
         var monitoring = new StackPanel(); monitoring.Children.Add(Text("모니터링", 14, true));
+        var automatic = Switch("자동 새로고침", state.Settings.AutoRefresh, value => Preferences(state!.Settings with { AutoRefresh = value }));
+        automatic.Margin = new Thickness(0, 18, 0, 0); monitoring.Children.Add(automatic);
         var intervalRow = new DockPanel { Margin = new Thickness(0, 18, 0, 0) };
         var interval = new ComboBox { Width = 130, VerticalAlignment = VerticalAlignment.Center };
-        foreach (string label in new[] { "1분", "5분", "15분", "30분" }) interval.Items.Add(label);
-        int[] intervals = [60, 300, 900, 1800]; interval.SelectedIndex = Math.Max(0, Array.IndexOf(intervals, state.Settings.RefreshSeconds));
+        int[] intervals = RefreshSchedule.Intervals.ToArray();
+        foreach (int seconds in intervals) interval.Items.Add($"{seconds / 60}분");
+        interval.SelectedIndex = Math.Max(0, Array.IndexOf(intervals, state.Settings.RefreshSeconds));
+        interval.IsEnabled = state.Settings.AutoRefresh;
         AutomationProperties.SetName(interval, "자동 새로고침 간격");
         interval.SelectionChanged += (_, _) => Preferences(state!.Settings with { RefreshSeconds = intervals[Math.Max(0, interval.SelectedIndex)] });
         DockPanel.SetDock(interval, Dock.Right); intervalRow.Children.Add(interval);
-        var intervalLabel = new StackPanel(); intervalLabel.Children.Add(Text("자동 새로고침")); intervalLabel.Children.Add(Caption("창을 닫으면 최소 15분 간격으로 조회합니다."));
-        intervalRow.Children.Add(intervalLabel); monitoring.Children.Add(intervalRow); monitoring.Children.Add(Divider());
+        var intervalLabel = new StackPanel(); intervalLabel.Children.Add(Text("조회 간격")); intervalLabel.Children.Add(Caption("창을 닫아도 선택한 주기로 계정 사용량을 조회합니다."));
+        intervalRow.Children.Add(intervalLabel); monitoring.Children.Add(intervalRow);
+        var automaticNote = Caption("꺼도 앱 시작 시 한 번 조회하며, 수동 새로고침은 계속 사용할 수 있습니다.");
+        automaticNote.Margin = new Thickness(0, 10, 0, 0); monitoring.Children.Add(automaticNote); monitoring.Children.Add(Divider());
         monitoring.Children.Add(Switch("로컬 토큰 통계", state.Settings.ScanLocalLogs, value => Preferences(state!.Settings with { ScanLocalLogs = value })));
         var scanNote = Caption("Dashboard가 열려 있을 때만 로그를 확인합니다. 대화 본문은 저장하지 않습니다."); scanNote.Margin = new Thickness(0, 6, 0, 0); monitoring.Children.Add(scanNote);
         var monitoringCard = Card(monitoring); monitoringCard.Margin = new Thickness(0, 0, 0, 20); body.Children.Add(monitoringCard);
+
+        var startup = new StackPanel(); startup.Children.Add(Text("시작", 14, true));
+        var login = Switch("로그인 시 자동 실행", state.LaunchAtLogin == LaunchAtLoginState.Enabled, value => Send("startup", value));
+        login.IsEnabled = state.LaunchAtLogin != LaunchAtLoginState.Unavailable;
+        login.Margin = new Thickness(0, 18, 0, 6); startup.Children.Add(login);
+        startup.Children.Add(Caption("Windows 재시작 후 로그인하면 Dashboard를 열지 않고 트레이에서 시작합니다."));
+        var startupNote = Caption(state.LaunchAtLogin == LaunchAtLoginState.Unavailable
+            ? "설치된 QuotaBar 앱에서 자동 실행을 설정하세요."
+            : "Windows의 시작 앱 설정에서도 QuotaBar를 허용해야 합니다. 앱을 옮겼다면 이 옵션을 다시 켜세요.");
+        startupNote.Margin = new Thickness(0, 6, 0, 0); startup.Children.Add(startupNote);
+        startup.Children.Add(Link("Windows 시작 앱 설정 열기", () => Send("startup-settings", true)));
+        var startupCard = Card(startup); startupCard.Margin = new Thickness(0, 0, 0, 20); body.Children.Add(startupCard);
 
         var about = new StackPanel(); about.Children.Add(Text("QuotaBar", 14, true));
         about.Children.Add(Caption($"Windows · 버전 {Brand.Version}")); about.Children.Add(Divider());

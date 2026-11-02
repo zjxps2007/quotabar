@@ -3,6 +3,7 @@ import Foundation
 /// Deadlines, rather than a polling tick, keep a menu-bar-only app asleep
 /// between quota requests. No deadline means no monitoring timer is needed.
 public struct RefreshSchedule: Equatable, Sendable {
+    public static let intervals = [60, 300, 900, 1800, 3600]
     public static let localInterval: TimeInterval = 300
     public let accounts: Date?
     public let localLogs: Date?
@@ -17,11 +18,11 @@ public struct RefreshSchedule: Equatable, Sendable {
 
     public init(suspended: Bool, hasAccounts: Bool, windowVisible: Bool,
                 dashboardSelected: Bool, scanLocalLogs: Bool, scanning: Bool,
-                refreshSeconds: Int, lastAccountRefresh: Date, lastLocalAttempt: Date?) {
-        accounts = !suspended && hasAccounts
-            ? lastAccountRefresh.addingTimeInterval(Double(windowVisible ? refreshSeconds : max(900, refreshSeconds)))
+                refreshSeconds: Int, lastAccountRefresh: Date, lastLocalAttempt: Date?, autoRefresh: Bool = true) {
+        accounts = !suspended && autoRefresh && hasAccounts && refreshSeconds > 0
+            ? lastAccountRefresh.addingTimeInterval(Double(refreshSeconds))
             : nil
-        localLogs = !suspended && windowVisible && dashboardSelected && scanLocalLogs && !scanning
+        localLogs = !suspended && autoRefresh && windowVisible && dashboardSelected && scanLocalLogs && !scanning
             ? (lastLocalAttempt?.addingTimeInterval(Self.localInterval) ?? .distantPast)
             : nil
     }

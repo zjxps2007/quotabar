@@ -53,5 +53,9 @@ Name: "{autodesktop}\QuotaBar"; Filename: "{app}\QuotaBar.Monitor.exe"; WorkingD
 [Run]
 Filename: "{app}\QuotaBar.Monitor.exe"; Description: "{cm:LaunchProgram,QuotaBar}"; Flags: nowait postinstall skipifsilent
 
+[Registry]
+; Registration is opt-in inside the app; uninstall removes only our Run value.
+Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueName: "QuotaBar"; Flags: dontcreatekey uninsdeletevalue
+
 ; User settings and credentials live outside {app} and are never removed.
 ; Claude connections must be disconnected in the app before uninstalling.

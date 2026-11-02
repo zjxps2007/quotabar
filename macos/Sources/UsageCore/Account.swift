@@ -94,14 +94,14 @@ public struct QuotaWindow: Codable, Equatable, Identifiable, Sendable {
     }
 }
 
-public struct AccountSnapshot: Codable, Sendable {
+public struct AccountSnapshot: Codable, Equatable, Sendable {
     public let fetchedAt: Date
     public let observedAt: Date?
     public let plan: String?
     public let email: String?
     public let windows: [QuotaWindow]
     public let state: String?
-    public var lowestRemaining: Double? { windows.map(\.remaining).min() }
+    public var lowestRemaining: Double? { windows.lazy.map(\.remaining).min() }
     public init(usage: ProviderUsage, provider: ProviderKind, now: Date = Date()) {
         fetchedAt = now
         observedAt = SharedFormatters.parseISO8601(usage.fetchedAt)
@@ -135,9 +135,12 @@ public enum MenuBarDisplayMode: String, Codable, CaseIterable, Sendable {
     }
 }
 
-public struct LiteSettings: Codable, Sendable {
+public struct LiteSettings: Codable, Equatable, Sendable {
     public var accounts: [MonitoredAccount] = []
     public var refreshSeconds: Int = 300
+    /// Older installations keep automatic refresh enabled.
+    public var autoRefresh: Bool?
+    public var isAutoRefreshEnabled: Bool { autoRefresh ?? true }
     public var scanLocalLogs = true
     /// Missing in older settings, which follow the system appearance.
     public var appearance: AppearanceMode?

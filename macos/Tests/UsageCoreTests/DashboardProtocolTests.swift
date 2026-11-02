@@ -48,8 +48,9 @@ struct DashboardProtocolTests {
         account.showInMenuBar = false; account.appManagedLogin = true
         settings.accounts = [account]
         settings.appearance = .dark; settings.showDockIcon = false; settings.menuBarDisplayMode = .remainingOnly
+        settings.autoRefresh = false; settings.refreshSeconds = 3600
         let state = DashboardState(settings: settings, snapshots: [:], errors: [account.id: "Failed"],
-                                   notes: [:], loading: [account.id], message: nil, demoReport: nil)
+                                   notes: [:], loading: [account.id], message: nil, demoReport: nil, launchAtLogin: .requiresApproval)
         let encoded = try JSONEncoder().encode(DashboardEvent.state(state))
         guard case .state(let copy) = try JSONDecoder().decode(DashboardEvent.self, from: encoded) else {
             Issue.record("Wrong event after decoding"); return
@@ -59,6 +60,17 @@ struct DashboardProtocolTests {
         #expect(copy.settings.selectedMenuBarDisplayMode == .remainingOnly)
         #expect(copy.errors[account.id] == "Failed" && copy.loading.contains(account.id))
         #expect(copy.demoReport == nil)
+        #expect(!copy.settings.isAutoRefreshEnabled && copy.settings.refreshSeconds == 3600)
+        #expect(copy.launchAtLogin == .requiresApproval)
+    }
+
+    @Test func startupAndRefreshCommandsRoundTrip() throws {
+        let encoder = JSONEncoder(), decoder = JSONDecoder()
+        let refresh = try decoder.decode(DashboardCommand.self, from: encoder.encode(DashboardCommand.autoRefresh(false)))
+        let startup = try decoder.decode(DashboardCommand.self, from: encoder.encode(DashboardCommand.launchAtLogin(true)))
+        guard case .autoRefresh(false) = refresh, case .launchAtLogin(true) = startup else {
+            Issue.record("Settings command changed in transit"); return
+        }
     }
 
     @Test func anonymousPipeDeliversOrderedMessagesAndClosesPeerOnce() async throws {

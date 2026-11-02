@@ -216,6 +216,16 @@ public actor LocalUsageScanner {
     static func parse(path: String, provider: ProviderKind, limit: Int) throws -> ParsedFile {
         var file = ParsedFile(sessionID: path)
         var model = "Unknown"
+        // Streaming updates often repeat a timestamp. Keep only the last parsed
+        // value, including failures, without retaining a cache for every row.
+        var lastTimestamp: (value: String, date: Date?)?
+        func timestamp(_ raw: Any?) -> Date? {
+            guard let value = raw as? String else { return nil }
+            if let lastTimestamp, lastTimestamp.value == value { return lastTimestamp.date }
+            let date = SharedFormatters.parseISO8601(value)
+            lastTimestamp = (value, date)
+            return date
+        }
         let scanned = try SessionProjectionReader.scan(path: path, cursor: nil) { data in
             guard file.events.count < max(0, limit) else { file.issue = true; return }
             guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
@@ -226,7 +236,7 @@ public actor LocalUsageScanner {
                       let id = message["id"] as? String, !id.isEmpty,
                       let name = message["model"] as? String, name != "<synthetic>",
                       let usage = message["usage"] as? [String: Any],
-                      let timestamp = (object["timestamp"] as? String).flatMap(SharedFormatters.parseISO8601) else { return }
+                      let timestamp = timestamp(object["timestamp"]) else { return }
                 let counts = TokenCounts(input: number(usage, "input_tokens") + number(usage, "cache_read_input_tokens") + number(usage, "cache_creation_input_tokens"),
                     cached: number(usage, "cache_read_input_tokens"), output: number(usage, "output_tokens"))
                 file.events.append(Event(time: timestamp, model: name, counts: counts, cumulative: false, messageID: id))
@@ -235,13 +245,12 @@ public actor LocalUsageScanner {
                 if type == "session_meta" {
                     file.sessionID = payload["id"] as? String ?? file.sessionID
                     file.parentID = payload["forked_from_id"] as? String ?? payload["forkedFromId"] as? String
-                    file.forkTime = (payload["timestamp"] as? String).flatMap(SharedFormatters.parseISO8601)
-                        ?? (object["timestamp"] as? String).flatMap(SharedFormatters.parseISO8601)
+                    file.forkTime = timestamp(payload["timestamp"]) ?? timestamp(object["timestamp"])
                 } else if type == "turn_context" { model = payload["model"] as? String ?? model }
                 else if type == "event_msg", payload["type"] as? String == "token_count",
                         let info = payload["info"] as? [String: Any],
                         let usage = (info["total_token_usage"] ?? info["last_token_usage"]) as? [String: Any],
-                        let timestamp = (object["timestamp"] as? String).flatMap(SharedFormatters.parseISO8601) {
+                        let timestamp = timestamp(object["timestamp"]) {
                     let counts = TokenCounts(input: number(usage, "input_tokens"), cached: number(usage, "cached_input_tokens"),
                         output: number(usage, "output_tokens"))
                     model = info["model"] as? String ?? info["model_name"] as? String ?? model

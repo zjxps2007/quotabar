@@ -87,6 +87,7 @@ final class MonitorStore: ObservableObject {
     @Published private(set) var local = LocalUsageReport()
     @Published private(set) var scanning = false
     @Published private(set) var windowVisible = false
+    @Published private(set) var launchAtLogin: LaunchAtLoginState = .disabled
     @Published var message: String? {
         didSet { if !applyingRemoteState, message != oldValue { remote?.send(.message(message)) } }
     }
@@ -109,6 +110,7 @@ final class MonitorStore: ObservableObject {
     private let settingsFile: SettingsFile
     private let service: MonitorService
     private let scanner = LocalUsageScanner()
+    private let loginItem = LaunchAtLoginManager()
     private let vault = SecretVault()
     private let codexSessions = CodexSessionManager()
     private var storageHealthy = true
@@ -209,7 +211,8 @@ final class MonitorStore: ObservableObject {
                 message = "로그인 저장소를 준비하지 못했습니다. 앱 데이터 폴더의 권한과 저장 공간을 확인한 뒤 다시 실행하세요."
             }
         }
-        settings.refreshSeconds = [60, 300, 900, 1800].contains(settings.refreshSeconds) ? settings.refreshSeconds : 300
+        settings.refreshSeconds = RefreshSchedule.intervals.contains(settings.refreshSeconds) ? settings.refreshSeconds : 300
+        refreshLaunchAtLogin()
         let center = NSWorkspace.shared.notificationCenter
         observers.append(center.addObserver(forName: NSWorkspace.willSleepNotification, object: nil, queue: .main) { [weak self] _ in
             Task { @MainActor in self?.suspend() }
@@ -260,7 +263,8 @@ final class MonitorStore: ObservableObject {
             hasAccounts: remote == nil && accounts.contains(where: \.enabled), windowVisible: windowVisible,
             dashboardSelected: route == "dashboard", scanLocalLogs: managesDashboard && settings.scanLocalLogs,
             scanning: scanning, refreshSeconds: settings.refreshSeconds,
-            lastAccountRefresh: lastScheduled, lastLocalAttempt: lastLocalAttempt ?? local.scannedAt)
+            lastAccountRefresh: lastScheduled, lastLocalAttempt: lastLocalAttempt ?? local.scannedAt,
+            autoRefresh: settings.isAutoRefreshEnabled)
     }
     private func scheduleNextRefresh() {
         let deadline = refreshSchedule.next
@@ -288,7 +292,14 @@ final class MonitorStore: ObservableObject {
         jobs.removeAll(); loading.removeAll(); scanTask?.cancel()
         scheduleNextRefresh()
     }
-    private func wake() { sleeping = false; refreshAccounts(); if windowVisible { refreshLocalIfNeeded() } }
+    private func wake() {
+        sleeping = false
+        if settings.isAutoRefreshEnabled {
+            refreshAccounts()
+            if windowVisible { refreshLocalIfNeeded() }
+        }
+        scheduleNextRefresh()
+    }
     func refreshAll() {
         if let remote {
             remote.send(.refreshAll)
@@ -350,9 +361,35 @@ final class MonitorStore: ObservableObject {
     }
     func setInterval(_ seconds: Int) {
         if let remote { remote.send(.interval(seconds)); return }
-        guard settings.refreshSeconds != seconds else { return }
+        guard RefreshSchedule.intervals.contains(seconds), settings.refreshSeconds != seconds else { return }
         var next = settings; next.refreshSeconds = seconds
         do { try save(next) } catch { message = error.localizedDescription }
+    }
+    func setAutoRefresh(_ enabled: Bool) {
+        if let remote { remote.send(.autoRefresh(enabled)); return }
+        guard settings.isAutoRefreshEnabled != enabled else { return }
+        var next = settings; next.autoRefresh = enabled
+        do { try save(next) } catch { message = error.localizedDescription }
+    }
+    func refreshLaunchAtLogin() {
+        if let remote { remote.send(.refreshLaunchAtLogin); return }
+        guard !demo else { return }
+        let state = loginItem.state
+        if launchAtLogin != state { launchAtLogin = state }
+    }
+    func setLaunchAtLogin(_ enabled: Bool) {
+        if let remote { remote.send(.launchAtLogin(enabled)); return }
+        guard !demo else { launchAtLogin = enabled ? .enabled : .disabled; return }
+        defer { refreshLaunchAtLogin() }
+        do { try loginItem.setEnabled(enabled) }
+        catch {
+            message = (error as? ProviderError)?.message
+                ?? "자동 실행 설정을 변경하지 못했습니다. 시스템 설정의 로그인 항목을 확인하세요."
+        }
+    }
+    func openLoginItemsSettings() {
+        if let remote { remote.send(.openLoginItemsSettings); return }
+        if !demo { LaunchAtLoginManager.openSettings() }
     }
     func setAppearance(_ mode: AppearanceMode) {
         if let remote { remote.send(.appearance(mode)); return }
@@ -569,7 +606,8 @@ final class MonitorStore: ObservableObject {
 
     func refreshLocalIfNeeded(force: Bool = false) {
         guard managesDashboard, !demo, !sleeping, storageHealthy, settings.scanLocalLogs, !scanning, windowVisible, route == "dashboard",
-              force || Date().timeIntervalSince(lastLocalAttempt ?? local.scannedAt ?? .distantPast) >= RefreshSchedule.localInterval else { return }
+              force || lastLocalAttempt == nil || (settings.isAutoRefreshEnabled
+                  && Date().timeIntervalSince(lastLocalAttempt ?? local.scannedAt ?? .distantPast) >= RefreshSchedule.localInterval) else { return }
         scanning = true
         lastLocalAttempt = Date()
         scheduleNextRefresh()
@@ -600,7 +638,7 @@ final class MonitorStore: ObservableObject {
 
     var dashboardState: DashboardState {
         DashboardState(settings: settings, snapshots: snapshots, errors: errors, notes: notes,
-                       loading: loading, message: message, demoReport: demo ? local : nil)
+                       loading: loading, message: message, demoReport: demo ? local : nil, launchAtLogin: launchAtLogin)
     }
 
     func apply(_ state: DashboardState) {
@@ -609,9 +647,14 @@ final class MonitorStore: ObservableObject {
         defer { applyingRemoteState = false }
         let appearanceChanged = settings.selectedAppearance != state.settings.selectedAppearance
         let scanChanged = settings.scanLocalLogs != state.settings.scanLocalLogs
-        settings = state.settings; snapshots = state.snapshots; errors = state.errors
-        notes = state.notes; loading = state.loading; message = state.message
-        if let report = state.demoReport { local = report }
+        if settings != state.settings { settings = state.settings }
+        if snapshots != state.snapshots { snapshots = state.snapshots }
+        if errors != state.errors { errors = state.errors }
+        if notes != state.notes { notes = state.notes }
+        if loading != state.loading { loading = state.loading }
+        if message != state.message { message = state.message }
+        if let startup = state.launchAtLogin, launchAtLogin != startup { launchAtLogin = startup }
+        if let report = state.demoReport, local != report { local = report }
         if appearanceChanged { AppTheme.apply(settings.selectedAppearance) }
         if scanChanged {
             if settings.scanLocalLogs { refreshLocalIfNeeded(force: true) }

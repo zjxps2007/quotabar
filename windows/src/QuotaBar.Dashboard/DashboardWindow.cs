@@ -42,6 +42,7 @@ internal sealed partial class DashboardWindow : Window
         Loaded += (_, _) => Send("visibility", true);
         StateChanged += (_, _) => Send("visibility", WindowState != WindowState.Minimized);
         Closed += (_, _) => Send("visibility", false);
+        Activated += (_, _) => { if (route == "settings") Send("startup-status", true); };
         PreviewKeyDown += (_, e) =>
         {
             if (e.Key == Key.R && Keyboard.Modifiers == ModifierKeys.Control && route == "dashboard")
@@ -211,6 +212,7 @@ internal sealed partial class DashboardWindow : Window
     private void Navigate(string page, bool notify = true)
     {
         bool activity = page == "activity"; route = page is "accounts" or "settings" ? page : "dashboard";
+        if (notify && route == "settings") Send("startup-status", true);
         Render(preserveScroll: false);
         if (activity) Dispatcher.BeginInvoke(DispatcherPriority.Loaded, () =>
         {

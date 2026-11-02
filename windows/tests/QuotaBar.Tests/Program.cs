@@ -8,6 +8,13 @@ using QuotaBar.Core;
 using QuotaBar.Windows;
 using QuotaBar.Protocol;
 
+if (args.FirstOrDefault() == "--preferences-contract")
+{
+    PreferencesTests.Contract();
+    Console.WriteLine("PASS refresh defaults, persistence, deadlines, disabled timers and startup display contract");
+    return 0;
+}
+
 if (args.FirstOrDefault() == "--fake-login")
 {
     var dir = Environment.GetEnvironmentVariable("CODEX_HOME")!;
@@ -44,7 +51,7 @@ await suite.Run("credential identity separates workspaces", () =>
 await suite.Run("unknown quota and refresh deadlines", () =>
 {
     Suite.Check(new Snapshot(DateTimeOffset.UtcNow, []).Lowest == null);
-    var now = DateTimeOffset.UtcNow; Suite.Check(RefreshSchedule.Next(false, true, false, 60, now) == now.AddMinutes(15));
+    var now = DateTimeOffset.UtcNow; Suite.Check(RefreshSchedule.Next(false, true, false, 60, now) == now.AddMinutes(1));
     Suite.Check(RefreshSchedule.Next(true, true, true, 60, now) == null); return Task.CompletedTask;
 });
 await suite.Run("DPAPI persistence rotation deletion and size bounds", () =>
@@ -139,6 +146,7 @@ await suite.Run("IPC rejects oversized and truncated frames", async () =>
     await Suite.ThrowsAsync<InvalidDataException>(() => pipe.ReadAsync(_ => Task.CompletedTask));
 });
 await TrayTests.Run(suite);
+await PreferencesTests.Run(suite);
 await Extended.Run(suite);
 Console.WriteLine($"{suite.Passed} passed, {suite.Failed} failed");
 suite.Cleanup(); return suite.Failed == 0 ? 0 : 1;

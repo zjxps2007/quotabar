@@ -7,16 +7,16 @@ struct RefreshScheduleTests {
 
     private func schedule(suspended: Bool = false, accounts: Bool = true, visible: Bool = true,
                           dashboard: Bool = true, logs: Bool = true, scanning: Bool = false,
-                          interval: Int = 300, localAttempt: Date? = nil) -> RefreshSchedule {
+                          interval: Int = 300, localAttempt: Date? = nil, automatic: Bool = true) -> RefreshSchedule {
         RefreshSchedule(suspended: suspended, hasAccounts: accounts, windowVisible: visible,
             dashboardSelected: dashboard, scanLocalLogs: logs, scanning: scanning,
-            refreshSeconds: interval, lastAccountRefresh: anchor, lastLocalAttempt: localAttempt)
+            refreshSeconds: interval, lastAccountRefresh: anchor, lastLocalAttempt: localAttempt, autoRefresh: automatic)
     }
 
-    @Test func menuBarOnlyKeepsBackgroundQuotaIntervalWithoutScanning() {
-        for interval in [60, 300, 900] {
+    @Test func menuBarOnlyHonorsSelectedIntervalWithoutScanning() {
+        for interval in RefreshSchedule.intervals {
             let result = schedule(visible: false, interval: interval)
-            #expect(result.accounts == anchor.addingTimeInterval(900))
+            #expect(result.accounts == anchor.addingTimeInterval(Double(interval)))
             #expect(result.localLogs == nil)
             #expect(result.next == result.accounts)
         }
@@ -24,7 +24,7 @@ struct RefreshScheduleTests {
     }
 
     @Test func reopeningAndIntervalChangesRecomputeFromLastRefresh() {
-        #expect(schedule(visible: false, interval: 60).next == anchor.addingTimeInterval(900))
+        #expect(schedule(visible: false, interval: 60).next == anchor.addingTimeInterval(60))
         #expect(schedule(logs: false, interval: 60).next == anchor.addingTimeInterval(60))
         #expect(schedule(logs: false, interval: 1800).next == anchor.addingTimeInterval(1800))
     }
@@ -47,6 +47,14 @@ struct RefreshScheduleTests {
         #expect(sleeping.accounts == nil)
         #expect(sleeping.localLogs == nil)
         #expect(sleeping.next == nil)
+    }
+
+    @Test func automaticRefreshCanBeDisabledAndReenabled() {
+        for visible in [true, false] {
+            let stopped = schedule(visible: visible, automatic: false)
+            #expect(stopped.accounts == nil && stopped.localLogs == nil && stopped.next == nil)
+            #expect(schedule(visible: visible, logs: false, interval: 3600).next == anchor.addingTimeInterval(3600))
+        }
     }
 
     @Test func localOnlyDashboardStillRefreshes() {

@@ -52,7 +52,8 @@ enum SessionProjectionReader {
                 let lineStart = bytes.position
                 let projection = Projection(bytes: bytes)
                 do {
-                    let row = try projection.value(.root)
+                    var row = Data()
+                    try projection.value(.root, to: &row)
                     try bytes.whitespace()
                     guard try bytes.peek() == nil || bytes.peek() == 10 else { throw ParseError.invalid }
                     if try bytes.peek() == 10 {
@@ -195,26 +196,35 @@ enum SessionProjectionReader {
             if result.count + part.count <= cap { result.append(part) }
             else { exceededLimit = true }
         }
-        func value(_ context: Context) throws -> Data {
+        func append(_ byte: UInt8, to result: inout Data) {
+            if result.count < cap { result.append(byte) }
+            else { exceededLimit = true }
+        }
+        // Build one projection per row instead of copying a temporary Data for
+        // every nested object, scalar and punctuation character.
+        func value(_ context: Context, to result: inout Data) throws {
             try bytes.whitespace()
             guard let first = try bytes.peek() else { throw ParseError.invalid }
             if context == .scalar {
                 if first == 34 {
-                    guard let text = try bytes.string(cap: 16 * 1024) else { exceededLimit = true; return Data("null".utf8) }
-                    return text
+                    guard let text = try bytes.string(cap: 16 * 1024) else { exceededLimit = true; return }
+                    append(text, to: &result)
+                    return
                 }
-                if first == 123 || first == 91 { try bytes.skipValue(); return Data("null".utf8) }
-                var result = Data()
+                if first == 123 || first == 91 { try bytes.skipValue(); append(Data("null".utf8), to: &result); return }
+                var count = 0
                 while let byte = try bytes.peek(), ![44, 125, 93, 32, 9, 13, 10].contains(byte) {
                     _ = try bytes.take()
-                    if result.count < 128 { result.append(byte) } else { exceededLimit = true }
+                    if count < 128 { append(byte, to: &result) } else { exceededLimit = true }
+                    count += 1
                 }
-                guard !result.isEmpty else { throw ParseError.invalid }
-                return result
+                guard count > 0 else { throw ParseError.invalid }
+                return
             }
-            guard first == 123 else { try bytes.skipValue(); return Data("null".utf8) }
+            guard first == 123 else { try bytes.skipValue(); append(Data("null".utf8), to: &result); return }
             _ = try bytes.take()
-            var result = Data([123]), firstField = true, firstInputField = true
+            append(123, to: &result)
+            var firstField = true, firstInputField = true
             try bytes.whitespace()
             while try bytes.peek() != 125 {
                 if !firstInputField { guard try bytes.take() == 44 else { throw ParseError.invalid }; try bytes.whitespace() }
@@ -227,15 +237,14 @@ enum SessionProjectionReader {
                 try bytes.whitespace()
                 guard try bytes.take() == 58 else { throw ParseError.invalid }
                 if let rawKey, let key, let child = context.field(key) {
-                    let part = try value(child)
-                    if !firstField { append(Data([44]), to: &result) }
-                    append(rawKey, to: &result); append(Data([58]), to: &result); append(part, to: &result)
+                    if !firstField { append(44, to: &result) }
+                    append(rawKey, to: &result); append(58, to: &result)
+                    try value(child, to: &result)
                     firstField = false
                 } else { try bytes.skipValue() }
                 try bytes.whitespace()
             }
-            _ = try bytes.take(); append(Data([125]), to: &result)
-            return result
+            _ = try bytes.take(); append(125, to: &result)
         }
     }
 }

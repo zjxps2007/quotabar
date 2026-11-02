@@ -20,6 +20,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSPo
     private let isDashboardHelper = CommandLine.arguments.contains("--dashboard-helper")
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        let loginLaunch = LaunchAtLoginManager.isLoginLaunch(NSAppleEventManager.shared().currentAppleEvent)
         if isDashboardHelper {
             let client = DashboardClient()
             dashboardClient = client
@@ -53,7 +54,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSPo
         observation = store.objectWillChange.sink { [weak self] _ in
             self?.scheduleStatusUpdate()
         }
-        if !CommandLine.arguments.contains("--menu-bar-only") { showDashboard() }
+        if !loginLaunch && !CommandLine.arguments.contains("--menu-bar-only") { showDashboard() }
         recordWindows("ui-launched")
         if CommandLine.arguments.contains("--memory-probe"), CommandLine.arguments.contains("--diagnostics") {
             runMemoryProbe()

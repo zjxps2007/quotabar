@@ -26,10 +26,12 @@ public enum SharedFormatters {
         return f
     }()
 
-    /// Parse an ISO 8601 string, trying fractional seconds first.
+    /// Choose the matching formatter first, retaining the legacy fallback.
     public static func parseISO8601(_ value: String) -> Date? {
-        if let date = iso8601WithFractional.date(from: value) { return date }
-        return iso8601.date(from: value)
+        if value.utf8.contains(46) {
+            return iso8601WithFractional.date(from: value) ?? iso8601.date(from: value)
+        }
+        return iso8601.date(from: value) ?? iso8601WithFractional.date(from: value)
     }
 
     /// Format a Date to ISO 8601 string (standard, no fractional).

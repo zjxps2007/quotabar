@@ -46,7 +46,7 @@ internal sealed class MonitorContext : ApplicationContext
             var paths = new AppPaths(Arguments.Value(args, "--data-dir")); instance = new(paths);
             if (!instance.IsOwner)
             {
-                try { instance.Activate().GetAwaiter().GetResult(); }
+                try { if (!args.Contains("--background")) instance.Activate().GetAwaiter().GetResult(); }
                 catch { MessageBox.Show("QuotaBar가 이미 실행 중입니다. 알림 영역에서 열어 주세요.", "QuotaBar"); }
                 instance.Dispose(); dispatcher.Dispose(); Environment.Exit(0);
             }
@@ -58,7 +58,7 @@ internal sealed class MonitorContext : ApplicationContext
         menu = new TrayMenu(State, Open, Quit);
         // NotifyIcon opens ContextMenuStrip on right-click. Left-click and double-click intentionally have no action.
         tray = new NotifyIcon { Visible = true, ContextMenuStrip = menu };
-        timer.Tick += async (_, _) => { timer.Stop(); await Refresh(); };
+        timer.Tick += async (_, _) => { timer.Stop(); await Refresh(automatic: true); };
         SystemEvents.PowerModeChanged += Power;
         SystemEvents.UserPreferenceChanged += PreferencesChanged;
         SystemEvents.DisplaySettingsChanged += DisplayChanged;
@@ -86,11 +86,24 @@ internal sealed class MonitorContext : ApplicationContext
             if (m.Type == "refresh") { await Refresh(); return; }
             if (m.Type == "refresh-account") { if (!suspended && service != null) await service.Refresh(p.GetGuid()); return; }
             if (m.Type == "scan") { await Scan(); return; }
+            if (m.Type == "startup-status") { service?.RefreshLaunchAtLogin(); return; }
+            if (m.Type == "startup-settings")
+            {
+                if (!demo) Process.Start(new ProcessStartInfo("ms-settings:startupapps") { UseShellExecute = true });
+                return;
+            }
+            if (m.Type == "startup")
+            {
+                if (demo) { sample = sample with { LaunchAtLogin = p.GetBoolean() ? LaunchAtLoginState.Enabled : LaunchAtLoginState.Disabled }; Publish(); }
+                else service!.SetLaunchAtLogin(p.GetBoolean());
+                return;
+            }
             if (demo && m.Type == "preferences")
             {
                 sample = sample with { Settings = sample.Settings with { Appearance = p.Get("theme").GetString()!, RefreshSeconds = p.Get("seconds").GetInt32(),
                     ScanLocalLogs = p.Get("scan").GetBoolean(), ShowTaskbarIcon = p.Get("taskbar").GetBoolean(),
-                    TrayDisplayMode = p.Get("trayDisplay").Text() ?? sample.Settings.TrayDisplayMode } };
+                    TrayDisplayMode = p.Get("trayDisplay").Text() ?? sample.Settings.TrayDisplayMode,
+                    AutoRefresh = p.Get("autoRefresh").ValueKind == System.Text.Json.JsonValueKind.Undefined ? sample.Settings.AutoRefresh : p.Get("autoRefresh").GetBoolean() } };
                 Publish(); return;
             }
             if (demo) { sample = sample with { Message = "미리보기 모드입니다. 실제 계정을 연결하려면 앱을 종료하고 일반 모드로 실행하세요." }; Publish(); return; }
@@ -102,7 +115,8 @@ internal sealed class MonitorContext : ApplicationContext
                 case "claude": await service!.ConnectClaude(p.Get("path").GetString()!, p.Get("consent").GetBoolean(), Helper()); break;
                 case "remove": service!.Remove(p.GetGuid()); break;
                 case "edit": service!.Edit(p.Get("id").GetGuid(), p.Get("name").GetString()!, p.Get("enabled").GetBoolean(), p.Get("tray").GetBoolean()); break;
-                case "preferences": service!.Preferences(p.Get("seconds").GetInt32(), p.Get("theme").GetString()!, p.Get("scan").GetBoolean(), p.Get("taskbar").GetBoolean(), p.Get("trayDisplay").Text()); break;
+                case "preferences": service!.Preferences(p.Get("seconds").GetInt32(), p.Get("theme").GetString()!, p.Get("scan").GetBoolean(), p.Get("taskbar").GetBoolean(), p.Get("trayDisplay").Text(),
+                    p.Get("autoRefresh").ValueKind == System.Text.Json.JsonValueKind.Undefined ? null : p.Get("autoRefresh").GetBoolean()); break;
                 default: throw new UsageException("command", "지원하지 않는 요청입니다.");
             }
             dashboard.Send("result", new { success = true }, m.RequestId);
@@ -116,22 +130,22 @@ internal sealed class MonitorContext : ApplicationContext
         if (!File.Exists(path)) throw new UsageException("helper", "StatusLine 실행 파일을 찾지 못했습니다."); return path;
     }
     private async Task Scan() { if (visible && route == "dashboard" && !suspended && service != null) await service.Scan(); }
-    private async Task Refresh()
+    private async Task Refresh(bool automatic = false)
     {
-        if (suspended || quitting) return;
+        if (suspended || quitting || (automatic && !State().Settings.AutoRefresh)) return;
         lastRefresh = DateTimeOffset.UtcNow; if (service != null) { await service.Refresh(); if (route == "dashboard") await Scan(); } Schedule();
     }
     private void Power(object sender, PowerModeChangedEventArgs e) => Post(async () =>
     {
         suspended = e.Mode == PowerModes.Suspend;
         if (suspended) { timer.Stop(); service?.Suspend(); }
-        else if (e.Mode == PowerModes.Resume) { await Task.Delay(2000); await Refresh(); }
+        else if (e.Mode == PowerModes.Resume) { await Task.Delay(2000); await Refresh(automatic: true); }
     });
     private void Schedule()
     {
         timer.Stop(); if (quitting || demo) return;
         var settings = State().Settings;
-        var next = RefreshSchedule.Next(suspended, settings.Accounts.Any(a => a.Enabled), visible, settings.RefreshSeconds, lastRefresh);
+        var next = RefreshSchedule.Next(suspended, settings.Accounts.Any(a => a.Enabled), visible, settings.RefreshSeconds, lastRefresh, settings.AutoRefresh);
         if (next is { } due) { timer.Interval = (int)Math.Clamp((due - DateTimeOffset.UtcNow).TotalMilliseconds, 1000, int.MaxValue); timer.Start(); }
     }
     private void Publish()
