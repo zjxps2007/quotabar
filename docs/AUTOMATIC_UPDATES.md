@@ -38,4 +38,6 @@
 
 `bash scripts/test.sh`는 macOS 버전 비교·공유 서명·변조 거부·설정/IPC·원자적 교체/복구를 검사합니다. `windows/scripts/test.ps1`은 같은 계약과 Windows 다운로드 취소·완료 전 임시 파일 정리·포터블 파일 보존·경로 이탈 거부를 검사합니다. `python3 -m unittest discover -s scripts/tests -v`는 일회용 테스트 키로 서명 도구를 검사합니다. CI에는 생산용 개인 키를 제공하지 않습니다.
 
+별도 Windows CI 작업은 `windows/scripts/test-updater.ps1`로 두 버전의 앱과 일회용 키를 만듭니다. 실제 설치 도우미를 실행해 포터블·설치형 업그레이드, 새 앱의 시작 확인, 시작 실패 시 롤백, 설정과 사용자 파일 보존을 검사합니다. 테스트 앱과 키는 배포 아티팩트로 업로드하지 않습니다. 서명된 공유 fixture는 Git의 Windows 줄바꿈 변환에서 제외합니다.
+
 자동 업데이트 상태는 macOS의 `~/Library/Application Support/AIUsage Lite/Updates`, Windows의 `%LOCALAPPDATA%\QuotaBar\Updates`에 기록됩니다. 실패 시 이곳의 `last-result.json`과 대상 앱 폴더 옆의 숨김 백업을 확인할 수 있습니다. 자동으로 복구하지 못한 백업은 앱을 종료한 뒤 수동 복구할 수 있도록 남깁니다.

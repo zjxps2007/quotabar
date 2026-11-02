@@ -8,6 +8,12 @@ using QuotaBar.Core;
 using QuotaBar.Windows;
 using QuotaBar.Protocol;
 
+if (args.Length == 6 && args[0] == "--update-integration")
+{
+    await UpdateIntegration.Run(args[1], args[2], args[3], args[4], args[5]);
+    return 0;
+}
+
 if (args.FirstOrDefault() == "--updates-contract")
 {
     await UpdateTests.Contract();
