@@ -15,10 +15,17 @@ jobs:
           persist-credentials: false
       - name: Existing Swift suites and shared contract
         run: bash scripts/test.sh
-      - name: Build application and Dashboard helper
-        run: bash scripts/build.sh
+      - name: Build and package application and Dashboard helper
+        run: bash macos/scripts/package.sh
       - name: Packaged Claude callback
         run: python3 scripts/check-statusline.py
+      - uses: actions/upload-artifact@v7
+        with:
+          name: macos-release
+          path: |
+            artifacts/QuotaBar-*-macOS-*.zip
+            artifacts/macos-build-info.json
+          if-no-files-found: error
       - uses: actions/upload-artifact@v7
         if: always()
         with:
@@ -61,7 +68,7 @@ jobs:
           if-no-files-found: warn
       - uses: actions/upload-artifact@v7
         with:
-          name: windows-x64-prototype
+          name: windows-x64-release
           path: |
             artifacts/QuotaBar-*-Windows-x64.zip
             artifacts/QuotaBar-*-Windows-x64-Setup.exe

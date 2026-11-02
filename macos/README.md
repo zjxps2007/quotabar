@@ -4,6 +4,10 @@ macOS 14 이상에서 실행하는 메뉴바 사용량 추적기입니다. 아�
 
 ## macOS 실행
 
+[0.1.0 Apple Silicon 앱 ZIP](https://github.com/zjxps2007/quotabar/releases/download/v0.1.0/QuotaBar-0.1.0-macOS-arm64.zip)을 풀고 `QuotaBar.app`을 응용 프로그램 폴더에 복사한 뒤 실행합니다. macOS 14 이상이 필요하며, 기존 앱이 실행 중이면 먼저 종료하세요. 배포 앱은 ad-hoc 서명이며 Apple 공증과 자동 업데이트는 제공하지 않습니다.
+
+소스에서 빌드하려면 다음 명령을 사용합니다.
+
 ```sh
 git clone https://github.com/zjxps2007/quotabar.git
 cd quotabar
@@ -23,7 +27,7 @@ open -n "artifacts/QuotaBar.app" --args --demo
 
 ### AIUsage Lite에서 업데이트
 
-0.2.2부터 앱 이름은 **QuotaBar**입니다. 이전 앱을 종료한 뒤 `QuotaBar.app`을 실행하세요. 계정·로그인·설정·중복 실행 잠금을 유지하기 위해 앱 식별자 `com.aiusage.lite`와 기존 데이터 폴더를 계속 사용합니다. Codex와 Gemini 계정을 다시 가져올 필요는 없습니다. Claude 연결은 실행 파일 경로를 사용하므로 새 앱에서 같은 CLI 설정 폴더를 한 번 다시 연결하세요.
+프리뷰 0.2.2에서 앱 이름을 **QuotaBar**로 변경했으며 정식 릴리즈는 **0.1.0**부터 시작합니다. 이전 앱을 종료한 뒤 `QuotaBar.app`을 실행하세요. 계정·로그인·설정·중복 실행 잠금을 유지하기 위해 앱 식별자 `com.aiusage.lite`와 기존 데이터 폴더를 계속 사용합니다. Codex와 Gemini 계정을 다시 가져올 필요는 없습니다. Claude 연결은 실행 파일 경로를 사용하므로 새 앱에서 같은 CLI 설정 폴더를 한 번 다시 연결하세요.
 
 ## macOS 유지 기능
 
@@ -104,7 +108,7 @@ bash scripts/test.sh
 
 격리된 임시 폴더와 합성 로그인 데이터로 계정 식별, 캐시 격리, quota 변환, 로그 집계, Claude status line 설치·복구를 검증합니다. 실제 계정 로그인과 서비스 응답은 사용자의 계정 연결 후 확인해야 합니다. 빌드·테스트·실행 측정 결과는 [검증 기록](../docs/VALIDATION.md)을 참고하세요.
 
-테스트에는 Swift Testing이 포함된 Swift 6 이상 도구 체인을 사용합니다. 패키징된 Claude callback은 `python3 scripts/check-statusline.py`로 따로 검증할 수 있습니다.
+테스트에는 Swift Testing이 포함된 Swift 6 이상 도구 체인을 사용합니다. 패키징된 Claude callback은 `python3 scripts/check-statusline.py`로 따로 검증할 수 있습니다. `bash macos/scripts/package.sh`는 Release 앱을 빌드하고 서명·버전을 확인한 뒤 현재 아키텍처의 ZIP과 소스 커밋·SHA-256을 기록한 `artifacts/macos-build-info.json`을 생성합니다.
 
 `bash scripts/benchmark-local-usage.sh`는 실제 계정·로그에 접근하지 않고 합성 로그로 최초 스캔과 캐시 재조회를 각각 3회 측정합니다. 2026-10-17 최적화에서는 약 28 MB·25개 파일의 최초 스캔 중앙값이 3.22초에서 1.30초, 캐시 재조회는 20.97 ms에서 11.95 ms로 줄었으며 전체 집계 결과의 해시는 동일했습니다. 이 Mac의 샘플 측정이며 실제 로그 크기와 기기에 따라 달라집니다.
 

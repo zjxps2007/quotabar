@@ -18,7 +18,7 @@ mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
 cp "$binary_dir/QuotaBar" "$app/Contents/MacOS/QuotaBar"
 cp ../LICENSE ../NOTICE "$app/Contents/Resources/"
 cp -R "$binary_dir/QuotaBar_QuotaBar.bundle" "$app/Contents/Resources/"
-cat > "$app/Contents/Info.plist" <<'PLIST'
+cat > "$app/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
@@ -27,8 +27,8 @@ cat > "$app/Contents/Info.plist" <<'PLIST'
 <key>CFBundleName</key><string>QuotaBar</string>
 <key>CFBundleDisplayName</key><string>QuotaBar</string>
 <key>CFBundlePackageType</key><string>APPL</string>
-<key>CFBundleShortVersionString</key><string>0.2.2</string>
-<key>CFBundleVersion</key><string>5</string>
+<key>CFBundleShortVersionString</key><string>$version</string>
+<key>CFBundleVersion</key><string>$build</string>
 <key>CFBundleIconFile</key><string>AppIcon-4</string>
 <key>LSMinimumSystemVersion</key><string>14.0</string>
 <key>LSApplicationCategoryType</key><string>public.app-category.utilities</string>
@@ -45,7 +45,7 @@ mkdir -p "$helper/Contents/MacOS" "$helper/Contents/Resources"
 cp "$app/Contents/MacOS/QuotaBar" "$helper/Contents/MacOS/QuotaBar"
 cp -R "$binary_dir/QuotaBar_QuotaBar.bundle" "$helper/Contents/Resources/"
 cp "$app/Contents/Resources/AppIcon-4.icns" "$helper/Contents/Resources/"
-cat > "$helper/Contents/Info.plist" <<'PLIST'
+cat > "$helper/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
@@ -54,18 +54,14 @@ cat > "$helper/Contents/Info.plist" <<'PLIST'
 <key>CFBundleName</key><string>QuotaBar</string>
 <key>CFBundleDisplayName</key><string>QuotaBar</string>
 <key>CFBundlePackageType</key><string>APPL</string>
-<key>CFBundleShortVersionString</key><string>0.2.2</string>
-<key>CFBundleVersion</key><string>5</string>
+<key>CFBundleShortVersionString</key><string>$version</string>
+<key>CFBundleVersion</key><string>$build</string>
 <key>CFBundleIconFile</key><string>AppIcon-4</string>
 <key>LSMinimumSystemVersion</key><string>14.0</string>
 <key>LSUIElement</key><true/>
 <key>NSHighResolutionCapable</key><true/>
 </dict></plist>
 PLIST
-for bundle in "$app" "$helper"; do
-  /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $version" "$bundle/Contents/Info.plist"
-  /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $build" "$bundle/Contents/Info.plist"
-done
 codesign --force --sign - --identifier com.aiusage.lite.dashboard "$helper"
 codesign --force --sign - --identifier com.aiusage.lite "$app"
 codesign --verify --strict "$app"

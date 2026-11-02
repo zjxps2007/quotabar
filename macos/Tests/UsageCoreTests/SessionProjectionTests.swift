@@ -33,13 +33,18 @@ struct SessionProjectionTests {
 
     @Test func testOversizedAndMalformedRowsDoNotLeakIntoNextProjection() throws {
         let valid = #"{"type":"assistant","message":{"id":"ok","model":"test","usage":{"input_tokens":3,"output_tokens":2}}}"#
-        for invalid in [
-            "{\"type\":\"" + String(repeating: "x", count: 16 * 1024) + "\"}",
-            "{\"payload\":{\"info\":{\"total_token_usage\":{\"input_tokens\":" + String(repeating: "9", count: 129) + "}}}}",
-            // Individually bounded strings can still exceed the per-row cap.
-            "{" + Array(repeating: "\"type\":\"" + String(repeating: "x", count: 16_000) + "\"", count: 66).joined(separator: ",") + "}",
+        let oversizedString = "{\"type\":\"\(String(repeating: "x", count: 16 * 1024))\"}"
+        let oversizedNumber = "{\"payload\":{\"info\":{\"total_token_usage\":{\"input_tokens\":\(String(repeating: "9", count: 129))}}}}"
+        // Individually bounded strings can still exceed the per-row cap.
+        let boundedField = "\"type\":\"\(String(repeating: "x", count: 16_000))\""
+        let oversizedRow = "{" + Array(repeating: boundedField, count: 66).joined(separator: ",") + "}"
+        let invalidRows: [String] = [
+            oversizedString,
+            oversizedNumber,
+            oversizedRow,
             #"{"type":"assistant","message":{"usage":{"input_tokens":}}}"#
-        ] {
+        ]
+        for invalid in invalidRows {
             let result = try scan([invalid, valid])
             #expect(result.error != nil)
             #expect(result.rows == [Data(valid.utf8)])

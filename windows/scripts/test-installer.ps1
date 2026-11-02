@@ -55,6 +55,9 @@ try {
     }
     $env:QUOTABAR_TEST_HELPER = Join-Path $destination 'StatusLine\QuotaBar.StatusLine.exe'
     & "$PSScriptRoot\test.ps1" -NoBuild
+    $testSummary = Get-Content -LiteralPath (Join-Path $repo 'artifacts\windows\tests.log') | Select-String -Pattern '^(\d+) passed, (\d+) failed$' | Select-Object -Last 1
+    if (-not $testSummary -or [int]$testSummary.Matches[0].Groups[2].Value -ne 0) { throw 'Integration test summary missing or failed.' }
+    $integrationPassed = [int]$testSummary.Matches[0].Groups[1].Value
     & "$PSScriptRoot\smoke.ps1" -ApplicationDirectory $destination
     $smoke = Get-Content -LiteralPath (Join-Path $repo 'artifacts\windows\packaged-probe.json') -Raw | ConvertFrom-Json
     if (-not $smoke.passed -or -not $smoke.parentCrashCleanup) { throw 'Installed application smoke failed.' }
@@ -62,7 +65,7 @@ try {
     if ((Test-Path -LiteralPath $registryPath) -or (Test-Path -LiteralPath $shortcutPath)) { throw 'Uninstall registration or shortcut was not removed.' }
     foreach ($file in $files) { if (Test-Path -LiteralPath (Join-Path $destination $file.Relative)) { throw "Installed file remained after uninstall: $($file.Relative)" } }
     if ((Get-Content -LiteralPath $sentinel -Raw) -ne 'preserve user content') { throw 'Uninstaller removed an unmanaged file.' }
-    [ordered]@{ passed = $true; version = $metadata.version; installer_sha256 = $metadata.installer.sha256; install = $true; same_version_reinstall = $true; uninstall = $true; application_files_verified = $files.Count; unicode_and_spaces_path = $true; start_menu_shortcut = $true; uninstall_registration_removed = $true; unmanaged_file_preserved = $true; packaged_smoke = $true; integration_passed = 30; integration_failed = 0 } |
+    [ordered]@{ passed = $true; version = $metadata.version; installer_sha256 = $metadata.installer.sha256; install = $true; same_version_reinstall = $true; uninstall = $true; application_files_verified = $files.Count; unicode_and_spaces_path = $true; start_menu_shortcut = $true; uninstall_registration_removed = $true; unmanaged_file_preserved = $true; packaged_smoke = $true; integration_passed = $integrationPassed; integration_failed = 0 } |
         ConvertTo-Json | Set-Content -LiteralPath (Join-Path $repo 'artifacts\windows\installer-validation.json') -Encoding utf8
     Write-Output 'Installer validation passed: install, reinstall, runtime, uninstall.'
 } finally {
