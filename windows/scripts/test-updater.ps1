@@ -7,8 +7,9 @@ $versionPath = Join-Path $RepoRoot 'shared\version.json'
 $originalPublic = [IO.File]::ReadAllBytes($publicPath)
 $originalVersion = [IO.File]::ReadAllBytes($versionPath)
 New-Item -ItemType Directory -Force -Path (Join-Path $RepoRoot 'artifacts') | Out-Null
-$key = [Security.Cryptography.ECDsa]::Create([Security.Cryptography.ECCurve]::NamedCurves.nistP256)
+$key = [Security.Cryptography.ECDsa]::Create()
 try {
+    $key.GenerateKey([Security.Cryptography.ECCurve]::CreateFromFriendlyName('nistP256'))
     [IO.File]::WriteAllText($keyPath, $key.ExportPkcs8PrivateKeyPem())
     [IO.File]::WriteAllText($publicPath, $key.ExportSubjectPublicKeyInfoPem())
     [IO.File]::WriteAllText($versionPath, '{"version":"0.1.0","build":6}')
@@ -27,7 +28,7 @@ try {
         Invoke-Dotnet @($tests, '--update-integration', $mode, $old, $oldSetup, $asset, $keyPath)
     }
 } finally {
-    $key.Dispose()
+    if ($null -ne $key) { $key.Dispose() }
     [IO.File]::WriteAllBytes($publicPath, $originalPublic)
     [IO.File]::WriteAllBytes($versionPath, $originalVersion)
     Remove-Item -LiteralPath $keyPath -Force -ErrorAction SilentlyContinue

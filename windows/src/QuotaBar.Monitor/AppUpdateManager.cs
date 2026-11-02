@@ -118,7 +118,7 @@ internal sealed class AppUpdateManager : IDisposable
     private void Schedule()
     {
         if (disposed) return;
-        timer.Stop(); if (!enabled || suspended || operation != null || staged != null) return;
+        timer.Stop(); if (!enabled || suspended || operation != null || (staged != null && staged.Update.Release.Version != blockedVersion)) return;
         var delay = lastAttempt == null ? TimeSpan.FromSeconds(15) : lastAttempt.Value.AddDays(1) - DateTimeOffset.UtcNow;
         timer.Interval = (int)Math.Clamp(delay.TotalMilliseconds, 15000, int.MaxValue); timer.Start();
     }

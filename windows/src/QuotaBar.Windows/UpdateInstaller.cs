@@ -160,12 +160,12 @@ public static class UpdateInstaller
             if (!SamePath(plan.Target, AppContext.BaseDirectory) || !SamePath(plan.DataRoot, paths.Root) || plan.Staged.Update.Release.Version != Brand.Version) return;
             WriteResult(Path.Combine(directory, "started.json"), plan, true, "업데이트를 설치했습니다.");
         }
-        catch (Exception e) when (e is IOException or System.Text.Json.JsonException or UnauthorizedAccessException) { }
+        catch (Exception e) when (e is IOException or System.Text.Json.JsonException or UnauthorizedAccessException or UsageException) { }
     }
     public static UpdateInstallResult? ReadResult(string path)
     {
         try { PrivateFiles.RejectLinks(path); return Json.Read<UpdateInstallResult>(PrivateFiles.ReadBounded(path, 4096)); }
-        catch (Exception e) when (e is IOException or System.Text.Json.JsonException or UnauthorizedAccessException) { return null; }
+        catch (Exception e) when (e is IOException or System.Text.Json.JsonException or UnauthorizedAccessException or UsageException) { return null; }
     }
     public static void CleanCompleted(AppPaths paths)
     {
@@ -193,6 +193,7 @@ public static class UpdateInstaller
         try { parent = Process.GetProcessById(plan.ParentPid); } catch (ArgumentException) { return; }
         using (parent)
         {
+            if (parent.HasExited) return;
             if (parent.StartTime.ToUniversalTime().Ticks != plan.ParentStarted) return;
             using var timeout = new CancellationTokenSource(TimeSpan.FromMinutes(2)); await parent.WaitForExitAsync(timeout.Token);
         }

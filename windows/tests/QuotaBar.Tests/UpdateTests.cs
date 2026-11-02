@@ -25,6 +25,11 @@ internal static class UpdateTests
         await suite.Run("update swap rolls back failures without losing either version", () => { Replacement(); return Task.CompletedTask; });
         await suite.Run("portable updates preserve user files and reject escaping archives", () => { Archives(); return Task.CompletedTask; });
         await suite.Run("signed downloads verify before fetching payload and clean incomplete stages", Downloads);
+        await suite.Run("corrupt updater history cannot prevent monitor startup", () => {
+            string path = Path.Combine(suite.Paths.Root, "update-history.json");
+            foreach (string value in new[] { "null", "{broken", "[]" }) { PrivateFiles.Write(path, System.Text.Encoding.UTF8.GetBytes(value)); Suite.Check(UpdateInstaller.ReadResult(path) == null); }
+            return Task.CompletedTask;
+        });
     }
     private static void Versions()
     {

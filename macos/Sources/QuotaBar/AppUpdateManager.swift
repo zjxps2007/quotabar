@@ -156,7 +156,8 @@ final class AppUpdateManager {
 
     private func schedule() {
         timer?.invalidate(); timer = nil
-        guard enabled, !suspended, task == nil, staged == nil else { return }
+        guard enabled, !suspended, task == nil,
+              staged == nil || staged?.update.release.version == blockedVersion else { return }
         let delay = max(15, (lastAttempt?.addingTimeInterval(24 * 60 * 60).timeIntervalSinceNow) ?? 15)
         timer = Timer.scheduledTimer(withTimeInterval: delay, repeats: false) { [weak self] _ in
             MainActor.assumeIsolated { self?.check(manual: false) }
