@@ -723,11 +723,7 @@ struct MenuPanel: View {
             }
             if store.demo { Text("미리보기 · 샘플 데이터").font(.caption).foregroundStyle(.secondary) }
             if !store.menuBarAccounts.isEmpty {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("남은 사용량").font(.caption.weight(.semibold))
-                    Text("상단바는 표시한 계정·기간 중 Provider별 가장 낮은 잔여율입니다. *는 최신 값 확인이 필요하다는 뜻입니다.")
-                        .font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                }
+                Text("남은 사용량").font(.caption.weight(.semibold))
             }
             if store.menuBarAccounts.isEmpty {
                 Text(store.menuBarEmptyMessage).font(.callout).foregroundStyle(.secondary)
