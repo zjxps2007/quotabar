@@ -4,11 +4,11 @@ Windows 10/11 x64용 네이티브 트레이 앱입니다. macOS 앱과 별도 �
 
 ## 설치와 실행
 
-[Windows 설치 EXE](https://github.com/zjxps2007/quotabar/releases/download/v0.1.0/QuotaBar-0.1.0-Windows-x64-Setup.exe)를 실행한 뒤 시작 메뉴에서 **QuotaBar**를 엽니다. 한국어·영어 설치 마법사를 제공하며 관리자 권한을 요청하지 않습니다. 기본 설치 위치는 `%LOCALAPPDATA%\Programs\QuotaBar`이고, 계정·설정 데이터는 별도 `%LOCALAPPDATA%\QuotaBar`에 저장합니다. .NET 런타임이 포함되어 별도 설치가 필요 없습니다.
+[Windows 설치 EXE](https://github.com/zjxps2007/quotabar/releases/download/v0.1.1/QuotaBar-0.1.1-Windows-x64-Setup.exe)를 실행한 뒤 시작 메뉴에서 **QuotaBar**를 엽니다. 한국어·영어 설치 마법사를 제공하며 관리자 권한을 요청하지 않습니다. 기본 설치 위치는 `%LOCALAPPDATA%\Programs\QuotaBar`이고, 계정·설정 데이터는 별도 `%LOCALAPPDATA%\QuotaBar`에 저장합니다. .NET 런타임이 포함되어 별도 설치가 필요 없습니다.
 
 같은 설치 파일을 다시 실행해 재설치할 수 있습니다. 업데이트나 제거 전에는 트레이에서 앱을 종료하세요. **Windows 설정 → 앱 → 설치된 앱 → QuotaBar → 제거**로 삭제할 수 있으며 계정·설정 데이터는 남습니다. Claude를 연결했다면 제거 전에 앱에서 연결을 해제하세요.
 
-[포터블 ZIP](https://github.com/zjxps2007/quotabar/releases/download/v0.1.0/QuotaBar-0.1.0-Windows-x64.zip)도 제공합니다. ZIP 전체를 고정된 폴더에 풀고 `QuotaBar.Monitor.exe`를 실행합니다. 파일 하나만 옮기지 마세요.
+[포터블 ZIP](https://github.com/zjxps2007/quotabar/releases/download/v0.1.1/QuotaBar-0.1.1-Windows-x64.zip)도 제공합니다. ZIP 전체를 고정된 폴더에 풀고 `QuotaBar.Monitor.exe`를 실행합니다. 파일 하나만 옮기지 마세요.
 
 `Dashboard/`와 `StatusLine/`에는 각 프로세스의 런타임이 있습니다. WPF와 기본 .NET 런타임의 동명 파일이 충돌하므로 폴더 내용을 합치지 마세요.
 
@@ -17,7 +17,7 @@ Windows 10/11 x64용 네이티브 트레이 앱입니다. macOS 앱과 별도 �
 - `QuotaBar.Monitor.exe --demo`: 실제 계정·설정·로그·네트워크에 접근하지 않는 샘플 화면.
 - `QuotaBar.Monitor.exe --background`: 트레이에서 시작합니다.
 
-정식 릴리즈 버전은 0.1.0부터 시작하며 기존 0.2.2 프리뷰 이후의 변경사항을 포함합니다. Authenticode 서명은 제공하지 않습니다. 공개된 0.1.0에는 자동 업데이트가 없고 개발 버전부터 설치형·포터블 모두 지원합니다. [자동 업데이트 안내](../docs/AUTOMATIC_UPDATES.md)를 참고하세요. 자동 시작은 설정에서 사용자가 켤 때만 등록합니다.
+정식 릴리즈 버전은 0.1.0부터 시작하며 기존 0.2.2 프리뷰 이후의 변경사항을 포함합니다. Authenticode 서명은 제공하지 않습니다. 0.1.0 사용자는 0.1.1을 한 번 직접 설치해야 하며, 0.1.1부터 설치형·포터블 모두 자동 업데이트를 지원합니다. [자동 업데이트 안내](../docs/AUTOMATIC_UPDATES.md)를 참고하세요. 자동 시작은 설정에서 사용자가 켤 때만 등록합니다.
 
 ## 자동 새로고침과 로그인 시 실행
 

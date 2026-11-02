@@ -4,7 +4,7 @@
 
 QuotaBar는 **Codex · Claude · Gemini**의 계정별 잔여 한도와 초기화 시간을 한곳에서 보여주는 데스크톱 앱입니다. 여러 계정을 오가며 사용량을 확인하는 대신, 작업 중인 화면에서 남은 한도를 살펴보고 필요할 때 Dashboard를 열 수 있습니다.
 
-**[macOS 다운로드](https://github.com/zjxps2007/quotabar/releases/download/v0.1.0/QuotaBar-0.1.0-macOS-arm64.zip)** · **[Windows 설치 EXE 다운로드](https://github.com/zjxps2007/quotabar/releases/download/v0.1.0/QuotaBar-0.1.0-Windows-x64-Setup.exe)** · [릴리즈 노트](https://github.com/zjxps2007/quotabar/releases/tag/v0.1.0)
+**[macOS 다운로드](https://github.com/zjxps2007/quotabar/releases/download/v0.1.1/QuotaBar-0.1.1-macOS-arm64.zip)** · **[Windows 설치 EXE 다운로드](https://github.com/zjxps2007/quotabar/releases/download/v0.1.1/QuotaBar-0.1.1-Windows-x64-Setup.exe)** · [릴리즈 노트](https://github.com/zjxps2007/quotabar/releases/tag/v0.1.1)
 
 ![QuotaBar Windows Dashboard](docs/images/windows-dashboard.png)
 
@@ -19,19 +19,20 @@ QuotaBar는 **Codex · Claude · Gemini**의 계정별 잔여 한도와 초기�
 - **라이트·다크 테마:** macOS와 Windows에서 같은 디자인으로 사용하며 시스템 테마를 따를 수 있습니다.
 - **필요할 때 여는 Dashboard:** 상세 창을 닫으면 화면 프로세스가 종료되고 사용량 모니터링은 계속됩니다.
 - **자동 새로고침과 시작:** 자동 조회를 켜거나 끄고 1·5·15·30·60분 간격을 선택합니다. 로그인 시 자동 실행도 선택할 수 있습니다.
+- **자동 업데이트:** 새 버전을 내려받고 Dashboard를 닫으면 설치 후 다시 시작합니다. 설정에서 끄거나 수동으로 확인·설치할 수 있습니다.
 
 ## 다운로드
 
 | 플랫폼 | 설치 방법 | 현재 제공 형태 |
 | --- | --- | --- |
-| Windows 10/11 x64 | [설치 EXE](https://github.com/zjxps2007/quotabar/releases/download/v0.1.0/QuotaBar-0.1.0-Windows-x64-Setup.exe) · [포터블 ZIP](https://github.com/zjxps2007/quotabar/releases/download/v0.1.0/QuotaBar-0.1.0-Windows-x64.zip) | 0.1.0 정식 |
-| macOS 14 이상 · Apple Silicon | [앱 ZIP](https://github.com/zjxps2007/quotabar/releases/download/v0.1.0/QuotaBar-0.1.0-macOS-arm64.zip) · [실행 안내](macos/README.md#macos-실행) | 0.1.0 정식 |
+| Windows 10/11 x64 | [설치 EXE](https://github.com/zjxps2007/quotabar/releases/download/v0.1.1/QuotaBar-0.1.1-Windows-x64-Setup.exe) · [포터블 ZIP](https://github.com/zjxps2007/quotabar/releases/download/v0.1.1/QuotaBar-0.1.1-Windows-x64.zip) | 0.1.1 정식 |
+| macOS 14 이상 · Apple Silicon | [앱 ZIP](https://github.com/zjxps2007/quotabar/releases/download/v0.1.1/QuotaBar-0.1.1-macOS-arm64.zip) · [실행 안내](macos/README.md#macos-실행) | 0.1.1 정식 |
 
 정식 릴리즈 버전은 **0.1.0**부터 시작합니다. 기존 **0.2.2 프리뷰** 이후의 변경사항을 포함하며, 업데이트 전에 실행 중인 앱을 종료하세요.
 
-macOS ZIP을 풀고 `QuotaBar.app`을 응용 프로그램 폴더에 복사합니다. macOS 앱은 ad-hoc 서명이며 Apple 공증을 받지 않았고, Windows 배포본은 Authenticode 서명이 없습니다. 공개된 0.1.0에는 자동 업데이트가 없으므로 다음 버전은 직접 설치해야 합니다.
+macOS ZIP을 풀고 `QuotaBar.app`을 응용 프로그램 폴더에 복사합니다. macOS 앱은 ad-hoc 서명이며 Apple 공증을 받지 않았고, Windows 배포본은 Authenticode 서명이 없습니다. **0.1.0에는 자동 업데이트가 없으므로 0.1.1은 한 번 직접 설치해야 합니다.**
 
-개발 버전은 **설정 → 앱 업데이트**에서 자동 업데이트를 켜거나 끌 수 있습니다. 새 정식 버전을 확인하고 서명된 파일을 자동으로 내려받으며, Dashboard를 닫으면 설치 후 다시 시작합니다. 자동 업데이트를 끈 상태에서도 수동 확인·설치가 가능합니다. [동작과 배포 절차](docs/AUTOMATIC_UPDATES.md)를 참고하세요.
+0.1.1부터 **설정 → 앱 업데이트**에서 자동 업데이트를 켜거나 끌 수 있습니다. 새 정식 버전을 확인하고 서명된 파일을 자동으로 내려받으며, Dashboard를 닫으면 설치 후 다시 시작합니다. 자동 업데이트를 끈 상태에서도 수동 확인·설치가 가능합니다. [동작과 배포 절차](docs/AUTOMATIC_UPDATES.md)를 참고하세요.
 
 Windows 설치 파일에는 .NET 런타임이 포함되어 있습니다. 관리자 권한 없이 현재 사용자에게 설치되며, 시작 메뉴에서 **QuotaBar**를 실행할 수 있습니다. Windows ARM64와 WSL 계정은 아직 지원하지 않습니다.
 
