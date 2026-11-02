@@ -12,7 +12,7 @@ case "$architecture" in arm64|x86_64) ;; *) echo "Unsupported package architectu
 for bundle in "$app" "$helper"; do
   test "$(plutil -extract CFBundleShortVersionString raw -o - "$bundle/Contents/Info.plist")" = "$version"
   test "$(plutil -extract CFBundleVersion raw -o - "$bundle/Contents/Info.plist")" = "$build"
-  lipo -verify_arch "$architecture" "$bundle/Contents/MacOS/QuotaBar"
+  lipo "$bundle/Contents/MacOS/QuotaBar" -verify_arch "$architecture"
   codesign --verify --strict "$bundle"
 done
 archive="$repo/artifacts/QuotaBar-$version-macOS-$architecture.zip"
