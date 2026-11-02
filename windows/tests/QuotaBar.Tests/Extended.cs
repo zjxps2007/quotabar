@@ -74,6 +74,16 @@ public static class Extended
             await Suite.ThrowsAsync<IOException>(() => sessions.Credential(account)); store.FailSave = false;
             var saved = await sessions.Credential(account); Suite.Check(calls == 1 && Credentials.Parse(saved, Provider.Codex).AccessToken == "new");
         });
+        await suite.Run("automatic restart blocks until pending rotated credentials are saved", async () =>
+        {
+            var store = new MemoryVault { Data = Expired(), FailSave = true };
+            var account = new Account(Guid.NewGuid(), Provider.Codex, "test", Credentials.Parse(store.Data, Provider.Codex).Identity, "");
+            int calls = 0; var sessions = new CodexSessions(store, _ => { calls++; return Task.FromResult(Fixtures.Auth(access: "new")); });
+            await Suite.ThrowsAsync<IOException>(() => sessions.Credential(account));
+            Suite.Throws<IOException>(sessions.FlushPendingWrites);
+            store.FailSave = false; sessions.FlushPendingWrites();
+            Suite.Check(calls == 1 && Credentials.Parse(store.Data!, Provider.Codex).AccessToken == "new");
+        });
         await suite.Run("account deletion prevents late OAuth resurrection", async () =>
         {
             var store = new MemoryVault { Data = Expired() }; var account = new Account(Guid.NewGuid(), Provider.Codex, "test", Credentials.Parse(store.Data, Provider.Codex).Identity, "");

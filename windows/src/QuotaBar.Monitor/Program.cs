@@ -11,6 +11,8 @@ internal static class Program
     [STAThread] static void Main(string[] args)
     {
         ApplicationConfiguration.Initialize();
+        if (Arguments.Value(args, "--update-manager-probe") is { } updateProbe)
+        { Application.Run(new UpdateManagerProbe(updateProbe)); return; }
         try { Application.Run(new MonitorContext(args)); }
         catch (Exception e)
         {
@@ -59,7 +61,8 @@ internal sealed class MonitorContext : ApplicationContext
         menu = new TrayMenu(State, Open, Quit);
         // NotifyIcon opens ContextMenuStrip on right-click. Left-click and double-click intentionally have no action.
         tray = new NotifyIcon { Visible = true, ContextMenuStrip = menu };
-        if (service != null) updater = new(service.Paths, Publish, Quit);
+        if (service != null) updater = new(service.Paths, Publish, service.PrepareUpdateExit,
+            () => { service.ResumeAfterUpdate(); Schedule(); }, Quit);
         timer.Tick += async (_, _) => { timer.Stop(); await Refresh(automatic: true); };
         SystemEvents.PowerModeChanged += Power;
         SystemEvents.UserPreferenceChanged += PreferencesChanged;

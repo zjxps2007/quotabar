@@ -146,6 +146,15 @@ public final class CodexSessionManager {
         generations[id] = UUID(); jobs.removeValue(forKey: id)?.cancel()
         pendingWrites.removeValue(forKey: id); reauthRequired.remove(id)
     }
+    /// Call after stopping new account requests, before an automatic restart.
+    public func finishPendingWrites() async throws {
+        // Rotations can outlive a cancelled usage request (for example across sleep).
+        for task in Array(jobs.values) { _ = try? await task.value }
+        for (id, (original, replacement)) in Array(pendingWrites) {
+            if try read(id) == original { try write(id, replacement) }
+            pendingWrites.removeValue(forKey: id)
+        }
+    }
     public func credential(id: UUID, identity: String, rejected: Data? = nil) async throws -> Data {
         guard !reauthRequired.contains(id) else {
             throw ProviderError("reauth_required", "로그인이 만료되거나 해제되었습니다. 앱에서 다시 로그인하세요.")

@@ -202,6 +202,34 @@ struct CodexOAuthTests {
         #expect(try CodexOAuthCredentials(data: recovered).refreshToken == "rotated-refresh")
         #expect(await wire.requests.count == 1)
     }
+    @Test func automaticRestartMustPersistRotatedCredentialsBeforeExit() async throws {
+        let box = MemoryVault(try loginData()), id = UUID()
+        let identity = try CodexOAuthCredentials(data: box.value!).identity.key
+        let wire = Wire(body: try tokenResponse())
+        let manager = box.manager(CodexOAuthClient(transport: { try await wire.send($0) }))
+        box.locked = true
+        do { _ = try await manager.credential(id: id, identity: identity) } catch {}
+        do { try await manager.finishPendingWrites(); Issue.record("Automatic exit must stop while the token cannot be saved") } catch {}
+        box.locked = false
+        try await manager.finishPendingWrites()
+        #expect(try CodexOAuthCredentials(data: box.value!).refreshToken == "rotated-refresh")
+        #expect(await wire.requests.count == 1)
+    }
+    @Test func automaticRestartWaitsForRotationsAfterTheCallerIsCancelled() async throws {
+        let box = MemoryVault(try loginData()), id = UUID(), gate = GateWire()
+        let identity = try CodexOAuthCredentials(data: box.value!).identity.key
+        let manager = box.manager(CodexOAuthClient(transport: { await gate.send($0) }))
+        let request = Task { try await manager.credential(id: id, identity: identity) }
+        while !(await gate.started) { await Task.yield() }
+        request.cancel()
+        var drained = false
+        let shutdown = Task { try await manager.finishPendingWrites(); drained = true }
+        await Task.yield(); #expect(!drained)
+        await gate.release(try tokenResponse())
+        try await shutdown.value
+        _ = try? await request.value
+        #expect(drained && box.writes == 1)
+    }
     @Test func revokedSessionStopsAutomaticRetriesUntilReconnection() async throws {
         let box = MemoryVault(try loginData()), id = UUID()
         let identity = try CodexOAuthCredentials(data: box.value!).identity.key

@@ -6,7 +6,7 @@ final class AppUpdateManager {
     private let client = ReleaseClient()
     private let downloader = UpdateDownloader()
     private let onState: (AppUpdateState) -> Void
-    private let prepareExit: () async -> Void
+    private let prepareExit: () async throws -> Void
     private let resume: () -> Void
     private let exit: () -> Void
     private var task: Task<Void, Never>?
@@ -21,7 +21,7 @@ final class AppUpdateManager {
     private var state = AppUpdateState() { didSet { onState(state) } }
     private var currentVersion: String { Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "dev" }
 
-    init(onState: @escaping (AppUpdateState) -> Void, prepareExit: @escaping () async -> Void,
+    init(onState: @escaping (AppUpdateState) -> Void, prepareExit: @escaping () async throws -> Void,
          resume: @escaping () -> Void, exit: @escaping () -> Void) {
         self.onState = onState; self.prepareExit = prepareExit; self.resume = resume; self.exit = exit
         if let data = try? Data(contentsOf: MacUpdateInstaller.resultURL), data.count < 4096,
@@ -32,11 +32,12 @@ final class AppUpdateManager {
     }
 
     func configure(enabled: Bool, canInstall: Bool, suspended: Bool = false) {
+        let stop = (self.enabled && !enabled) || (!self.suspended && suspended)
         self.enabled = enabled; self.canInstall = canInstall; self.suspended = suspended
         onState(state)
         if !enabled || suspended {
             timer?.invalidate(); timer = nil
-            if state.phase != .installing { task?.cancel() }
+            if stop, state.phase != .installing { task?.cancel() }
         }
         if enabled, !suspended, canInstall, staged != nil, task == nil { install(force: false) }
         else { schedule() }
@@ -126,7 +127,7 @@ final class AppUpdateManager {
             }
             try Task.checkCancellation()
             guard !suspended, force || (enabled && canInstall) else { state.phase = .ready; return }
-            await prepareExit(); paused = true
+            paused = true; try await prepareExit()
             try Task.checkCancellation()
             guard !suspended, force || (enabled && canInstall) else { resume(); state.phase = .ready; return }
             let process = try MacUpdateInstaller.launchHelper(job: job!); helper = process

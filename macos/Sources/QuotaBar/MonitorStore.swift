@@ -234,6 +234,7 @@ final class MonitorStore: ObservableObject {
             self.timer?.invalidate(); self.timer = nil; self.scanTask?.cancel()
             let running = self.jobs.values.map { $0.1 }
             for task in running { await task.value }
+            try await self.codexSessions.finishPendingWrites()
         }, resume: { [weak self] in
             self?.installingUpdate = false; self?.refreshAccounts(); self?.scheduleNextRefresh()
         }, exit: { NSApp.terminate(nil) })

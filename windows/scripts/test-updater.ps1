@@ -15,6 +15,15 @@ try {
     [IO.File]::WriteAllText($versionPath, '{"version":"0.1.0","build":6}')
     Invoke-Dotnet @('build', (Join-Path $RepoRoot 'windows\tests\QuotaBar.Tests\QuotaBar.Tests.csproj'), '-c', 'Release', '--nologo', '-m:1', '-nodeReuse:false', '-p:UseSharedCompilation=false')
     & "$PSScriptRoot\package.ps1" -OutputFolder 'Updater-Old'
+    $probePath = Join-Path $RepoRoot 'artifacts\update-manager-probe.json'
+    $probeInfo = [Diagnostics.ProcessStartInfo]::new((Join-Path $RepoRoot 'artifacts\Updater-Old\QuotaBar.Monitor.exe'))
+    $probeInfo.UseShellExecute = $false
+    $probeInfo.ArgumentList.Add('--update-manager-probe')
+    $probeInfo.ArgumentList.Add($probePath)
+    $probe = [Diagnostics.Process]::Start($probeInfo)
+    if (-not $probe.WaitForExit(15000)) { $probe.Kill(); throw 'Update manager probe timed out.' }
+    if (-not (Get-Content -LiteralPath $probePath -Raw | ConvertFrom-Json).passed) { throw (Get-Content -LiteralPath $probePath -Raw) }
+    Write-Output 'PASS manual update check while automatic updates are disabled'
     & "$PSScriptRoot\package-installer.ps1"
     [IO.File]::WriteAllText($versionPath, '{"version":"0.1.1","build":7}')
     & "$PSScriptRoot\package.ps1" -OutputFolder 'Updater-New'

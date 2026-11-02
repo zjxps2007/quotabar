@@ -7,12 +7,14 @@ namespace QuotaBar.Monitor;
 // Owned by the monitor UI thread; Dashboard receives display state only.
 internal sealed class AppUpdateManager : IDisposable
 {
-    private readonly ReleaseClient client = new();
+    private readonly ReleaseClient client;
     private readonly UpdateDownloader downloader = new();
     private readonly System.Windows.Forms.Timer timer = new();
     private readonly AppPaths paths;
     private readonly Action changed;
     private readonly Func<Task> exit;
+    private readonly Func<Task> prepareExit;
+    private readonly Action resume;
     private CancellationTokenSource? operation;
     private DateTimeOffset? lastAttempt;
     private StagedUpdate? staged;
@@ -20,9 +22,10 @@ internal sealed class AppUpdateManager : IDisposable
     private bool enabled, canInstall, suspended, disposed;
     public AppUpdateState State { get; private set; } = new();
 
-    public AppUpdateManager(AppPaths paths, Action changed, Func<Task> exit)
+    public AppUpdateManager(AppPaths paths, Action changed, Func<Task> prepareExit, Action resume, Func<Task> exit, ReleaseClient? releaseClient = null)
     {
-        this.paths = paths; this.changed = changed; this.exit = exit;
+        client = releaseClient ?? new();
+        this.paths = paths; this.changed = changed; this.prepareExit = prepareExit; this.resume = resume; this.exit = exit;
         if (UpdateInstaller.ReadResult(UpdateInstaller.ResultPath(paths)) is { Success: false } previous)
         { blockedVersion = previous.Version; State = new(UpdatePhase.Failed, previous.Version, Message: previous.Message); }
         timer.Tick += (_, _) => Check(manual: false);
@@ -30,8 +33,9 @@ internal sealed class AppUpdateManager : IDisposable
     }
     public void Configure(bool enabled, bool canInstall, bool suspended)
     {
+        bool stop = (this.enabled && !enabled) || (!this.suspended && suspended);
         this.enabled = enabled; this.canInstall = canInstall; this.suspended = suspended;
-        if ((!enabled || suspended) && State.Phase != UpdatePhase.Installing) operation?.Cancel();
+        if (stop && State.Phase != UpdatePhase.Installing) operation?.Cancel();
         if (enabled && canInstall && !suspended && staged != null && operation == null && staged.Update.Release.Version != blockedVersion)
             Install(force: false);
         else Schedule();
@@ -71,13 +75,15 @@ internal sealed class AppUpdateManager : IDisposable
     private async Task Apply(bool force, CancellationToken token)
     {
         if (staged == null || !Allowed(force)) return;
-        Process? helper = null; bool handedOff = false;
+        Process? helper = null; bool handedOff = false, paused = false;
         try
         {
             Set(State with { Phase = UpdatePhase.Installing, Progress = null });
             var payload = staged;
             job ??= await Task.Run(() => UpdateInstaller.Prepare(payload, paths, AppContext.BaseDirectory, Brand.Version, token), token);
             token.ThrowIfCancellationRequested();
+            if (!Allowed(force)) { Set(State with { Phase = UpdatePhase.Ready }); return; }
+            paused = true; await prepareExit(); token.ThrowIfCancellationRequested();
             if (!Allowed(force)) { Set(State with { Phase = UpdatePhase.Ready }); return; }
             helper = UpdateInstaller.LaunchHelper(job);
             bool ready = false;
@@ -93,7 +99,7 @@ internal sealed class AppUpdateManager : IDisposable
             handedOff = true;
             await exit(); // Drains credential rotations and closes Dashboard before releasing the instance lease.
         }
-        catch { blockedVersion = staged.Update.Release.Version; throw; }
+        catch { handedOff = false; blockedVersion = staged.Update.Release.Version; throw; }
         finally
         {
             if (helper != null)
@@ -102,6 +108,7 @@ internal sealed class AppUpdateManager : IDisposable
                 { try { helper.Kill(); await helper.WaitForExitAsync(); } catch (InvalidOperationException) { } }
                 helper.Dispose();
             }
+            if (paused && !handedOff) resume();
         }
     }
     private async Task Run(Func<CancellationToken, Task> work)

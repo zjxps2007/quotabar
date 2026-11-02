@@ -25,7 +25,7 @@ public sealed class MonitorService : IDisposable
     private readonly HashSet<Guid> loading = [];
     private LocalUsageReport? activity;
     private string? message;
-    private bool scanning, disposed, releaseCache;
+    private bool scanning, disposed, releaseCache, updatePaused;
     private readonly HashSet<Task> running = [];
     private TaskCompletionSource? loginFinished;
     public Settings Settings { get; private set; }
@@ -105,6 +105,7 @@ public sealed class MonitorService : IDisposable
     }
     public async Task Login()
     {
+        if (updatePaused) throw new UsageException("updating", "업데이트 설치 준비가 끝난 뒤 다시 시도하세요.");
         if (loginToken != null) throw new UsageException("login_active", "진행 중인 로그인을 완료하거나 취소하세요.");
         var cancel = loginToken = new(); loginFinished = new(TaskCreationOptions.RunContinuationsAsynchronously); message = "브라우저에서 Codex 로그인을 완료하세요. 최대 5분 동안 기다립니다."; Notify();
         try { var bytes = await login.LoginAsync(cancel.Token); cancel.Token.ThrowIfCancellationRequested(); if (!disposed) await Refresh(Add(Provider.Codex, bytes, "", true).Id); }
@@ -150,7 +151,7 @@ public sealed class MonitorService : IDisposable
     }
     public async Task Refresh(Guid? id = null)
     {
-        if (disposed) return;
+        if (disposed || updatePaused) return;
         var accounts = Settings.Accounts.Where(a => a.Enabled && (id == null || a.Id == id) && !requests.ContainsKey(a.Id)).ToArray();
         var work = Task.WhenAll(accounts.Select(Fetch)); running.Add(work); try { await work; } finally { running.Remove(work); }
     }
@@ -190,7 +191,7 @@ public sealed class MonitorService : IDisposable
     public void StopScan() { releaseCache = true; scanToken?.Cancel(); if (!scanning) scanner.ReleaseCache(); }
     public async Task Scan()
     {
-        if (scanning || !Settings.ScanLocalLogs || disposed) return;
+        if (scanning || !Settings.ScanLocalLogs || disposed || updatePaused) return;
         using var cancel = new CancellationTokenSource(); scanToken = cancel; releaseCache = false; scanning = true; Notify();
         var roots = Settings.Accounts.Where(a => a.Provider == Provider.Claude).Select(a => a.SourcePath).Append(AppPaths.ClaudeHome).Distinct(StringComparer.OrdinalIgnoreCase).Select(p => Path.Combine(p, "projects")).ToArray();
         try
@@ -204,6 +205,14 @@ public sealed class MonitorService : IDisposable
         finally { if (releaseCache) scanner.ReleaseCache(); scanning = false; scanToken = null; Notify(); }
     }
     public void Dispose() { disposed = true; loginToken?.Cancel(); Suspend(); client.Dispose(); }
+    public async Task PrepareUpdateExit()
+    {
+        updatePaused = true; Suspend();
+        var work = running.ToList(); if (loginFinished != null) work.Add(loginFinished.Task);
+        await Task.WhenAll(work);
+        sessions.FlushPendingWrites();
+    }
+    public void ResumeAfterUpdate() => updatePaused = false;
     public async Task Shutdown()
     {
         disposed = true; loginToken?.Cancel(); Suspend();

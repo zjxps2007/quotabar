@@ -9,6 +9,18 @@ public sealed class CodexSessions(ICredentialStore store, Func<byte[], Task<byte
     private readonly Dictionary<Guid, (byte[] Original, byte[] Replacement)> pending = [];
     private readonly HashSet<Guid> revoked = [];
     public void Invalidate(Guid id) { lock (sync) { generations[id] = Guid.NewGuid(); pending.Remove(id); revoked.Remove(id); } }
+    // The owner must stop and drain requests first. A failed save blocks automatic restart.
+    public void FlushPendingWrites()
+    {
+        lock (sync)
+        {
+            foreach (var (id, write) in pending.ToArray())
+            {
+                if (store.Load(id)?.SequenceEqual(write.Original) == true) store.Save(id, write.Replacement);
+                pending.Remove(id);
+            }
+        }
+    }
     public async Task<byte[]> Credential(Account account, byte[]? rejected = null)
     {
         var gate = gates.GetOrAdd(account.Id, _ => new(1)); await gate.WaitAsync();
