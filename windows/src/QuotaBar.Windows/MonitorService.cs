@@ -53,12 +53,13 @@ public sealed class MonitorService : IDisposable
         IOException => "파일을 읽거나 저장하지 못했습니다. 경로, 권한과 여유 공간을 확인하세요.", _ => "작업을 완료하지 못했습니다. 다시 시도하세요." };
     public void SetMessage(string? text) { message = text; Notify(); }
     private void Save(Settings value) { store.Save(value); Settings = value; Notify(); }
-    public void Preferences(int seconds, string theme, bool scan, bool taskbar, string? trayDisplay = null, bool? autoRefresh = null)
+    public void Preferences(int seconds, string theme, bool scan, bool taskbar, string? trayDisplay = null, bool? autoRefresh = null, bool? automaticUpdates = null)
     {
         trayDisplay ??= Settings.TrayDisplayMode;
         if (!RefreshSchedule.Intervals.Contains(seconds) || !new[] { "system", "light", "dark" }.Contains(theme)
             || !new[] { "remaining", "icon" }.Contains(trayDisplay)) throw new UsageException("settings", "지원하는 설정 값을 선택하세요.");
-        Save(Settings with { RefreshSeconds = seconds, AutoRefresh = autoRefresh ?? Settings.AutoRefresh, Appearance = theme,
+        Save(Settings with { RefreshSeconds = seconds, AutoRefresh = autoRefresh ?? Settings.AutoRefresh,
+            AutomaticUpdates = automaticUpdates ?? Settings.AutomaticUpdates, Appearance = theme,
             ScanLocalLogs = scan, ShowTaskbarIcon = taskbar, TrayDisplayMode = trayDisplay });
         if (!scan) { StopScan(); activity = null; Notify(); }
     }

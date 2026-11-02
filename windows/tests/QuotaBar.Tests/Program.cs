@@ -8,6 +8,13 @@ using QuotaBar.Core;
 using QuotaBar.Windows;
 using QuotaBar.Protocol;
 
+if (args.FirstOrDefault() == "--updates-contract")
+{
+    await UpdateTests.Contract();
+    Console.WriteLine("PASS stable update feed, P256 manifest signature, file digest and HTTP contract");
+    return 0;
+}
+
 if (args.FirstOrDefault() == "--preferences-contract")
 {
     PreferencesTests.Contract();
@@ -147,6 +154,7 @@ await suite.Run("IPC rejects oversized and truncated frames", async () =>
 });
 await TrayTests.Run(suite);
 await PreferencesTests.Run(suite);
+await UpdateTests.Run(suite);
 await Extended.Run(suite);
 Console.WriteLine($"{suite.Passed} passed, {suite.Failed} failed");
 suite.Cleanup(); return suite.Failed == 0 ? 0 : 1;

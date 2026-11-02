@@ -88,6 +88,10 @@ final class MonitorStore: ObservableObject {
     @Published private(set) var scanning = false
     @Published private(set) var windowVisible = false
     @Published private(set) var launchAtLogin: LaunchAtLoginState = .disabled
+    @Published private(set) var appUpdate = AppUpdateState()
+    private var appUpdater: AppUpdateManager?
+    private var installingUpdate = false
+    private var dashboardRunning = false
     @Published var message: String? {
         didSet { if !applyingRemoteState, message != oldValue { remote?.send(.message(message)) } }
     }
@@ -221,6 +225,19 @@ final class MonitorStore: ObservableObject {
             Task { @MainActor in self?.wake() }
         })
         refreshAccounts()
+        appUpdater = AppUpdateManager(onState: { [weak self] value in
+            if self?.appUpdate != value { self?.appUpdate = value }
+        }, prepareExit: { [weak self] in
+            guard let self else { return }
+            self.installingUpdate = true; self.queue.removeAll()
+            self.loading.formIntersection(self.jobs.keys)
+            self.timer?.invalidate(); self.timer = nil; self.scanTask?.cancel()
+            let running = self.jobs.values.map { $0.1 }
+            for task in running { await task.value }
+        }, resume: { [weak self] in
+            self?.installingUpdate = false; self?.refreshAccounts(); self?.scheduleNextRefresh()
+        }, exit: { NSApp.terminate(nil) })
+        configureAppUpdates()
     }
 
     func needsAttention(_ account: MonitoredAccount) -> Bool {
@@ -244,6 +261,7 @@ final class MonitorStore: ObservableObject {
         }
         scheduleNextRefresh()
         if changed { diagnostic(value ? "window-visible" : "window-hidden") }
+        configureAppUpdates()
     }
     func reclaimIdleMemory() {
         guard !windowVisible else { return }
@@ -259,7 +277,7 @@ final class MonitorStore: ObservableObject {
         }
     }
     private var refreshSchedule: RefreshSchedule {
-        RefreshSchedule(suspended: sleeping || demo || !storageHealthy,
+        RefreshSchedule(suspended: sleeping || demo || !storageHealthy || installingUpdate,
             hasAccounts: remote == nil && accounts.contains(where: \.enabled), windowVisible: windowVisible,
             dashboardSelected: route == "dashboard", scanLocalLogs: managesDashboard && settings.scanLocalLogs,
             scanning: scanning, refreshSeconds: settings.refreshSeconds,
@@ -291,6 +309,7 @@ final class MonitorStore: ObservableObject {
         for (_, task) in jobs.values { task.cancel() }
         jobs.removeAll(); loading.removeAll(); scanTask?.cancel()
         scheduleNextRefresh()
+        configureAppUpdates()
     }
     private func wake() {
         sleeping = false
@@ -299,6 +318,7 @@ final class MonitorStore: ObservableObject {
             if windowVisible { refreshLocalIfNeeded() }
         }
         scheduleNextRefresh()
+        configureAppUpdates()
     }
     func refreshAll() {
         if let remote {
@@ -311,18 +331,18 @@ final class MonitorStore: ObservableObject {
     }
     func refreshAccounts() {
         if let remote { remote.send(.refreshAccounts); return }
-        guard !demo, storageHealthy else { return }
+        guard !demo, storageHealthy, !installingUpdate else { return }
         lastScheduled = Date()
         enqueue(enabledAccounts.map(\.id))
         scheduleNextRefresh()
     }
     func refresh(_ account: MonitoredAccount) {
         if let remote { remote.send(.refresh(account.id)); return }
-        guard account.enabled, !demo, storageHealthy else { return }
+        guard account.enabled, !demo, storageHealthy, !installingUpdate else { return }
         enqueue([account.id])
     }
     private func enqueue(_ ids: [UUID]) {
-        guard !sleeping else { return }
+        guard !sleeping, !installingUpdate else { return }
         for id in ids where !loading.contains(id) {
             queue.append(id); loading.insert(id)
         }
@@ -358,6 +378,27 @@ final class MonitorStore: ObservableObject {
         if !demo { try settingsFile.save(next) }
         settings = next
         scheduleNextRefresh()
+        configureAppUpdates()
+    }
+    private func configureAppUpdates() {
+        appUpdater?.configure(enabled: settings.areAutomaticUpdatesEnabled && storageHealthy,
+            canInstall: !windowVisible && !dashboardRunning, suspended: sleeping)
+    }
+    func setDashboardRunning(_ value: Bool) { dashboardRunning = value; configureAppUpdates() }
+    func setAutomaticUpdates(_ enabled: Bool) {
+        if let remote { remote.send(.automaticUpdates(enabled)); return }
+        var next = settings; next.automaticUpdates = enabled
+        do { try save(next) } catch { message = error.localizedDescription }
+    }
+    func checkAppUpdate() {
+        if let remote { remote.send(.checkAppUpdate); return }
+        guard !demo else { appUpdate = AppUpdateState(message: "미리보기에서는 업데이트를 내려받거나 설치하지 않습니다."); return }
+        appUpdater?.check()
+    }
+    func installAppUpdate() {
+        if let remote { remote.send(.installAppUpdate); return }
+        guard !demo else { return }
+        appUpdater?.installNow()
     }
     func setInterval(_ seconds: Int) {
         if let remote { remote.send(.interval(seconds)); return }
@@ -638,7 +679,7 @@ final class MonitorStore: ObservableObject {
 
     var dashboardState: DashboardState {
         DashboardState(settings: settings, snapshots: snapshots, errors: errors, notes: notes,
-                       loading: loading, message: message, demoReport: demo ? local : nil, launchAtLogin: launchAtLogin)
+                       loading: loading, message: message, demoReport: demo ? local : nil, launchAtLogin: launchAtLogin, appUpdate: appUpdate)
     }
 
     func apply(_ state: DashboardState) {
@@ -654,6 +695,7 @@ final class MonitorStore: ObservableObject {
         if loading != state.loading { loading = state.loading }
         if message != state.message { message = state.message }
         if let startup = state.launchAtLogin, launchAtLogin != startup { launchAtLogin = startup }
+        if let update = state.appUpdate, appUpdate != update { appUpdate = update }
         if let report = state.demoReport, local != report { local = report }
         if appearanceChanged { AppTheme.apply(settings.selectedAppearance) }
         if scanChanged {

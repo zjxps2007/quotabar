@@ -15,6 +15,8 @@ jobs:
           persist-credentials: false
       - name: Existing Swift suites and shared contract
         run: bash scripts/test.sh
+      - name: Signed update release tooling
+        run: python3 -m unittest discover -s scripts/tests -v
       - name: Build and package application and Dashboard helper
         run: bash macos/scripts/package.sh
       - name: Packaged Claude callback

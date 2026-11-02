@@ -31,6 +31,7 @@ public sealed record Settings
     public List<Account> Accounts { get; init; } = [];
     public int RefreshSeconds { get; init; } = 300;
     public bool AutoRefresh { get; init; } = true;
+    public bool AutomaticUpdates { get; init; } = true;
     public bool ScanLocalLogs { get; init; } = true;
     public string Appearance { get; init; } = "system";
     public bool ShowTaskbarIcon { get; init; } = true;
@@ -40,7 +41,8 @@ public enum LaunchAtLoginState { Disabled, Enabled, Unavailable }
 public sealed record DisplayState(Settings Settings, Dictionary<Guid, Snapshot> Snapshots,
     Dictionary<Guid, string> Errors, HashSet<Guid> Loading, string? Message = null, bool Demo = false,
     LocalUsageReport? Activity = null, bool Scanning = false, bool LoggingIn = false, string? DataDirectory = null,
-    Dictionary<string, string>? DefaultPaths = null, LaunchAtLoginState LaunchAtLogin = LaunchAtLoginState.Disabled);
+    Dictionary<string, string>? DefaultPaths = null, LaunchAtLoginState LaunchAtLogin = LaunchAtLoginState.Disabled,
+    AppUpdateState? AppUpdate = null);
 public interface ICredentialStore
 {
     byte[]? Load(Guid id);

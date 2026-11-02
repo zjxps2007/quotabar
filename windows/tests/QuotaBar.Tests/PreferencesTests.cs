@@ -8,9 +8,9 @@ internal static class PreferencesTests
     public static void Contract()
     {
         var legacy = Json.Read<Settings>("""{"schemaVersion":1,"accounts":[],"refreshSeconds":900}"""u8);
-        Suite.Check(legacy.AutoRefresh && legacy.RefreshSeconds == 900);
-        var saved = Json.Read<Settings>(Json.Bytes(legacy with { AutoRefresh = false, RefreshSeconds = 3600 }));
-        Suite.Check(!saved.AutoRefresh && saved.RefreshSeconds == 3600);
+        Suite.Check(legacy.AutoRefresh && legacy.AutomaticUpdates && legacy.RefreshSeconds == 900);
+        var saved = Json.Read<Settings>(Json.Bytes(legacy with { AutoRefresh = false, AutomaticUpdates = false, RefreshSeconds = 3600 }));
+        Suite.Check(!saved.AutoRefresh && !saved.AutomaticUpdates && saved.RefreshSeconds == 3600);
         var now = DateTimeOffset.Parse("2026-11-02T12:00:00Z");
         foreach (bool visible in new[] { false, true })
         foreach (int seconds in RefreshSchedule.Intervals)
@@ -21,10 +21,11 @@ internal static class PreferencesTests
             Suite.Check(RefreshSchedule.Next(false, false, visible, seconds, now) == null);
         }
         Suite.Check(RefreshSchedule.Next(false, true, true, 0, now) == null);
-        var state = Demo.State() with { Settings = saved, LaunchAtLogin = LaunchAtLoginState.Enabled };
+        var state = Demo.State() with { Settings = saved, LaunchAtLogin = LaunchAtLoginState.Enabled,
+            AppUpdate = new(UpdatePhase.Downloading, "0.1.10", 42) };
         var restored = Json.Read<DisplayState>(Json.Bytes(state));
         Suite.Check(!restored.Settings.AutoRefresh && restored.Settings.RefreshSeconds == 3600
-            && restored.LaunchAtLogin == LaunchAtLoginState.Enabled);
+            && restored.LaunchAtLogin == LaunchAtLoginState.Enabled && !restored.Settings.AutomaticUpdates && restored.AppUpdate == state.AppUpdate);
     }
 
     public static async Task Run(Suite suite)
@@ -35,14 +36,14 @@ internal static class PreferencesTests
             var paths = new AppPaths(Path.Combine(suite.Paths.Root, "refresh-preferences"));
             using (var service = new MonitorService(paths, launchAtLogin: new FakeStartup()))
             {
-                service.Preferences(3600, "dark", true, true, autoRefresh: false);
+                service.Preferences(3600, "dark", true, true, autoRefresh: false, automaticUpdates: false);
                 service.Preferences(3600, "light", true, true); // A client without the new field preserves it.
-                Suite.Check(!service.Settings.AutoRefresh && service.Settings.RefreshSeconds == 3600);
+                Suite.Check(!service.Settings.AutoRefresh && !service.Settings.AutomaticUpdates && service.Settings.RefreshSeconds == 3600);
                 Suite.Throws<UsageException>(() => service.Preferences(0, "dark", true, true, autoRefresh: true));
                 Suite.Check(!service.Settings.AutoRefresh && service.Settings.RefreshSeconds == 3600);
             }
             using var reopened = new MonitorService(paths, launchAtLogin: new FakeStartup());
-            Suite.Check(!reopened.Settings.AutoRefresh && reopened.Settings.RefreshSeconds == 3600);
+            Suite.Check(!reopened.Settings.AutoRefresh && !reopened.Settings.AutomaticUpdates && reopened.Settings.RefreshSeconds == 3600);
             return Task.CompletedTask;
         });
         await suite.Run("startup registration quotes paths and removes only its own isolated registry value", () =>

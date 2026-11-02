@@ -55,6 +55,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSPo
             self?.scheduleStatusUpdate()
         }
         if !loginLaunch && !CommandLine.arguments.contains("--menu-bar-only") { showDashboard() }
+        MacUpdateInstaller.acknowledgeIfRequested()
         recordWindows("ui-launched")
         if CommandLine.arguments.contains("--memory-probe"), CommandLine.arguments.contains("--diagnostics") {
             runMemoryProbe()

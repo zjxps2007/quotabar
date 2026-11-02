@@ -26,6 +26,7 @@ internal sealed class MonitorContext : ApplicationContext
     private readonly TrayMenu menu;
     private readonly DashboardHost dashboard;
     private readonly MonitorService? service;
+    private readonly AppUpdateManager? updater;
     private readonly SingleInstance? instance;
     private readonly System.Windows.Forms.Timer timer = new();
     private readonly bool demo;
@@ -54,10 +55,11 @@ internal sealed class MonitorContext : ApplicationContext
         }
         dashboard = new DashboardHost(dispatcher, State);
         dashboard.Command += async m => await Command(m);
-        dashboard.Exited += () => { visible = false; service?.StopScan(); Schedule(); };
+        dashboard.Exited += () => { visible = false; service?.StopScan(); Schedule(); ConfigureUpdates(); };
         menu = new TrayMenu(State, Open, Quit);
         // NotifyIcon opens ContextMenuStrip on right-click. Left-click and double-click intentionally have no action.
         tray = new NotifyIcon { Visible = true, ContextMenuStrip = menu };
+        if (service != null) updater = new(service.Paths, Publish, Quit);
         timer.Tick += async (_, _) => { timer.Stop(); await Refresh(automatic: true); };
         SystemEvents.PowerModeChanged += Power;
         SystemEvents.UserPreferenceChanged += PreferencesChanged;
@@ -65,21 +67,31 @@ internal sealed class MonitorContext : ApplicationContext
         Publish();
         if (instance != null) _ = instance.Listen(() => Post(() => Open("dashboard")));
         if (probe != null) dispatcher.BeginInvoke(async () => await Probe(probe));
-        else dispatcher.BeginInvoke(async () => { if (!args.Contains("--background")) Open("dashboard"); await Refresh(); });
+        else dispatcher.BeginInvoke(async () => {
+            if (!args.Contains("--background")) Open("dashboard");
+            if (service != null) UpdateInstaller.Acknowledge(args, service.Paths);
+            await Refresh();
+        });
     }
-    private DisplayState State() => service?.State() ?? sample;
+    private DisplayState State() => service is { } monitor ? monitor.State() with { AppUpdate = updater?.State } : sample;
+    private void ConfigureUpdates()
+    {
+        if (service == null || quitting) return;
+        var state = service.State();
+        updater?.Configure(state.Settings.AutomaticUpdates, !visible && !dashboard.IsRunning, suspended || state.LoggingIn);
+    }
     private void Open(string target)
     {
         route = target;
-        try { dashboard.Show(target); }
-        catch (Exception e) { MessageBox.Show(MonitorService.Explain(e), "QuotaBar"); }
+        try { visible = true; ConfigureUpdates(); dashboard.Show(target); }
+        catch (Exception e) { visible = dashboard.IsRunning; ConfigureUpdates(); MessageBox.Show(MonitorService.Explain(e), "QuotaBar"); }
     }
     private async Task Command(Message m)
     {
         try
         {
             var p = m.Payload;
-            if (m.Type == "visibility") { visible = p.GetBoolean(); if (!visible) service?.StopScan(); else if (route == "dashboard") await Scan(); Schedule(); return; }
+            if (m.Type == "visibility") { visible = p.GetBoolean(); ConfigureUpdates(); if (!visible) service?.StopScan(); else if (route == "dashboard") await Scan(); Schedule(); return; }
             if (m.Type == "route") { route = p.GetString()!; if (route == "dashboard") await Scan(); else service?.StopScan(); return; }
             if (m.Type == "captured") { captured = p.GetString(); return; }
             if (m.Type == "quit") { await Quit(); return; }
@@ -103,12 +115,15 @@ internal sealed class MonitorContext : ApplicationContext
                 sample = sample with { Settings = sample.Settings with { Appearance = p.Get("theme").GetString()!, RefreshSeconds = p.Get("seconds").GetInt32(),
                     ScanLocalLogs = p.Get("scan").GetBoolean(), ShowTaskbarIcon = p.Get("taskbar").GetBoolean(),
                     TrayDisplayMode = p.Get("trayDisplay").Text() ?? sample.Settings.TrayDisplayMode,
-                    AutoRefresh = p.Get("autoRefresh").ValueKind == System.Text.Json.JsonValueKind.Undefined ? sample.Settings.AutoRefresh : p.Get("autoRefresh").GetBoolean() } };
+                    AutoRefresh = p.Get("autoRefresh").ValueKind == System.Text.Json.JsonValueKind.Undefined ? sample.Settings.AutoRefresh : p.Get("autoRefresh").GetBoolean(),
+                    AutomaticUpdates = p.Get("automaticUpdates").ValueKind == System.Text.Json.JsonValueKind.Undefined ? sample.Settings.AutomaticUpdates : p.Get("automaticUpdates").GetBoolean() } };
                 Publish(); return;
             }
             if (demo) { sample = sample with { Message = "미리보기 모드입니다. 실제 계정을 연결하려면 앱을 종료하고 일반 모드로 실행하세요." }; Publish(); return; }
             switch (m.Type)
             {
+                case "check-app-update": updater!.Check(); break;
+                case "install-app-update": updater!.InstallNow(); break;
                 case "login": await service!.Login(); break;
                 case "cancel-login": service!.CancelLogin(); break;
                 case "import": await service!.Import(Enum.Parse<Provider>(p.Get("provider").GetString()!, true), p.Get("path").GetString()!); break;
@@ -116,7 +131,8 @@ internal sealed class MonitorContext : ApplicationContext
                 case "remove": service!.Remove(p.GetGuid()); break;
                 case "edit": service!.Edit(p.Get("id").GetGuid(), p.Get("name").GetString()!, p.Get("enabled").GetBoolean(), p.Get("tray").GetBoolean()); break;
                 case "preferences": service!.Preferences(p.Get("seconds").GetInt32(), p.Get("theme").GetString()!, p.Get("scan").GetBoolean(), p.Get("taskbar").GetBoolean(), p.Get("trayDisplay").Text(),
-                    p.Get("autoRefresh").ValueKind == System.Text.Json.JsonValueKind.Undefined ? null : p.Get("autoRefresh").GetBoolean()); break;
+                    p.Get("autoRefresh").ValueKind == System.Text.Json.JsonValueKind.Undefined ? null : p.Get("autoRefresh").GetBoolean(),
+                    p.Get("automaticUpdates").ValueKind == System.Text.Json.JsonValueKind.Undefined ? null : p.Get("automaticUpdates").GetBoolean()); break;
                 default: throw new UsageException("command", "지원하지 않는 요청입니다.");
             }
             dashboard.Send("result", new { success = true }, m.RequestId);
@@ -138,6 +154,7 @@ internal sealed class MonitorContext : ApplicationContext
     private void Power(object sender, PowerModeChangedEventArgs e) => Post(async () =>
     {
         suspended = e.Mode == PowerModes.Suspend;
+        ConfigureUpdates();
         if (suspended) { timer.Stop(); service?.Suspend(); }
         else if (e.Mode == PowerModes.Resume) { await Task.Delay(2000); await Refresh(automatic: true); }
     });
@@ -158,7 +175,7 @@ internal sealed class MonitorContext : ApplicationContext
             Icon next = TrayIconRenderer.Create(summary, key.Item4, key.Item5);
             tray.Icon = next; icon?.Dispose(); icon = next; iconKey = key;
         }
-        menu.RefreshIfVisible(); dashboard.Publish(); Schedule();
+        menu.RefreshIfVisible(); dashboard.Publish(); Schedule(); ConfigureUpdates();
     }
     private void PreferencesChanged(object sender, UserPreferenceChangedEventArgs e) => Post(Publish);
     private void DisplayChanged(object? sender, EventArgs e) => Post(Publish);
@@ -226,7 +243,7 @@ internal sealed class MonitorContext : ApplicationContext
     protected override void ExitThreadCore()
     {
         quitting = true; SystemEvents.PowerModeChanged -= Power; SystemEvents.UserPreferenceChanged -= PreferencesChanged;
-        SystemEvents.DisplaySettingsChanged -= DisplayChanged; timer.Dispose(); service?.Dispose(); dashboard.Dispose();
+        SystemEvents.DisplaySettingsChanged -= DisplayChanged; timer.Dispose(); updater?.Dispose(); service?.Dispose(); dashboard.Dispose();
         tray.Visible = false; tray.Dispose(); menu.Dispose(); icon?.Dispose(); instance?.Dispose(); dispatcher.Dispose(); base.ExitThreadCore();
     }
 }

@@ -105,7 +105,7 @@ internal sealed partial class DashboardWindow
     {
         state = state! with { Settings = value }; Render();
         Send("preferences", new { seconds = value.RefreshSeconds, autoRefresh = value.AutoRefresh, theme = value.Appearance,
-            scan = value.ScanLocalLogs, taskbar = value.ShowTaskbarIcon, trayDisplay = value.TrayDisplayMode });
+            scan = value.ScanLocalLogs, taskbar = value.ShowTaskbarIcon, trayDisplay = value.TrayDisplayMode, automaticUpdates = value.AutomaticUpdates });
     }
     private void SettingsPage()
     {
@@ -181,10 +181,42 @@ internal sealed partial class DashboardWindow
         startup.Children.Add(Link("Windows 시작 앱 설정 열기", () => Send("startup-settings", true)));
         var startupCard = Card(startup); startupCard.Margin = new Thickness(0, 0, 0, 20); body.Children.Add(startupCard);
 
+        AppUpdateSettings();
         var about = new StackPanel(); about.Children.Add(Text("QuotaBar", 14, true));
         about.Children.Add(Caption($"Windows · 버전 {Brand.Version}")); about.Children.Add(Divider());
         about.Children.Add(Caption("연결 정보는 현재 Windows 사용자만 열 수 있도록 보호됩니다."));
         if (state.DataDirectory != null) { var data = Caption("데이터 위치: " + state.DataDirectory); data.Margin = new Thickness(0, 6, 0, 0); about.Children.Add(data); }
         body.Children.Add(Card(about));
+    }
+
+    private void AppUpdateSettings()
+    {
+        var update = state!.AppUpdate ?? new();
+        bool busy = update.Phase is UpdatePhase.Checking or UpdatePhase.Downloading or UpdatePhase.Installing;
+        var content = new StackPanel(); content.Children.Add(Text("앱 업데이트", 14, true));
+        var automatic = Switch("자동 업데이트", state.Settings.AutomaticUpdates,
+            value => Preferences(state!.Settings with { AutomaticUpdates = value }));
+        automatic.Margin = new Thickness(0, 18, 0, 6); content.Children.Add(automatic);
+        content.Children.Add(Caption("새 버전을 자동으로 내려받고, Dashboard를 닫으면 설치 후 다시 시작합니다."));
+        content.Children.Add(Divider());
+        string status = update.Phase switch {
+            UpdatePhase.Checking => "새 버전 확인 중…", UpdatePhase.Current => "최신 버전입니다.",
+            UpdatePhase.Available => $"버전 {update.Version} 업데이트가 있습니다.",
+            UpdatePhase.Downloading => $"버전 {update.Version} 다운로드 중 · {update.Progress ?? 0}%",
+            UpdatePhase.Ready => $"버전 {update.Version} 설치 준비 완료", UpdatePhase.Installing => "설치를 준비하고 있습니다…",
+            UpdatePhase.Failed => "업데이트를 완료하지 못했습니다.", _ => $"현재 버전 {Brand.Version}"
+        };
+        content.Children.Add(Text(status, 12, color: update.Phase == UpdatePhase.Failed ? warning : ink));
+        if (!string.IsNullOrWhiteSpace(update.Message))
+        { var note = Caption(update.Message); note.Margin = new Thickness(0, 6, 0, 0); content.Children.Add(note); }
+        if (update.Phase == UpdatePhase.Downloading)
+            content.Children.Add(new ProgressBar { Value = update.Progress ?? 0, Maximum = 100, Height = 5, Margin = new Thickness(0, 12, 0, 0) });
+        var actions = new WrapPanel { Margin = new Thickness(0, 16, 0, 0) };
+        var check = Button("업데이트 확인", () => Send("check-app-update", true)); check.IsEnabled = !busy && !state.Demo;
+        check.Margin = new Thickness(0, 0, 8, 0); actions.Children.Add(check);
+        if (update.Phase is UpdatePhase.Available or UpdatePhase.Ready)
+        { var install = Button("설치 후 다시 시작", () => Send("install-app-update", true)); install.IsEnabled = !state.Demo && !state.LoggingIn; actions.Children.Add(install); }
+        content.Children.Add(actions);
+        var card = Card(content); card.Margin = new Thickness(0, 0, 0, 20); body.Children.Add(card);
     }
 }

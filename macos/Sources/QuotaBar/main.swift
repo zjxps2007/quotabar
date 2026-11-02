@@ -3,6 +3,10 @@ import AppKit
 import Darwin
 import UsageCore
 
+if CommandLine.arguments.count == 3, CommandLine.arguments[1] == "--apply-update" {
+    exit(MacUpdateInstaller.apply(job: URL(fileURLWithPath: CommandLine.arguments[2])))
+}
+
 // Claude invokes this short-lived mode before SwiftUI or monitoring is started.
 if CommandLine.arguments.contains("--claude-statusline") {
     exit(ClaudeSubscriptionStatusLine.run(arguments: CommandLine.arguments))

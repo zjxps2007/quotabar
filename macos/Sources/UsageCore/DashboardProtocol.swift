@@ -11,13 +11,15 @@ public struct DashboardState: Codable, Sendable {
     public var message: String?
     public var demoReport: LocalUsageReport?
     public var launchAtLogin: LaunchAtLoginState?
+    public var appUpdate: AppUpdateState?
 
     public init(settings: LiteSettings, snapshots: [UUID: AccountSnapshot], errors: [UUID: String],
                 notes: [UUID: String], loading: Set<UUID>, message: String?, demoReport: LocalUsageReport?,
-                launchAtLogin: LaunchAtLoginState? = nil) {
+                launchAtLogin: LaunchAtLoginState? = nil, appUpdate: AppUpdateState? = nil) {
         self.settings = settings; self.snapshots = snapshots; self.errors = errors
         self.notes = notes; self.loading = loading; self.message = message; self.demoReport = demoReport
         self.launchAtLogin = launchAtLogin
+        self.appUpdate = appUpdate
     }
 }
 
@@ -28,6 +30,7 @@ public enum DashboardCommand: Codable, Sendable {
     case refresh(UUID), toggle(UUID), remove(UUID)
     case interval(Int), appearance(AppearanceMode), dockIcon(Bool), menuBarMode(MenuBarDisplayMode), scanLogs(Bool)
     case autoRefresh(Bool), launchAtLogin(Bool), refreshLaunchAtLogin, openLoginItemsSettings
+    case automaticUpdates(Bool), checkAppUpdate, installAppUpdate
     case menuBarVisibility(UUID, Bool)
     case message(String?)
     case connect(id: UUID, provider: ProviderKind, path: String, alias: String)

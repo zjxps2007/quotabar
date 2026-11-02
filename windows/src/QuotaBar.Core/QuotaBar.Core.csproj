@@ -1,3 +1,4 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <ItemGroup><EmbeddedResource Include="../../../shared/assets/AppMark.svg" LogicalName="QuotaBar.AppMark" /></ItemGroup>
+  <ItemGroup><EmbeddedResource Include="../../../shared/assets/UpdatePublicKey.pem" LogicalName="QuotaBar.UpdatePublicKey" /></ItemGroup>
 </Project>

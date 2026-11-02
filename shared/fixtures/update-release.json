@@ -1,0 +1,29 @@
+{
+  "tag_name": "v0.1.10",
+  "html_url": "https://github.com/zjxps2007/quotabar/releases/tag/v0.1.10",
+  "draft": false,
+  "prerelease": false,
+  "assets": [
+    {
+      "name": "QuotaBar-0.1.10-macOS-arm64.zip",
+      "browser_download_url": "https://github.com/zjxps2007/quotabar/releases/download/v0.1.10/QuotaBar-0.1.10-macOS-arm64.zip",
+      "state": "uploaded",
+      "size": 1024,
+      "digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+    },
+    {
+      "name": "QuotaBar-0.1.10-Windows-x64-Setup.exe",
+      "browser_download_url": "https://github.com/zjxps2007/quotabar/releases/download/v0.1.10/QuotaBar-0.1.10-Windows-x64-Setup.exe",
+      "state": "uploaded",
+      "size": 1024,
+      "digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+    },
+    {
+      "name": "QuotaBar-0.1.10-Windows-x64.zip",
+      "browser_download_url": "https://github.com/zjxps2007/quotabar/releases/download/v0.1.10/QuotaBar-0.1.10-Windows-x64.zip",
+      "state": "uploaded",
+      "size": 1024,
+      "digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+    }
+  ]
+}

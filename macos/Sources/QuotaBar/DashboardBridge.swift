@@ -44,9 +44,11 @@ final class DashboardHost {
             Task { @MainActor in self?.didExit(generation: id) }
         }
         process = child; channel = pipe
+        store.setDashboardRunning(true)
         do { try child.run() }
         catch {
             process = nil; channel = nil; pipe.close()
+            store.setDashboardRunning(false)
             store.message = "Dashboard를 열지 못했습니다. 앱을 다시 실행해 주세요."
             return
         }
@@ -97,6 +99,7 @@ final class DashboardHost {
         observation = nil; channel?.close(); channel = nil; process = nil
         ready = false; updatePending = false
         store.setVisible(false)
+        store.setDashboardRunning(false)
         store.diagnostic("dashboard-process-exited")
     }
 
@@ -137,6 +140,9 @@ final class DashboardHost {
         case .remove(let id): if let value = account(id) { store.remove(value) }
         case .interval(let value): store.setInterval(value)
         case .autoRefresh(let value): store.setAutoRefresh(value)
+        case .automaticUpdates(let value): store.setAutomaticUpdates(value)
+        case .checkAppUpdate: store.checkAppUpdate()
+        case .installAppUpdate: store.installAppUpdate()
         case .launchAtLogin(let value): store.setLaunchAtLogin(value)
         case .refreshLaunchAtLogin: store.refreshLaunchAtLogin()
         case .openLoginItemsSettings: store.openLoginItemsSettings()

@@ -680,6 +680,7 @@ struct PreferencesView: View {
                             .font(.caption).foregroundStyle(.secondary)
                     }
                 }.frame(maxWidth: .infinity, alignment: .leading).card()
+                AppUpdateSettings(store: store)
                 VStack(alignment: .leading, spacing: 12) {
                     Label("데이터 저장", systemImage: "lock.shield").font(.headline)
                     Text("Codex · Gemini 로그인은 이 Mac의 사용자 전용 파일에 저장됩니다. 키체인 승인창을 사용하지 않으며, 별도 암호화 대신 파일 접근 권한으로 보호됩니다.")
@@ -695,7 +696,7 @@ struct PreferencesView: View {
                         Text("버전 \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "—")")
                             .font(.caption).foregroundStyle(.secondary)
                     }
-                    Text("sylearn/AIUsage의 조회 코드와 Claude 연결 기능을 바탕으로 만든 독립 경량 버전입니다. 업데이트는 새 앱으로 교체하는 방식입니다.").font(.callout)
+                    Text("sylearn/AIUsage의 조회 코드와 Claude 연결 기능을 바탕으로 만든 독립 경량 버전입니다.").font(.callout)
                     Link("QuotaBar · GitHub", destination: URL(string: "https://github.com/zjxps2007/quotabar")!)
                         .buttonStyle(.plain).foregroundStyle(AppTheme.accent)
                     Link(destination: URL(string: "https://github.com/sylearn/AIUsage")!) {

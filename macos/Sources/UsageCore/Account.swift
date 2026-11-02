@@ -141,6 +141,8 @@ public struct LiteSettings: Codable, Equatable, Sendable {
     /// Older installations keep automatic refresh enabled.
     public var autoRefresh: Bool?
     public var isAutoRefreshEnabled: Bool { autoRefresh ?? true }
+    public var automaticUpdates: Bool?
+    public var areAutomaticUpdatesEnabled: Bool { automaticUpdates ?? true }
     public var scanLocalLogs = true
     /// Missing in older settings, which follow the system appearance.
     public var appearance: AppearanceMode?

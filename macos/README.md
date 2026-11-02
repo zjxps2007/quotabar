@@ -4,7 +4,7 @@ macOS 14 이상에서 실행하는 메뉴바 사용량 추적기입니다. 아�
 
 ## macOS 실행
 
-[0.1.0 Apple Silicon 앱 ZIP](https://github.com/zjxps2007/quotabar/releases/download/v0.1.0/QuotaBar-0.1.0-macOS-arm64.zip)을 풀고 `QuotaBar.app`을 응용 프로그램 폴더에 복사한 뒤 실행합니다. macOS 14 이상이 필요하며, 기존 앱이 실행 중이면 먼저 종료하세요. 배포 앱은 ad-hoc 서명이며 Apple 공증과 자동 업데이트는 제공하지 않습니다.
+[0.1.0 Apple Silicon 앱 ZIP](https://github.com/zjxps2007/quotabar/releases/download/v0.1.0/QuotaBar-0.1.0-macOS-arm64.zip)을 풀고 `QuotaBar.app`을 응용 프로그램 폴더에 복사한 뒤 실행합니다. macOS 14 이상이 필요하며, 기존 앱이 실행 중이면 먼저 종료하세요. 배포 앱은 ad-hoc 서명이며 Apple 공증을 받지 않았습니다. 공개된 0.1.0에는 자동 업데이트가 없고 개발 버전부터 지원합니다. [자동 업데이트 안내](../docs/AUTOMATIC_UPDATES.md)
 
 소스에서 빌드하려면 다음 명령을 사용합니다.
 
