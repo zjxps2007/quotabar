@@ -4,7 +4,7 @@ macOS 14 이상에서 실행하는 메뉴바 사용량 추적기입니다. 아�
 
 ## macOS 실행
 
-[0.1.2 Apple Silicon 앱 ZIP](https://github.com/zjxps2007/quotabar/releases/download/v0.1.2/QuotaBar-0.1.2-macOS-arm64.zip)을 풀고 `QuotaBar.app`을 응용 프로그램 폴더에 복사한 뒤 실행합니다. macOS 14 이상이 필요하며, 기존 앱이 실행 중이면 먼저 종료하세요. 배포 앱은 ad-hoc 서명이며 Apple 공증을 받지 않았습니다. 0.1.0 사용자는 최신 버전을 한 번 직접 설치해야 하며, 0.1.1부터 자동 업데이트를 지원합니다. [자동 업데이트 안내](../docs/AUTOMATIC_UPDATES.md)
+[0.1.3 Apple Silicon 앱 ZIP](https://github.com/zjxps2007/quotabar/releases/download/v0.1.3/QuotaBar-0.1.3-macOS-arm64.zip)을 풀고 `QuotaBar.app`을 응용 프로그램 폴더에 복사한 뒤 실행합니다. macOS 14 이상이 필요하며, 기존 앱이 실행 중이면 먼저 종료하세요. 배포 앱은 ad-hoc 서명이며 Apple 공증을 받지 않았습니다. 0.1.0 사용자는 최신 버전을 한 번 직접 설치해야 하며, 0.1.1부터 자동 업데이트를 지원합니다. [자동 업데이트 안내](../docs/AUTOMATIC_UPDATES.md)
 
 소스에서 빌드하려면 다음 명령을 사용합니다.
 
@@ -28,6 +28,10 @@ open -n "artifacts/QuotaBar.app" --args --demo
 ### AIUsage Lite에서 업데이트
 
 프리뷰 0.2.2에서 앱 이름을 **QuotaBar**로 변경했으며 정식 릴리즈는 **0.1.0**부터 시작합니다. 이전 앱을 종료한 뒤 `QuotaBar.app`을 실행하세요. 계정·로그인·설정·중복 실행 잠금을 유지하기 위해 앱 식별자 `com.aiusage.lite`와 기존 데이터 폴더를 계속 사용합니다. Codex와 Gemini 계정을 다시 가져올 필요는 없습니다. Claude 연결은 실행 파일 경로를 사용하므로 새 앱에서 같은 CLI 설정 폴더를 한 번 다시 연결하세요.
+
+## 0.1.1·0.1.2에서 업데이트
+
+기존 macOS 설치기는 다운로드 폴더의 URL 표현 차이로 설치를 거부할 수 있습니다. **0.1.3 앱 ZIP을 한 번 직접 설치**하면 수정된 설치기가 적용됩니다. 계정과 설정은 기존 위치에 유지되며, 이후에는 앱의 자동 업데이트를 사용할 수 있습니다. Windows 설치기는 이 오류의 영향을 받지 않습니다.
 
 ## macOS 유지 기능
 

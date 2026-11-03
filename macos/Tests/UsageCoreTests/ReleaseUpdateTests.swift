@@ -73,6 +73,23 @@ struct ReleaseUpdateTests {
         #expect(throws: (any Error).self) { try UpdateSignature.verify(manifest: manifest, signature: signature, publicKeyPEM: key, release: mismatched, currentVersion: "0.1.0") }
     }
 
+    @Test func stagedDirectorySurvivesInstallerJobRoundTrip() throws {
+        let release = try #require(try ReleaseFeed.parse(fixture("update-release.json"), platform: .macOSArm64))
+        let key = try String(contentsOf: root.appendingPathComponent("update-test-public.pem"), encoding: .utf8)
+        let verified = try UpdateSignature.verify(manifest: fixture("update-manifest.json"),
+            signature: fixture("update-manifest.sig"), publicKeyPEM: key, release: release, currentVersion: "0.1.0")
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("QuotaBar update \(UUID().uuidString)", isDirectory: false)
+        #expect(!directory.hasDirectoryPath)
+        let staged = StagedUpdate(update: verified, directory: directory)
+        let copy = try JSONDecoder().decode(StagedUpdate.self, from: JSONEncoder().encode(staged))
+        let job = copy.directory.appendingPathComponent("install.json")
+        #expect(copy.directory == job.deletingLastPathComponent())
+        #expect(copy.archive.deletingLastPathComponent() == copy.directory)
+        #expect(copy.directory.path == directory.path)
+        #expect(copy.directory != directory.appendingPathComponent("another", isDirectory: true))
+    }
+
     @Test func downloadedBytesMustMatchSignedSizeAndDigest() throws {
         let file = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: file) }
