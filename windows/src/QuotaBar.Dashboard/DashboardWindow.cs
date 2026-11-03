@@ -256,7 +256,7 @@ internal sealed partial class DashboardWindow : Window
         var titles = new StackPanel();
         titles.Children.Add(Text(route == "accounts" ? "Providers & Accounts" : route == "settings" ? "설정" : "Dashboard", 25, true));
         var subtitle = Caption(route == "accounts" ? "계정 연결과 로그인, 모니터링 상태를 관리하세요."
-            : route == "settings" ? "화면 모드, 작업 표시줄과 트레이 표시, 조회 방식을 설정하세요." : "남은 사용량과 활동을 확인하세요.");
+            : route == "settings" ? "화면 표시, 모니터링, 앱 실행과 업데이트를 설정하세요." : "남은 사용량과 활동을 확인하세요.");
         subtitle.Margin = new Thickness(0, 5, 16, 0); titles.Children.Add(subtitle); header.Children.Add(titles);
         DockPanel.SetDock(header, Dock.Top); main.Children.Add(header);
         if (state.Demo)

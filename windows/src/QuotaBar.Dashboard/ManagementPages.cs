@@ -107,9 +107,14 @@ internal sealed partial class DashboardWindow
         Send("preferences", new { seconds = value.RefreshSeconds, autoRefresh = value.AutoRefresh, theme = value.Appearance,
             scan = value.ScanLocalLogs, taskbar = value.ShowTaskbarIcon, trayDisplay = value.TrayDisplayMode, automaticUpdates = value.AutomaticUpdates });
     }
+    private Border SettingsCard(UIElement content)
+    {
+        var card = Card(content); card.Margin = new Thickness(0, 0, 0, 20); return card;
+    }
     private void SettingsPage()
     {
-        var appearance = new StackPanel(); appearance.Children.Add(Text("화면 모드", 14, true));
+        var display = new StackPanel(); display.Children.Add(Text("화면 및 표시", 14, true));
+        var appearanceLabel = Text("화면 모드"); appearanceLabel.Margin = new Thickness(0, 18, 0, 0); display.Children.Add(appearanceLabel);
         var segments = new UniformGrid { Columns = 3, MaxWidth = 420, HorizontalAlignment = HorizontalAlignment.Left };
         foreach (var (key, label) in new[] { ("system", "시스템 설정 따르기"), ("light", "라이트"), ("dark", "다크") })
         {
@@ -118,15 +123,13 @@ internal sealed partial class DashboardWindow
             choice.BorderBrush = state.Settings.Appearance == key ? line : Brushes.Transparent; choice.Padding = new Thickness(14, 7, 14, 7);
             segments.Children.Add(choice);
         }
-        appearance.Children.Add(new Border { Background = track, CornerRadius = new CornerRadius(9), Padding = new Thickness(3),
-            HorizontalAlignment = HorizontalAlignment.Left, Child = segments, Margin = new Thickness(0, 14, 0, 14) });
-        appearance.Children.Add(Caption("앱 창에 바로 적용되며, 다음 실행에도 선택한 모드를 유지합니다."));
-        var appearanceCard = Card(appearance); appearanceCard.Margin = new Thickness(0, 0, 0, 20); body.Children.Add(appearanceCard);
+        display.Children.Add(new Border { Background = track, CornerRadius = new CornerRadius(9), Padding = new Thickness(3),
+            HorizontalAlignment = HorizontalAlignment.Left, Child = segments, Margin = new Thickness(0, 12, 0, 0) });
+        display.Children.Add(Divider());
 
-        var display = new StackPanel(); display.Children.Add(Text("작업 표시줄 및 트레이", 14, true));
         var taskbar = Switch("작업 표시줄에 앱 아이콘 표시", state!.Settings.ShowTaskbarIcon,
             value => Preferences(state!.Settings with { ShowTaskbarIcon = value }));
-        taskbar.Margin = new Thickness(0, 18, 0, 6); display.Children.Add(taskbar);
+        taskbar.Margin = new Thickness(0, 0, 0, 6); display.Children.Add(taskbar);
         display.Children.Add(Caption("끄면 트레이에서 Dashboard와 설정을 열 수 있습니다.")); display.Children.Add(Divider());
         display.Children.Add(Text("트레이 표시", 12));
         var modes = new UniformGrid { Columns = 2, HorizontalAlignment = HorizontalAlignment.Left };
@@ -147,11 +150,11 @@ internal sealed partial class DashboardWindow
         display.Children.Add(Caption("숫자는 표시 대상 계정·기간 중 가장 낮은 잔여 비율(%)입니다. 작은 아이콘에서는 % 기호를 생략합니다."));
         var trayNote = Caption("Dashboard에서 표시할 계정을 선택하세요. 마우스를 올리거나 클릭하면 계정별 내역을 확인할 수 있습니다.");
         trayNote.Margin = new Thickness(0, 6, 0, 0); display.Children.Add(trayNote);
-        var displayCard = Card(display); displayCard.Margin = new Thickness(0, 0, 0, 20); body.Children.Add(displayCard);
+        body.Children.Add(SettingsCard(display));
 
         var monitoring = new StackPanel(); monitoring.Children.Add(Text("모니터링", 14, true));
         var automatic = Switch("자동 새로고침", state.Settings.AutoRefresh, value => Preferences(state!.Settings with { AutoRefresh = value }));
-        automatic.Margin = new Thickness(0, 18, 0, 0); monitoring.Children.Add(automatic);
+        automatic.Margin = new Thickness(0, 0, 16, 0); automatic.VerticalAlignment = VerticalAlignment.Center;
         var intervalRow = new DockPanel { Margin = new Thickness(0, 18, 0, 0) };
         var interval = new ComboBox { Width = 130, VerticalAlignment = VerticalAlignment.Center };
         int[] intervals = RefreshSchedule.Intervals.ToArray();
@@ -161,39 +164,40 @@ internal sealed partial class DashboardWindow
         AutomationProperties.SetName(interval, "자동 새로고침 간격");
         interval.SelectionChanged += (_, _) => Preferences(state!.Settings with { RefreshSeconds = intervals[Math.Max(0, interval.SelectedIndex)] });
         DockPanel.SetDock(interval, Dock.Right); intervalRow.Children.Add(interval);
-        var intervalLabel = new StackPanel(); intervalLabel.Children.Add(Text("조회 간격")); intervalLabel.Children.Add(Caption("창을 닫아도 선택한 주기로 계정 사용량을 조회합니다."));
-        intervalRow.Children.Add(intervalLabel); monitoring.Children.Add(intervalRow);
-        var automaticNote = Caption("꺼도 앱 시작 시 한 번 조회하며, 수동 새로고침은 계속 사용할 수 있습니다.");
+        intervalRow.Children.Add(automatic); monitoring.Children.Add(intervalRow);
+        var automaticNote = Caption("창을 닫아도 선택한 주기로 조회합니다. 꺼도 앱 시작 시 조회와 수동 새로고침은 사용할 수 있습니다.");
         automaticNote.Margin = new Thickness(0, 10, 0, 0); monitoring.Children.Add(automaticNote); monitoring.Children.Add(Divider());
         monitoring.Children.Add(Switch("로컬 토큰 통계", state.Settings.ScanLocalLogs, value => Preferences(state!.Settings with { ScanLocalLogs = value })));
         var scanNote = Caption("Dashboard가 열려 있을 때만 로그를 확인합니다. 대화 본문은 저장하지 않습니다."); scanNote.Margin = new Thickness(0, 6, 0, 0); monitoring.Children.Add(scanNote);
-        var monitoringCard = Card(monitoring); monitoringCard.Margin = new Thickness(0, 0, 0, 20); body.Children.Add(monitoringCard);
+        body.Children.Add(SettingsCard(monitoring));
 
-        var startup = new StackPanel(); startup.Children.Add(Text("시작", 14, true));
-        var login = Switch("로그인 시 자동 실행", state.LaunchAtLogin == LaunchAtLoginState.Enabled, value => Send("startup", value));
-        login.IsEnabled = state.LaunchAtLogin != LaunchAtLoginState.Unavailable;
-        login.Margin = new Thickness(0, 18, 0, 6); startup.Children.Add(login);
-        startup.Children.Add(Caption("Windows 재시작 후 로그인하면 Dashboard를 열지 않고 트레이에서 시작합니다."));
-        var startupNote = Caption(state.LaunchAtLogin == LaunchAtLoginState.Unavailable
-            ? "설치된 QuotaBar 앱에서 자동 실행을 설정하세요."
-            : "Windows의 시작 앱 설정에서도 QuotaBar를 허용해야 합니다. 앱을 옮겼다면 이 옵션을 다시 켜세요.");
-        startupNote.Margin = new Thickness(0, 6, 0, 0); startup.Children.Add(startupNote);
-        startup.Children.Add(Link("Windows 시작 앱 설정 열기", () => Send("startup-settings", true)));
-        var startupCard = Card(startup); startupCard.Margin = new Thickness(0, 0, 0, 20); body.Children.Add(startupCard);
-
-        AppUpdateSettings();
-        var about = new StackPanel(); about.Children.Add(Text("QuotaBar", 14, true));
-        about.Children.Add(Caption($"Windows · 버전 {Brand.Version}")); about.Children.Add(Divider());
-        about.Children.Add(Caption("연결 정보는 현재 Windows 사용자만 열 수 있도록 보호됩니다."));
-        if (state.DataDirectory != null) { var data = Caption("데이터 위치: " + state.DataDirectory); data.Margin = new Thickness(0, 6, 0, 0); about.Children.Add(data); }
-        body.Children.Add(Card(about));
+        body.Children.Add(SettingsCard(AppSettings()));
+        var storage = new StackPanel(); storage.Children.Add(Text("데이터 저장", 14, true));
+        var storageNote = Caption("연결 정보는 현재 Windows 사용자만 열 수 있도록 보호됩니다.");
+        storageNote.Margin = new Thickness(0, 14, 0, 0); storage.Children.Add(storageNote);
+        if (state.DataDirectory != null) { var data = Caption("데이터 위치: " + state.DataDirectory); data.Margin = new Thickness(0, 6, 0, 0); storage.Children.Add(data); }
+        body.Children.Add(SettingsCard(storage));
     }
 
-    private void AppUpdateSettings()
+    private StackPanel AppSettings()
     {
         var update = state!.AppUpdate ?? new();
         bool busy = update.Phase is UpdatePhase.Checking or UpdatePhase.Downloading or UpdatePhase.Installing;
-        var content = new StackPanel(); content.Children.Add(Text("앱 업데이트", 14, true));
+        var content = new StackPanel();
+        var heading = new DockPanel();
+        var version = Caption($"Windows · 버전 {Brand.Version}"); DockPanel.SetDock(version, Dock.Right); heading.Children.Add(version);
+        heading.Children.Add(Row(AppLogo(24), Text("QuotaBar", 14, true))); content.Children.Add(heading);
+        var login = Switch("로그인 시 자동 실행", state.LaunchAtLogin == LaunchAtLoginState.Enabled, value => Send("startup", value));
+        login.IsEnabled = state.LaunchAtLogin != LaunchAtLoginState.Unavailable;
+        login.Margin = new Thickness(0, 18, 0, 6); content.Children.Add(login);
+        content.Children.Add(Caption("Windows 재시작 후 로그인하면 Dashboard를 열지 않고 트레이에서 시작합니다."));
+        var startupNote = Caption(state.LaunchAtLogin == LaunchAtLoginState.Unavailable
+            ? "설치된 QuotaBar 앱에서 자동 실행을 설정하세요."
+            : "Windows의 시작 앱 설정에서도 QuotaBar를 허용해야 합니다. 앱을 옮겼다면 이 옵션을 다시 켜세요.");
+        startupNote.Margin = new Thickness(0, 6, 0, 0); content.Children.Add(startupNote);
+        content.Children.Add(Link("Windows 시작 앱 설정 열기", () => Send("startup-settings", true)));
+        content.Children.Add(Divider());
+        content.Children.Add(Text("앱 업데이트", 14, true));
         var automatic = Switch("자동 업데이트", state.Settings.AutomaticUpdates,
             value => Preferences(state!.Settings with { AutomaticUpdates = value }));
         automatic.Margin = new Thickness(0, 18, 0, 6); content.Children.Add(automatic);
@@ -203,12 +207,12 @@ internal sealed partial class DashboardWindow
             UpdatePhase.Checking => "새 버전 확인 중…", UpdatePhase.Current => "최신 버전입니다.",
             UpdatePhase.Available => $"버전 {update.Version} 업데이트가 있습니다.",
             UpdatePhase.Downloading => $"버전 {update.Version} 다운로드 중 · {update.Progress ?? 0}%",
-            UpdatePhase.Ready => $"버전 {update.Version} 설치 준비 완료", UpdatePhase.Installing => "설치를 준비하고 있습니다…",
-            UpdatePhase.Failed => "업데이트를 완료하지 못했습니다.", _ => $"현재 버전 {Brand.Version}"
+            UpdatePhase.Ready => state.Settings.AutomaticUpdates ? $"Dashboard를 닫으면 {update.Version}을 설치하고 다시 시작합니다." : $"버전 {update.Version} 설치 준비 완료",
+            UpdatePhase.Installing => "설치를 준비하고 있습니다…", UpdatePhase.Failed => "업데이트를 완료하지 못했습니다.",
+            _ => state.Settings.AutomaticUpdates ? "앱 시작 후와 하루에 한 번 새 정식 버전을 확인합니다." : "아래에서 새 버전을 직접 확인할 수 있습니다."
         };
+        if (!string.IsNullOrWhiteSpace(update.Message)) status = update.Message;
         content.Children.Add(Text(status, 12, color: update.Phase == UpdatePhase.Failed ? warning : ink));
-        if (!string.IsNullOrWhiteSpace(update.Message))
-        { var note = Caption(update.Message); note.Margin = new Thickness(0, 6, 0, 0); content.Children.Add(note); }
         if (update.Phase == UpdatePhase.Downloading)
             content.Children.Add(new ProgressBar { Value = update.Progress ?? 0, Maximum = 100, Height = 5, Margin = new Thickness(0, 12, 0, 0) });
         var actions = new WrapPanel { Margin = new Thickness(0, 16, 0, 0) };
@@ -217,6 +221,6 @@ internal sealed partial class DashboardWindow
         if (update.Phase is UpdatePhase.Available or UpdatePhase.Ready)
         { var install = Button("설치 후 다시 시작", () => Send("install-app-update", true)); install.IsEnabled = !state.Demo && !state.LoggingIn; actions.Children.Add(install); }
         content.Children.Add(actions);
-        var card = Card(content); card.Margin = new Thickness(0, 0, 0, 20); body.Children.Add(card);
+        return content;
     }
 }

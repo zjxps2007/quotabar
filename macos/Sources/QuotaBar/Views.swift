@@ -127,7 +127,7 @@ struct RootView: View {
             VStack(alignment: .leading, spacing: 5) {
                 Text(store.route == "accounts" ? "Providers & Accounts" : store.route == "settings" ? "설정" : "Dashboard")
                     .font(.system(size: 25, weight: .bold))
-                Text(store.route == "accounts" ? "계정 연결과 로그인, 모니터링 상태를 관리하세요." : store.route == "settings" ? "화면 모드, Dock과 상단바 표시, 조회 방식을 설정하세요." : "남은 사용량과 활동을 확인하세요.")
+                Text(store.route == "accounts" ? "계정 연결과 로그인, 모니터링 상태를 관리하세요." : store.route == "settings" ? "화면 표시, 모니터링, 앱 실행과 업데이트를 설정하세요." : "남은 사용량과 활동을 확인하세요.")
                     .font(.system(size: 12)).foregroundStyle(.secondary)
             }
             Spacer()
@@ -599,18 +599,15 @@ struct PreferencesView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
-                VStack(alignment: .leading, spacing: 14) {
-                    Label("화면 모드", systemImage: "circle.lefthalf.filled").font(.headline)
+                VStack(alignment: .leading, spacing: 18) {
+                    Label("화면 및 표시", systemImage: "menubar.dock.rectangle").font(.headline)
+                    Text("화면 모드")
                     Picker("화면 모드", selection: Binding(get: { store.settings.selectedAppearance }, set: store.setAppearance)) {
                         Text("시스템 설정 따르기").tag(AppearanceMode.system)
                         Text("라이트").tag(AppearanceMode.light)
                         Text("다크").tag(AppearanceMode.dark)
                     }.pickerStyle(.segmented).labelsHidden().frame(maxWidth: 420)
-                    Text("앱 창과 상단바 팝업에 바로 적용되며, 다음 실행에도 선택한 모드를 유지합니다.")
-                        .font(.caption).foregroundStyle(.secondary)
-                }.frame(maxWidth: .infinity, alignment: .leading).card()
-                VStack(alignment: .leading, spacing: 18) {
-                    Label("Dock 및 상단바", systemImage: "menubar.dock.rectangle").font(.headline)
+                    Divider()
                     Toggle(isOn: Binding(get: { store.settings.isDockIconVisible }, set: store.setDockIconVisible)) {
                         VStack(alignment: .leading, spacing: 4) {
                             Text("Dock에 앱 아이콘 표시")
@@ -644,43 +641,23 @@ struct PreferencesView: View {
                 }.frame(maxWidth: .infinity, alignment: .leading).card()
                 VStack(alignment: .leading, spacing: 18) {
                     Label("모니터링", systemImage: "arrow.triangle.2.circlepath").font(.headline)
-                    Toggle("자동 새로고침", isOn: Binding(get: { store.settings.isAutoRefreshEnabled }, set: store.setAutoRefresh))
-                        .toggleStyle(.switch)
-                    HStack {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("조회 간격")
-                            Text("창을 닫아도 선택한 주기로 계정 사용량을 조회합니다.").font(.caption).foregroundStyle(.secondary)
-                        }
-                        Spacer()
-                        Picker("조회 간격", selection: Binding(get: { store.settings.refreshSeconds }, set: store.setInterval)) {
+                    HStack(spacing: 12) {
+                        Toggle("자동 새로고침", isOn: Binding(get: { store.settings.isAutoRefreshEnabled }, set: store.setAutoRefresh))
+                            .toggleStyle(.switch)
+                        Picker("자동 새로고침 간격", selection: Binding(get: { store.settings.refreshSeconds }, set: store.setInterval)) {
                             ForEach(RefreshSchedule.intervals, id: \.self) { seconds in
                                 Text("\(seconds / 60)분").tag(seconds)
                             }
                         }.labelsHidden().frame(width: 130).disabled(!store.settings.isAutoRefreshEnabled)
                     }
-                    Text("자동 새로고침을 꺼도 앱 시작 시 한 번 조회하며, 수동 새로고침은 계속 사용할 수 있습니다.")
+                    Text("창을 닫아도 선택한 주기로 조회합니다. 꺼도 앱 시작 시 조회와 수동 새로고침은 사용할 수 있습니다.")
                         .font(.caption).foregroundStyle(.secondary)
                     Divider()
                     Toggle(isOn: Binding(get: { store.settings.scanLocalLogs }, set: store.setScanLogs)) {
                         VStack(alignment: .leading, spacing: 4) { Text("로컬 토큰 통계"); Text("Dashboard가 열려 있을 때만 로그를 확인합니다. 대화 본문은 저장하지 않습니다.").font(.caption).foregroundStyle(.secondary) }
                     }.toggleStyle(.switch)
                 }.frame(maxWidth: .infinity, alignment: .leading).card()
-                VStack(alignment: .leading, spacing: 14) {
-                    Label("시작", systemImage: "power").font(.headline)
-                    Toggle("로그인 시 자동 실행", isOn: Binding(get: { store.launchAtLogin.isRegistered }, set: store.setLaunchAtLogin))
-                        .toggleStyle(.switch).disabled(store.launchAtLogin == .unavailable)
-                    Text("Mac 재시동 후 로그인하면 Dashboard를 열지 않고 상단바에서 시작합니다.")
-                        .font(.caption).foregroundStyle(.secondary)
-                    if store.launchAtLogin == .requiresApproval {
-                        Text("macOS 로그인 항목 설정에서 QuotaBar의 실행을 허용해 주세요.")
-                            .font(.caption).foregroundStyle(.secondary)
-                        Button("로그인 항목 설정 열기", action: store.openLoginItemsSettings)
-                    } else if store.launchAtLogin == .unavailable {
-                        Text("빌드된 QuotaBar.app에서 자동 실행을 설정할 수 있습니다.")
-                            .font(.caption).foregroundStyle(.secondary)
-                    }
-                }.frame(maxWidth: .infinity, alignment: .leading).card()
-                AppUpdateSettings(store: store)
+                AppSettings(store: store)
                 VStack(alignment: .leading, spacing: 12) {
                     Label("데이터 저장", systemImage: "lock.shield").font(.headline)
                     Text("Codex · Gemini 로그인은 이 Mac의 사용자 전용 파일에 저장됩니다. 키체인 승인창을 사용하지 않으며, 별도 암호화 대신 파일 접근 권한으로 보호됩니다.")
@@ -688,21 +665,6 @@ struct PreferencesView: View {
                     Text(store.root.path).font(.system(size: 11, design: .monospaced)).textSelection(.enabled)
                     Button("데이터 폴더 열기") { NSWorkspace.shared.open(store.root) }.disabled(store.demo)
                 }.font(.callout).frame(maxWidth: .infinity, alignment: .leading).card()
-                VStack(alignment: .leading, spacing: 12) {
-                    HStack {
-                        AppLogo(size: 24)
-                        Text("QuotaBar").font(.headline)
-                        Spacer()
-                        Text("버전 \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "—")")
-                            .font(.caption).foregroundStyle(.secondary)
-                    }
-                    Text("sylearn/AIUsage의 조회 코드와 Claude 연결 기능을 바탕으로 만든 독립 경량 버전입니다.").font(.callout)
-                    Link("QuotaBar · GitHub", destination: URL(string: "https://github.com/zjxps2007/quotabar")!)
-                        .buttonStyle(.plain).foregroundStyle(AppTheme.accent)
-                    Link(destination: URL(string: "https://github.com/sylearn/AIUsage")!) {
-                        Text("원본 프로젝트 · Apache 2.0").foregroundStyle(AppTheme.accent).underline()
-                    }.buttonStyle(.plain)
-                }.frame(maxWidth: .infinity, alignment: .leading).card()
             }.padding(.horizontal, 28).padding(.bottom, 28)
         }
         .onAppear { store.refreshLaunchAtLogin() }
