@@ -35,17 +35,8 @@ struct AppSettings: View {
             Divider()
             updates
             Divider()
-            VStack(alignment: .leading, spacing: 12) {
-                Text("sylearn/AIUsage의 조회 코드와 Claude 연결 기능을 바탕으로 만든 독립 경량 버전입니다.")
-                    .font(.caption).foregroundStyle(.secondary)
-                HStack(spacing: 16) {
-                    Link("QuotaBar · GitHub", destination: URL(string: "https://github.com/zjxps2007/quotabar")!)
-                        .buttonStyle(.plain).foregroundStyle(AppTheme.accent)
-                    Link(destination: URL(string: "https://github.com/sylearn/AIUsage")!) {
-                        Text("원본 프로젝트 · Apache 2.0").foregroundStyle(AppTheme.accent).underline()
-                    }.buttonStyle(.plain)
-                }
-            }
+            Link("QuotaBar · GitHub", destination: URL(string: "https://github.com/zjxps2007/quotabar")!)
+                .buttonStyle(.plain).foregroundStyle(AppTheme.accent)
         }.frame(maxWidth: .infinity, alignment: .leading).card()
     }
 

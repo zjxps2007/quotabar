@@ -665,6 +665,7 @@ struct PreferencesView: View {
                     Text(store.root.path).font(.system(size: 11, design: .monospaced)).textSelection(.enabled)
                     Button("데이터 폴더 열기") { NSWorkspace.shared.open(store.root) }.disabled(store.demo)
                 }.font(.callout).frame(maxWidth: .infinity, alignment: .leading).card()
+                OpenSourceLicensesSettings()
             }.padding(.horizontal, 28).padding(.bottom, 28)
         }
         .onAppear { store.refreshLaunchAtLogin() }

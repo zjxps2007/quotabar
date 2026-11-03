@@ -43,6 +43,7 @@ if [[ "$configuration" == "release" ]]; then strip -x "$app/Contents/MacOS/Quota
 helper="$app/Contents/Helpers/QuotaBar Dashboard.app"
 mkdir -p "$helper/Contents/MacOS" "$helper/Contents/Resources"
 cp "$app/Contents/MacOS/QuotaBar" "$helper/Contents/MacOS/QuotaBar"
+cp ../LICENSE ../NOTICE "$helper/Contents/Resources/"
 cp -R "$binary_dir/QuotaBar_QuotaBar.bundle" "$helper/Contents/Resources/"
 cp "$app/Contents/Resources/AppIcon-4.icns" "$helper/Contents/Resources/"
 cat > "$helper/Contents/Info.plist" <<PLIST

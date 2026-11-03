@@ -177,6 +177,7 @@ internal sealed partial class DashboardWindow
         storageNote.Margin = new Thickness(0, 14, 0, 0); storage.Children.Add(storageNote);
         if (state.DataDirectory != null) { var data = Caption("데이터 위치: " + state.DataDirectory); data.Margin = new Thickness(0, 6, 0, 0); storage.Children.Add(data); }
         body.Children.Add(SettingsCard(storage));
+        body.Children.Add(SettingsCard(OpenSourceLicensesSettings()));
     }
 
     private StackPanel AppSettings()
