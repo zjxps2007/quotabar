@@ -63,6 +63,7 @@ extension View { func card() -> some View { modifier(CardSurface()) } }
 
 struct RootView: View {
     @EnvironmentObject var store: MonitorStore
+    private let appVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "dev"
     var body: some View {
         HStack(spacing: 0) {
             sidebar
@@ -110,6 +111,10 @@ struct RootView: View {
                 nav("settings", "설정", "slider.horizontal.3")
             }
             Spacer()
+            Text("v\(appVersion)")
+                .font(.system(size: 11)).foregroundStyle(.secondary)
+                .padding(.leading, 12)
+                .accessibilityLabel("앱 버전 \(appVersion)")
         }.padding(.horizontal, 18).padding(.bottom, 20).frame(width: 210)
             .background(AppTheme.sidebarBackground)
     }

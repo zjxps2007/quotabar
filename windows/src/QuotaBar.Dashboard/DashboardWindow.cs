@@ -230,7 +230,11 @@ internal sealed partial class DashboardWindow : Window
         int caret = searchBox?.CaretIndex ?? 0; searchBox = null; activitySection = null; Theme();
         var layout = new Grid { Background = backdrop };
         layout.ColumnDefinitions.Add(new() { Width = new GridLength(210) }); layout.ColumnDefinitions.Add(new());
-        var rail = new StackPanel { Margin = new Thickness(18, 34, 18, 20) };
+        var navigation = new DockPanel { Margin = new Thickness(18, 34, 18, 20) };
+        var version = Caption($"v{Brand.Version}"); version.Margin = new Thickness(12, 16, 0, 0);
+        AutomationProperties.SetName(version, $"앱 버전 {Brand.Version}");
+        DockPanel.SetDock(version, Dock.Bottom); navigation.Children.Add(version);
+        var rail = new StackPanel();
         rail.Children.Add(Row(AppLogo(), Text("QuotaBar", 18, true)));
         var workspace = Text("WORKSPACE", 9, true, muted); workspace.Margin = new Thickness(12, 30, 0, 12); rail.Children.Add(workspace);
         foreach (var (key, label) in new[] { ("dashboard", "Dashboard"), ("accounts", "Providers & Accounts"), ("settings", "설정") })
@@ -243,7 +247,8 @@ internal sealed partial class DashboardWindow : Window
             nav.Background = selected ? accent : Brushes.Transparent;
             rail.Children.Add(nav);
         }
-        layout.Children.Add(new Border { Background = sidebar, BorderBrush = line, BorderThickness = new Thickness(0, 0, 1, 0), Child = rail });
+        navigation.Children.Add(rail);
+        layout.Children.Add(new Border { Background = sidebar, BorderBrush = line, BorderThickness = new Thickness(0, 0, 1, 0), Child = navigation });
         var main = new DockPanel(); Grid.SetColumn(main, 1); layout.Children.Add(main); Content = layout;
         var header = new DockPanel { Margin = new Thickness(28, 32, 28, 22) };
         if (route != "settings")
