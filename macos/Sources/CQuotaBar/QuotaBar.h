@@ -4,6 +4,7 @@
 #include <stddef.h>
 typedef struct QBScanner QBScanner;
 typedef struct QBCancel QBCancel;
+typedef struct QBLogin QBLogin;
 
 QBScanner *qb_scanner_new(void);
 void qb_scanner_free(QBScanner *);
@@ -26,4 +27,9 @@ int32_t qb_vault_delete(const char *directory, const char *uuid);
 void qb_secret_free(uint8_t *data, size_t length);
 int32_t qb_credentials(const uint8_t *data, size_t length, int32_t provider, int32_t mode, uint8_t **output, size_t *outputLength);
 int32_t qb_rotate_credentials(const uint8_t *current, size_t currentLength, const uint8_t *response, size_t responseLength, int64_t nowMicros, uint8_t **output, size_t *outputLength);
+char *qb_mac_find_codex(const char *searchPath, const char *home);
+char *qb_mac_login_url(const char *text);
+QBLogin *qb_mac_login_start(const char *executable, const char *temporaryDirectory, double timeoutSeconds);
+int32_t qb_mac_login_poll(QBLogin *attempt, uint8_t **output, size_t *length);
+void qb_mac_login_close(QBLogin *attempt, int32_t immediately);
 #endif

@@ -14,20 +14,12 @@ public sealed class LocalUsageScanner : IDisposable
     {
         protected override bool ReleaseHandle() { FreeScanner(handle); return true; }
     }
-    private sealed class CancelHandle() : SafeHandleZeroOrMinusOneIsInvalid(true)
-    {
-        protected override bool ReleaseHandle() { FreeCancel(handle); return true; }
-    }
-
     [DllImport(Library, EntryPoint = "qb_scanner_new")] private static extern ScannerHandle CreateScanner();
     [DllImport(Library, EntryPoint = "qb_scanner_free")] private static extern void FreeScanner(IntPtr scanner);
     [DllImport(Library, EntryPoint = "qb_scanner_release_cache")] private static extern void Release(ScannerHandle scanner);
-    [DllImport(Library, EntryPoint = "qb_cancel_new")] private static extern CancelHandle CreateCancel();
-    [DllImport(Library, EntryPoint = "qb_cancel_free")] private static extern void FreeCancel(IntPtr cancel);
-    [DllImport(Library, EntryPoint = "qb_cancel_set")] private static extern void Cancel(CancelHandle cancel);
     [DllImport(Library, EntryPoint = "qb_string_free")] private static extern void FreeString(IntPtr value);
     [DllImport(Library, EntryPoint = "qb_scanner_scan")]
-    private static extern int ScanNative(ScannerHandle handle, CancelHandle cancel,
+    private static extern int ScanNative(ScannerHandle handle, NativeCancellation cancel,
         [MarshalAs(UnmanagedType.LPUTF8Str)] string request, out IntPtr result);
 
     public void ReleaseCache() => Release(handle);
@@ -49,8 +41,8 @@ public sealed class LocalUsageScanner : IDisposable
         }
         string request = Encoding.UTF8.GetString(Json.Bytes(new { codexRoots, claudeRoots, historyDays, timeZone, offsetSeconds,
             nowMicros = (clock.UtcTicks - DateTimeOffset.UnixEpoch.UtcTicks) / 10 }));
-        using var cancel = CreateCancel();
-        using var registration = token.Register(() => Cancel(cancel));
+        using var cancel = NativeCancellation.Create();
+        using var registration = token.Register(cancel.Cancel);
         int status = ScanNative(handle, cancel, request, out var json);
         if (status == 1) throw new OperationCanceledException(token);
         if (status != 0 || json == IntPtr.Zero) throw new IOException("사용량 기록을 읽을 수 없습니다.");

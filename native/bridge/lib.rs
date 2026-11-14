@@ -1,9 +1,13 @@
 //! C entry points used by the platform application hosts.
 mod credentials;
 mod login_item;
+#[cfg(target_os = "macos")]
+mod mac_login;
 #[cfg(windows)]
 mod notification_icon;
 mod vault;
+#[cfg(windows)]
+mod windows_login;
 #[cfg(windows)]
 #[unsafe(no_mangle)]
 /// Draws straight-alpha BGRA into the caller's square icon buffer.
