@@ -4,138 +4,28 @@ import Foundation
 
 public struct GeminiProvider: Sendable {
     let timeoutSeconds: Double
-    static let quotaURL = "https://cloudcode-pa.googleapis.com/v1internal:retrieveUserQuota"
-    static let loadCodeAssistURL = "https://cloudcode-pa.googleapis.com/v1internal:loadCodeAssist"
-    static let projectsURL = "https://cloudresourcemanager.googleapis.com/v1/projects"
     public init(timeoutSeconds: Double = 15) { self.timeoutSeconds = timeoutSeconds }
 
     /// CLI-managed OAuth: no token rotation or writes to the user's login files.
     public func fetch(authData: Data) async throws -> ProviderUsage {
-        let creds = try loadCredentials(data: authData)
-        guard let token = creds.accessToken, !token.isEmpty else {
-            throw ProviderError("not_logged_in", "Gemini login has no access token. Sign in through Gemini CLI and reconnect.")
-        }
-        let assist = await loadCodeAssist(accessToken: token)
+        let creds = try NativeCredentials.decode(NativeProviderRequest.Credentials.self, data: authData, provider: .gemini, mode: 4)
+        let assist = await discover(.geminiAssist, token: creds.accessToken)
         let project: String?
-        if let value = assist.projectId { project = value }
-        else { project = await discoverProjectId(accessToken: token) }
-        let response = try await retrieveQuota(accessToken: token, projectId: project)
+        if let id = assist?.project { project = id }
+        else { project = await discover(.geminiProjects, token: creds.accessToken)?.project }
+        let response = try await retrieveQuota(accessToken: creds.accessToken, projectId: project)
         return try NativeQuota.parse(provider: "gemini", response: response, source: SourceInfo(mode: "read-only", type: "gemini-cli"),
-            email: creds.accountEmail, project: project, tier: assist.tierId)
-    }
-    private struct GeminiCredentials {
-        let accessToken: String?
-        let idToken: String?
-        let refreshToken: String?
-        let expiryDate: Date?
-        let directEmail: String?
-        let clientId: String?
-        let clientSecret: String?
-
-        var accountEmail: String? {
-            if let jwtEmail = jwtEmail() { return jwtEmail }
-            return directEmail
-        }
-
-        private func jwtEmail() -> String? {
-            guard let token = idToken, token.contains(".") else { return nil }
-            let parts = token.split(separator: ".")
-            guard parts.count >= 2 else { return nil }
-            var payload = String(parts[1])
-            let rem = payload.count % 4
-            if rem > 0 { payload += String(repeating: "=", count: 4 - rem) }
-            payload = payload.replacingOccurrences(of: "-", with: "+").replacingOccurrences(of: "_", with: "/")
-            guard let data = Data(base64Encoded: payload),
-                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
-            return json["email"] as? String
-        }
+            email: creds.email, project: project, tier: assist?.tier)
     }
 
-    private func loadCredentials(data: Data) throws -> GeminiCredentials {
-        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            throw ProviderError("invalid_credentials_file", "Gemini login must be a JSON object.")
-        }
-        let expiryDate: Date?
-        if let ed = json["expiry_date"] as? Double {
-            expiryDate = Date(timeIntervalSince1970: ed / 1000)
-        } else if let eds = json["expiry_date"] as? String, let ed = Double(eds) {
-            expiryDate = Date(timeIntervalSince1970: ed / 1000)
-        } else {
-            expiryDate = nil
-        }
-
-        return GeminiCredentials(
-            accessToken: json["access_token"] as? String,
-            idToken: json["id_token"] as? String,
-            refreshToken: json["refresh_token"] as? String,
-            expiryDate: expiryDate,
-            directEmail: json["email"] as? String,
-            clientId: json["client_id"] as? String,
-            clientSecret: json["client_secret"] as? String
-        )
-    }
-
-    // MARK: - API Requests
-
-    private struct CodeAssistInfo {
-        let tierId: String?
-        let projectId: String?
-    }
-
-    // These two are best-effort only — mirror JS where both failures are caught and return null
-    // Use short timeout so they don't eat into the quota fetch budget
-    private static let optionalRequestTimeout: Double = 5
-
-    private func loadCodeAssist(accessToken: String) async -> CodeAssistInfo {
-        guard let url = URL(string: Self.loadCodeAssistURL) else { return CodeAssistInfo(tierId: nil, projectId: nil) }
-        var request = URLRequest(url: url, timeoutInterval: Self.optionalRequestTimeout)
-        request.httpMethod = "POST"
-        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try? JSONSerialization.data(withJSONObject: [
-            "metadata": ["ideType": "GEMINI_CLI", "pluginType": "GEMINI"]
-        ])
-
-        guard let (data, _) = try? await QuotaHTTP.data(for: request),
-              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            return CodeAssistInfo(tierId: nil, projectId: nil)
-        }
-
-        let tierId = (json["currentTier"] as? [String: Any])?["id"] as? String
-        let projectId = normalizeProjectId(json["cloudaicompanionProject"])
-        return CodeAssistInfo(tierId: tierId, projectId: projectId)
-    }
-
-    private func discoverProjectId(accessToken: String) async -> String? {
-        guard let url = URL(string: Self.projectsURL) else { return nil }
-        var request = QuotaHTTP.request(url: url, timeout: Self.optionalRequestTimeout)
-        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
-
-        guard let (data, _) = try? await QuotaHTTP.data(for: request),
-              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let projects = json["projects"] as? [[String: Any]] else { return nil }
-
-        for project in projects {
-            if let id = project["projectId"] as? String {
-                if id.hasPrefix("gen-lang-client") { return id }
-                if let labels = project["labels"] as? [String: Any], labels["generative-language"] != nil { return id }
-            }
-        }
-        return nil
+    private func discover(_ endpoint: NativeProviderRequest.Endpoint, token: String) async -> NativeProviderRequest.Discovery? {
+        guard let request = try? NativeProviderRequest.make(endpoint, token: token, timeout: timeoutSeconds),
+              let (data, _) = try? await QuotaHTTP.data(for: request) else { return nil }
+        return try? NativeProviderRequest.discovery(data, list: endpoint == .geminiProjects)
     }
 
     private func retrieveQuota(accessToken: String, projectId: String?) async throws -> [String: Any] {
-        guard let url = URL(string: Self.quotaURL) else {
-            throw ProviderError("invalid_url", "Gemini quota URL is invalid.")
-        }
-        var request = URLRequest(url: url, timeoutInterval: timeoutSeconds)
-        request.httpMethod = "POST"
-        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        var body: [String: Any] = [:]
-        if let p = projectId { body["project"] = p }
-        request.httpBody = try? JSONSerialization.data(withJSONObject: body)
-
+        let request = try NativeProviderRequest.make(.geminiQuota, token: accessToken, project: projectId, timeout: timeoutSeconds)
         let (data, response) = try await QuotaHTTP.data(for: request)
         if let http = response as? HTTPURLResponse, (http.statusCode == 401 || http.statusCode == 403) {
             // 不是令牌问题：重新登录也无效，所以不能再提示用户重新认证，也不触发刷新重试。
@@ -166,14 +56,6 @@ public struct GeminiProvider: Sendable {
         let body = String(decoding: data, as: UTF8.self).lowercased()
         return body.contains("unsupported_client")
             || body.contains("no longer supported for gemini code assist for individuals")
-    }
-
-    private func normalizeProjectId(_ value: Any?) -> String? {
-        if let s = value as? String, !s.isEmpty { return s }
-        if let d = value as? [String: Any] {
-            return d["id"] as? String ?? d["projectId"] as? String
-        }
-        return nil
     }
 
 }

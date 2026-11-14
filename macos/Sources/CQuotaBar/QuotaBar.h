@@ -26,6 +26,7 @@ int32_t qb_vault_save(const char *directory, const char *uuid, const uint8_t *da
 int32_t qb_vault_delete(const char *directory, const char *uuid);
 void qb_secret_free(uint8_t *data, size_t length);
 int32_t qb_credentials(const uint8_t *data, size_t length, int32_t provider, int32_t mode, uint8_t **output, size_t *outputLength);
+int32_t qb_provider_request(int32_t mode, const uint8_t *data, size_t length, uint8_t **output, size_t *outputLength);
 int32_t qb_rotate_credentials(const uint8_t *current, size_t currentLength, const uint8_t *response, size_t responseLength, int64_t nowMicros, uint8_t **output, size_t *outputLength);
 char *qb_mac_find_codex(const char *searchPath, const char *home);
 char *qb_mac_login_url(const char *text);

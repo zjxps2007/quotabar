@@ -51,6 +51,34 @@ public static class Extended
             using var client = new ProviderClient(handler);
             await Task.WhenAll(client.FetchCodex(Fixtures.Auth("a", access: "access-a"), default), client.FetchCodex(Fixtures.Auth("b", access: "access-b"), default)); Suite.Check(calls == 2);
         });
+        await suite.Run("Gemini project discovery sends the selected project only to the quota endpoint", async () =>
+        {
+            var calls = new List<string>();
+            using var client = new ProviderClient(new Handler(async (request, token) =>
+            {
+                var endpoint = request.RequestUri!.AbsolutePath;
+                calls.Add(endpoint);
+                Suite.Check(request.Headers.Authorization?.Parameter == "fixture-gemini" && !request.Headers.Contains("ChatGPT-Account-Id"));
+                if (endpoint.EndsWith(":loadCodeAssist"))
+                {
+                    var body = Json.Read<JsonElement>(await request.Content!.ReadAsByteArrayAsync(token));
+                    Suite.Check(body.Get("metadata").Get("ideType").Text() == "GEMINI_CLI");
+                    return Reply(new { currentTier = new { id = "Standard" } });
+                }
+                if (endpoint == "/v1/projects")
+                {
+                    Suite.Check(request.Method == HttpMethod.Get && request.Content == null);
+                    return Reply(new { projects = new[] { new { projectId = "ordinary" }, new { projectId = "gen-lang-client-example" } } });
+                }
+                Suite.Check(endpoint.EndsWith(":retrieveUserQuota"));
+                var quota = Json.Read<JsonElement>(await request.Content!.ReadAsByteArrayAsync(token));
+                Suite.Check(quota.Get("project").Text() == "gen-lang-client-example");
+                return Reply(Fixture("gemini-quota.json"));
+            }));
+            var auth = Json.Bytes(new { access_token = "fixture-gemini", email = "gemini@example.invalid" });
+            var result = await client.FetchGemini(auth, default);
+            Suite.Check(calls.Count == 3 && result.Plan == "Standard" && result.Email == "gemini@example.invalid" && result.Lowest == 40);
+        });
         await suite.Run("OAuth preserves omitted refresh token and rejects identity changes", async () =>
         {
             using var client = new ProviderClient(new Handler((request, _) =>

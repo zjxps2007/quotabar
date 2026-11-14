@@ -67,12 +67,7 @@ public struct CodexOAuthClient: Sendable {
         guard let refresh = old.refreshToken else {
             throw ProviderError("reauth_required", "자동 갱신할 수 없는 로그인입니다. 앱에서 다시 로그인하세요.")
         }
-        var request = QuotaHTTP.request(url: URL(string: "https://auth.openai.com/oauth/token")!, timeout: 20)
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try JSONSerialization.data(withJSONObject: [
-            "grant_type": "refresh_token", "client_id": Self.clientID, "refresh_token": refresh
-        ])
+        let request = try NativeProviderRequest.make(.refresh, token: refresh, timeout: 20)
         let (data, response) = try await transport(request)
         guard (200..<300).contains(response.statusCode) else {
             if [400, 401, 403].contains(response.statusCode) {

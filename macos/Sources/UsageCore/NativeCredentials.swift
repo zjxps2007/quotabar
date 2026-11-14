@@ -43,6 +43,11 @@ enum NativeCredentials {
         case -8: return ProviderError("oauth_response", "로그인 갱신 응답에 필요한 인증 정보가 없습니다.")
         case -9: return ProviderError("account_mismatch", "갱신된 인증의 계정이 달라 연결을 중단했습니다. 다시 로그인하세요.")
         case -10: return ProviderError("account_mismatch", "갱신된 로그인 정보를 기존 계정에 연결할 수 없습니다.")
+        case -11: return provider == .codex ? ProviderError("invalid_auth_file", "Codex login could not be parsed.")
+            : ProviderError("invalid_credentials_file", "Gemini login must be a JSON object.")
+        case -12: return provider == .codex ? ProviderError("missing_tokens", "Codex login exists but has no access token.")
+            : ProviderError("not_logged_in", "Gemini login has no access token. Sign in through Gemini CLI and reconnect.")
+        case -13: return ProviderError("api_key_unsupported", "ChatGPT subscription login is required; API keys do not expose subscription quota.")
         default: return ProviderError("invalid_auth", "로그인 파일을 읽을 수 없습니다. JSON 형식을 확인하세요.")
         }
     }

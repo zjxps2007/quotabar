@@ -5,6 +5,7 @@ mod login_item;
 mod mac_login;
 #[cfg(windows)]
 mod notification_icon;
+mod provider_requests;
 mod vault;
 #[cfg(windows)]
 mod windows_login;

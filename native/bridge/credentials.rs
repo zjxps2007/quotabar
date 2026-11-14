@@ -28,7 +28,7 @@ fn platform() -> Platform {
     }
 }
 
-fn publish(bytes: Vec<u8>, output: &mut *mut u8, length: &mut usize) {
+pub(super) fn publish(bytes: Vec<u8>, output: &mut *mut u8, length: &mut usize) {
     let bytes = Zeroizing::new(bytes);
     let result: Box<[u8]> = bytes.as_slice().into();
     *length = result.len();
@@ -72,6 +72,11 @@ pub unsafe extern "C" fn qb_credentials(
         } else {
             unsafe { slice::from_raw_parts(data, length) }
         };
+        if mode == 4 {
+            let parsed =
+                quotabar::provider_requests::mac_query(input, provider == Provider::Codex)?;
+            return serde_json::to_vec(&parsed).map_err(|_| -11);
+        }
         if mode == 2 {
             let json = serde_json::from_slice(input).map_err(|_| -3)?;
             return serde_json::to_vec(&credentials::mac_workspace(&json)).map_err(|_| -3);

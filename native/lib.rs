@@ -7,6 +7,7 @@ pub mod mac_login;
 #[cfg(windows)]
 pub mod notification_icon;
 pub mod oauth;
+pub mod provider_requests;
 pub mod quota;
 pub mod tray;
 #[cfg(windows)]
