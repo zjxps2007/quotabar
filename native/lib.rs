@@ -1,6 +1,8 @@
 pub mod claude;
+pub mod credentials;
 pub mod files;
 pub mod login_item;
+pub mod oauth;
 pub mod quota;
 pub mod tray;
 #[cfg(windows)]

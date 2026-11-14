@@ -9,20 +9,21 @@ public struct CodexOAuthCredentials: Sendable {
     public let expiresAt: Date?
     private let lastRefresh: Date?
 
+    private struct Parsed: Decodable {
+        let identity: ImportedIdentity
+        let accessToken: String
+        let refreshToken: String?
+        let expiresAt: Date?
+        let lastRefresh: Date?
+    }
     public init(data: Data) throws {
-        identity = try ImportedIdentity.parse(data, provider: .codex)
-        let json = try JSONSerialization.jsonObject(with: data) as! [String: Any]
-        let tokens = json["tokens"] as? [String: Any] ?? json
-        guard json["OPENAI_API_KEY"] as? String == nil,
-              let access = Self.string(tokens["access_token"] ?? tokens["accessToken"]) else {
-            throw ProviderError("invalid_auth", "ChatGPT 구독 계정으로 로그인하세요.")
-        }
-        self.data = data; accessToken = access
-        refreshToken = Self.string(tokens["refresh_token"] ?? tokens["refreshToken"])
-        let expiry = (json["expires_at"] as? Double).map(Date.init(timeIntervalSince1970:))
-        expiresAt = expiry ?? (Self.claims(access)?["exp"] as? Double).map(Date.init(timeIntervalSince1970:))
-            ?? (json["expired"] as? String).flatMap(SharedFormatters.parseISO8601)
-        lastRefresh = (json["last_refresh"] as? String).flatMap(SharedFormatters.parseISO8601)
+        let parsed = try NativeCredentials.decode(Parsed.self, data: data, provider: .codex, mode: 3)
+        self.data = data
+        identity = parsed.identity
+        accessToken = parsed.accessToken
+        refreshToken = parsed.refreshToken
+        expiresAt = parsed.expiresAt
+        lastRefresh = parsed.lastRefresh
     }
 
     public func needsRefresh(at now: Date = Date()) -> Bool {
@@ -31,18 +32,6 @@ public struct CodexOAuthCredentials: Sendable {
         return now.timeIntervalSince(lastRefresh ?? .distantPast) >= 3600
     }
 
-    static func string(_ value: Any?) -> String? {
-        guard let value = value as? String, !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
-        return value
-    }
-    static func claims(_ token: String) -> [String: Any]? {
-        let pieces = token.split(separator: ".")
-        guard pieces.count == 3 else { return nil }
-        var base64 = String(pieces[1]).replacingOccurrences(of: "-", with: "+").replacingOccurrences(of: "_", with: "/")
-        base64 += String(repeating: "=", count: (4 - base64.count % 4) % 4)
-        guard let data = Data(base64Encoded: base64) else { return nil }
-        return (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
-    }
 }
 
 /// Refuses redirects so a token POST cannot be forwarded to another endpoint.
@@ -91,35 +80,7 @@ public struct CodexOAuthClient: Sendable {
             }
             throw ProviderError("oauth_unavailable", "로그인 갱신이 일시적으로 실패했습니다. 다음 조회에서 다시 시도합니다.")
         }
-        guard data.count <= 1_048_576,
-              let result = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let access = CodexOAuthCredentials.string(result["access_token"]) else {
-            throw ProviderError("oauth_response", "로그인 갱신 응답에 필요한 인증 정보가 없습니다.")
-        }
-        var json = try JSONSerialization.jsonObject(with: current) as! [String: Any]
-        var tokens = json["tokens"] as? [String: Any] ?? json
-        let original = CodexAccountIdentity(authJSON: json)
-        // Check each returned token before carrying forward the pinned workspace.
-        for token in [access, result["id_token"] as? String].compactMap({ $0 }) {
-            let returned = CodexAccountIdentity(authJSON: ["access_token": token])
-            guard !original.conflicts(with: returned) else {
-                throw ProviderError("account_mismatch", "갱신된 인증의 계정이 달라 연결을 중단했습니다. 다시 로그인하세요.")
-            }
-        }
-        tokens["access_token"] = access
-        if let value = CodexOAuthCredentials.string(result["refresh_token"]) { tokens["refresh_token"] = value }
-        if let value = CodexOAuthCredentials.string(result["id_token"]) { tokens["id_token"] = value }
-        if json["tokens"] != nil { json["tokens"] = tokens } else { json = tokens }
-        json.removeValue(forKey: "expires_at"); json.removeValue(forKey: "expired")
-        if let seconds = result["expires_in"] as? Double, seconds.isFinite, seconds > 0 {
-            json["expires_at"] = now.addingTimeInterval(seconds).timeIntervalSince1970
-        }
-        json["last_refresh"] = SharedFormatters.iso8601String(from: now)
-        let updated = try JSONSerialization.data(withJSONObject: json)
-        guard try CodexOAuthCredentials(data: updated).identity.key == old.identity.key else {
-            throw ProviderError("account_mismatch", "갱신된 로그인 정보를 기존 계정에 연결할 수 없습니다.")
-        }
-        return updated
+        return try NativeCredentials.rotate(current, response: data, now: now)
     }
 }
 

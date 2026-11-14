@@ -3,7 +3,7 @@
 import Foundation
 
 /// 一个用户在一个工作区中的订阅身份。名称、套餐和导入路径都不是原生身份。
-public struct CodexAccountIdentity: Equatable, Sendable {
+public struct CodexAccountIdentity: Decodable, Equatable, Sendable {
     public let accountId: String?
     public let userId: String?
     public let email: String?
@@ -26,24 +26,12 @@ public struct CodexAccountIdentity: Equatable, Sendable {
 
     /// 同时支持 Codex 原生 auth.json 和 CPA 扁平文件；先取用户原生 ID，最后才取 sub。
     public init(authJSON json: [String: Any]) {
-        let tokens = json["tokens"] as? [String: Any] ?? [:]
-        let claims = [
-            tokens["id_token"] ?? tokens["idToken"] ?? json["id_token"] ?? json["idToken"],
-            tokens["access_token"] ?? tokens["accessToken"] ?? json["access_token"] ?? json["accessToken"],
-        ].compactMap { Self.jwtPayload($0 as? String) }
-        let auth = claims.compactMap { $0["https://api.openai.com/auth"] as? [String: Any] }
-        func first(_ values: [Any?]) -> String? {
-            values.lazy.compactMap { Self.normalized($0 as? String) }.first
+        if let data = try? JSONSerialization.data(withJSONObject: json),
+           let parsed = try? NativeCredentials.decode(Self.self, data: data, provider: .codex, mode: 2) {
+            self = parsed
+        } else {
+            self.init(accountId: nil, userId: nil)
         }
-        let accountId = first([tokens["account_id"], tokens["accountId"], json["account_id"], json["accountId"], json["chatgpt_account_id"]]
-            + auth.map { $0["chatgpt_account_id"] } + claims.map { $0["chatgpt_account_id"] })
-        let userId = first([json["chatgpt_user_id"]]
-            + auth.map { $0["chatgpt_user_id"] } + claims.map { $0["chatgpt_user_id"] }
-            + auth.map { $0["user_id"] } + claims.map { $0["user_id"] }
-            + [json["user_id"]] + claims.map { $0["sub"] })
-        let email = first([json["email"]] + claims.map { $0["email"] }
-            + claims.map { ($0["https://api.openai.com/profile"] as? [String: Any])?["email"] })
-        self.init(accountId: accountId, userId: userId, email: email)
     }
 
     public var nativeKey: String? {
@@ -80,13 +68,5 @@ public struct CodexAccountIdentity: Equatable, Sendable {
         guard let normalized = value?.trimmingCharacters(in: .whitespacesAndNewlines)
             .precomposedStringWithCanonicalMapping.lowercased(), !normalized.isEmpty else { return nil }
         return normalized
-    }
-
-    private static func jwtPayload(_ token: String?) -> [String: Any]? {
-        guard let pieces = token?.split(separator: "."), pieces.count >= 2 else { return nil }
-        var payload = String(pieces[1]).replacingOccurrences(of: "-", with: "+").replacingOccurrences(of: "_", with: "/")
-        payload += String(repeating: "=", count: (4 - payload.count % 4) % 4)
-        guard let data = Data(base64Encoded: payload) else { return nil }
-        return try? JSONSerialization.jsonObject(with: data) as? [String: Any]
     }
 }

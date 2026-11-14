@@ -1,9 +1,7 @@
 // Parsing and OAuth semantics ported from QuotaBar and sylearn/AIUsage; see NOTICE.
 using System.Net;
 using System.Net.Http.Headers;
-using System.Text;
 using System.Text.Json;
-using System.Text.Json.Nodes;
 
 namespace QuotaBar.Core;
 public sealed class ProviderClient : IDisposable
@@ -11,7 +9,7 @@ public sealed class ProviderClient : IDisposable
     private readonly HttpClient http;
     public ProviderClient(HttpMessageHandler? handler = null)
     { http = new(handler ?? new HttpClientHandler { AllowAutoRedirect = false, UseCookies = false }) { Timeout = TimeSpan.FromSeconds(20) }; }
-    private async Task<JsonElement> Request(string url, string? access, string? account, object? body, CancellationToken token)
+    private async Task<byte[]> RequestBytes(string url, string? access, string? account, object? body, CancellationToken token)
     {
         using var request = new HttpRequestMessage(body == null ? HttpMethod.Get : HttpMethod.Post, url);
         request.Headers.CacheControl = new() { NoCache = true, NoStore = true }; request.Headers.Pragma.ParseAdd("no-cache");
@@ -30,8 +28,10 @@ public sealed class ProviderClient : IDisposable
         var buffer = new byte[8192]; int count;
         while ((count = await stream.ReadAsync(buffer, token)) > 0)
         { if (bytes.Length + count > 2 * 1024 * 1024) throw new UsageException("large_response", "응답이 너무 큽니다."); bytes.Write(buffer, 0, count); }
-        return Json.Read<JsonElement>(bytes.ToArray());
+        return bytes.ToArray();
     }
+    private async Task<JsonElement> Request(string url, string? access, string? account, object? body, CancellationToken token)
+        => Json.Read<JsonElement>(await RequestBytes(url, access, account, body, token));
     public async Task<Snapshot> FetchCodex(byte[] auth, CancellationToken token)
     {
         var credentials = Credentials.Parse(auth, Provider.Codex);
@@ -42,27 +42,10 @@ public sealed class ProviderClient : IDisposable
     {
         var old = Credentials.Parse(current, Provider.Codex);
         if (old.RefreshToken == null) throw new UsageException("reauth_required", "앱에서 다시 로그인하세요.");
-        var result = await Request("https://auth.openai.com/oauth/token", null, null,
+        var result = await RequestBytes("https://auth.openai.com/oauth/token", null, null,
             new { grant_type = "refresh_token", client_id = "app_EMoamEEZ73f0CkXaXp7hrann", refresh_token = old.RefreshToken }, CancellationToken.None);
-        string? access = result.Get("access_token").Text();
-        if (string.IsNullOrWhiteSpace(access)) throw new UsageException("oauth_response", "갱신 응답에 인증 정보가 없습니다.");
-        foreach (var token in new[] { access, result.Get("id_token").Text() }.Where(t => t != null))
-        {
-            var claims = Credentials.Claims(token); var auth = claims.Get("https://api.openai.com/auth");
-            string? account = auth.Get("chatgpt_account_id").Text() ?? claims.Get("chatgpt_account_id").Text();
-            string? user = auth.Get("chatgpt_user_id").Text() ?? claims.Get("chatgpt_user_id").Text() ?? auth.Get("user_id").Text() ?? claims.Get("user_id").Text() ?? claims.Get("sub").Text();
-            if (account != null && !string.Equals(account, old.AccountId, StringComparison.OrdinalIgnoreCase) || user != null && old.UserId != null && !string.Equals(user, old.UserId, StringComparison.OrdinalIgnoreCase))
-                throw new UsageException("account_mismatch", "갱신된 계정이 다릅니다. 다시 연결하세요.");
-        }
-        var root = JsonNode.Parse(current)!.AsObject(); var target = root["tokens"] as JsonObject ?? root;
-        target["access_token"] = access;
-        foreach (var key in new[] { "id_token", "refresh_token" }) if (result.Get(key).Text() is { Length: > 0 } value) target[key] = value;
-        root.Remove("expires_at"); root.Remove("expired");
-        if (result.Get("expires_in").Number() is { } seconds && seconds is > 0 and < 315360000) root["expires_at"] = DateTimeOffset.UtcNow.AddSeconds(seconds).ToUnixTimeSeconds();
-        root["last_refresh"] = DateTimeOffset.UtcNow.ToString("O");
-        byte[] bytes = Encoding.UTF8.GetBytes(root.ToJsonString());
-        if (Credentials.Parse(bytes, Provider.Codex).Identity != old.Identity) throw new UsageException("account_mismatch", "계정 정체성이 변경되었습니다.");
-        return bytes;
+        try { return Credentials.Rotate(current, result, DateTimeOffset.UtcNow); }
+        finally { System.Security.Cryptography.CryptographicOperations.ZeroMemory(result); }
     }
     public async Task<Snapshot> FetchGemini(byte[] data, CancellationToken token)
     {

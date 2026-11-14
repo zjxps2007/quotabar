@@ -1,4 +1,5 @@
 //! C entry points used by the platform application hosts.
+mod credentials;
 mod login_item;
 mod vault;
 #[cfg(windows)]

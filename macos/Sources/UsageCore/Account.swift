@@ -1,5 +1,4 @@
 import Foundation
-import CryptoKit
 
 public enum ProviderKind: String, Codable, CaseIterable, Identifiable, Sendable {
     case codex, claude, gemini
@@ -40,47 +39,11 @@ public struct MonitoredAccount: Codable, Identifiable, Equatable, Sendable {
 
 /// Identity is pinned independently of a path or display alias. CLI account switching
 /// must never make an existing card silently display a different workspace.
-public struct ImportedIdentity: Equatable, Sendable {
+public struct ImportedIdentity: Decodable, Equatable, Sendable {
     public let key: String
     public let label: String
     public static func parse(_ data: Data, provider: ProviderKind) throws -> Self {
-        guard data.count <= 1_048_576,
-              let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            throw ProviderError("invalid_auth", "로그인 파일을 읽을 수 없습니다. JSON 형식을 확인하세요.")
-        }
-        let tokens = json["tokens"] as? [String: Any] ?? json
-        guard let access = (tokens["access_token"] ?? tokens["accessToken"]) as? String, !access.isEmpty else {
-            throw ProviderError("missing_token", "구독 계정의 CLI 로그인 파일이 필요합니다. API 키는 지원하지 않습니다.")
-        }
-        switch provider {
-        case .codex:
-            let identity = CodexAccountIdentity(authJSON: json)
-            guard let key = identity.key else {
-                throw ProviderError("missing_identity", "Codex의 워크스페이스와 사용자 정보를 확인할 수 없습니다. CLI에서 다시 로그인하세요.")
-            }
-            return Self(key: key, label: identity.email ?? "Codex · \(identity.accountId?.prefix(8) ?? "account")")
-        case .gemini:
-            let claims = jwt((json["id_token"] ?? json["idToken"]) as? String)
-            let email = (claims?["email"] as? String ?? json["email"] as? String)?.lowercased()
-            if let subject = claims?["sub"] as? String, !subject.isEmpty {
-                return Self(key: "gemini:subject:\(subject)", label: email ?? "Gemini account")
-            }
-            if let email, !email.isEmpty { return Self(key: "gemini:email:\(email)", label: email) }
-            guard let refresh = json["refresh_token"] as? String, !refresh.isEmpty else {
-                throw ProviderError("missing_identity", "Gemini 계정 식별 정보가 없습니다. CLI에서 다시 로그인하세요.")
-            }
-            let digest = SHA256.hash(data: Data(refresh.utf8)).map { String(format: "%02x", $0) }.joined()
-            return Self(key: "gemini:credential:\(digest)", label: "Gemini · \(digest.prefix(6))")
-        case .claude:
-            throw ProviderError("invalid_auth", "Claude는 CLI 설정 폴더를 연결하세요.")
-        }
-    }
-    private static func jwt(_ token: String?) -> [String: Any]? {
-        guard let pieces = token?.split(separator: "."), pieces.count >= 2 else { return nil }
-        var encoded = String(pieces[1]).replacingOccurrences(of: "-", with: "+").replacingOccurrences(of: "_", with: "/")
-        encoded += String(repeating: "=", count: (4 - encoded.count % 4) % 4)
-        guard let data = Data(base64Encoded: encoded) else { return nil }
-        return try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        try NativeCredentials.decode(Self.self, data: data, provider: provider, mode: 1)
     }
 }
 
