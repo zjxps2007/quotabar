@@ -15,7 +15,7 @@ bash scripts/build.sh
 open "artifacts/QuotaBar.app"
 ```
 
-Xcode Command Line Tools의 Swift 5.9 이상이 필요합니다. 현재 Mac의 아키텍처로 빌드합니다. 빌드한 앱을 원하는 위치에 둔 뒤 계정을 연결하세요. 서명은 로컬 실행용 ad-hoc 서명이며 공증된 배포 앱은 아닙니다.
+Xcode Command Line Tools의 Swift 5.9 이상과 Rust 툴체인이 필요합니다. 현재 Mac의 아키텍처로 빌드합니다. 빌드한 앱을 원하는 위치에 둔 뒤 계정을 연결하세요. 서명은 로컬 실행용 ad-hoc 서명이며 공증된 배포 앱은 아닙니다.
 
 계정에 접근하지 않는 미리보기:
 

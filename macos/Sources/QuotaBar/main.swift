@@ -3,13 +3,12 @@ import AppKit
 import Darwin
 import UsageCore
 
-if CommandLine.arguments.count == 3, CommandLine.arguments[1] == "--apply-update" {
-    exit(MacUpdateInstaller.apply(job: URL(fileURLWithPath: CommandLine.arguments[2])))
-}
-
-// Claude invokes this short-lived mode before SwiftUI or monitoring is started.
-if CommandLine.arguments.contains("--claude-statusline") {
-    exit(ClaudeSubscriptionStatusLine.run(arguments: CommandLine.arguments))
+// Keep the public executable path used by installed Claude bindings and staged updates.
+if CommandLine.arguments.dropFirst().first == "--claude-statusline"
+    || (CommandLine.arguments.count == 3 && CommandLine.arguments[1] == "--apply-update") {
+    let native = Bundle.main.bundleURL.appendingPathComponent("Contents/MacOS/quotabar-statusline").path
+    _ = execv(native, CommandLine.unsafeArgv)
+    exit(1)
 }
 let dashboardHelper = CommandLine.arguments.contains("--dashboard-helper")
 if dashboardHelper {

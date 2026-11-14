@@ -1,3 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <ItemGroup><ProjectReference Include="../QuotaBar.Core/QuotaBar.Core.csproj" /></ItemGroup>
+  <ItemGroup>
+    <Content Include="../../../target/$(Configuration.ToLowerInvariant())/quotabar_native.dll"
+             Link="quotabar_native.dll" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
 </Project>

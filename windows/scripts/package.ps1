@@ -8,7 +8,9 @@ $bundle = Join-Path $stage 'QuotaBar-Windows-x64'
 New-Item -ItemType Directory -Force -Path $stage, $bundle | Out-Null
 Push-Location (Join-Path $RepoRoot 'windows')
 try {
-    foreach ($project in @('Monitor','Dashboard','StatusLine')) {
+    & "$PSScriptRoot\build-native.ps1" -Destination (Join-Path $bundle 'StatusLine')
+    & "$PSScriptRoot\write-update-version.ps1" -Path (Join-Path $bundle 'StatusLine\QuotaBar.StatusLine.dll') -Version $version
+    foreach ($project in @('Monitor','Dashboard')) {
         $output = Join-Path $stage $project
         Invoke-Dotnet @('publish',"src/QuotaBar.$project/QuotaBar.$project.csproj",'-c','Release','-r',$Runtime,'--self-contained','true','-p:PublishSingleFile=false','-p:PublishTrimmed=false',"-p:Version=$version",'-m:1','-nodeReuse:false','-p:UseSharedCompilation=false','-o',$output,'--nologo')
         # WPF and Core carry different WindowsBase.dll files. Never merge these runtimes.

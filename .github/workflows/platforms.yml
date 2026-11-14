@@ -28,6 +28,8 @@ jobs:
           persist-credentials: false
       - name: Existing Swift suites and shared contract
         run: bash scripts/test.sh
+      - name: Native Rust contracts
+        run: cargo test --locked --workspace --all-targets
       - name: Signed update release tooling
         run: python3 -m unittest discover -s scripts/tests -v
       - name: Build and package application and Dashboard helper
@@ -61,6 +63,8 @@ jobs:
           global-json-file: windows/global.json
       - name: Build and synthetic integration tests
         run: ./windows/scripts/test.ps1
+      - name: Native Rust contracts
+        run: cargo test --locked --workspace --all-targets
       - name: Self-contained x64 package
         run: ./windows/scripts/package.ps1
       - name: Packaged callback on PowerShell and Git Bash

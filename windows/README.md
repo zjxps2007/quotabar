@@ -60,7 +60,7 @@ macOS와 같은 흑백 테마, 앱·서비스 로고, 서비스별 색상, 둥�
 
 ## 소스에서 빌드
 
-.NET 10 SDK와 PowerShell 7을 사용합니다. `windows/global.json`의 SDK 버전을 준비하세요. 개발 스크립트는 저장소 `.tools/dotnet`이 있으면 우선 사용하고, 없으면 PATH의 SDK를 사용합니다.
+.NET 10 SDK, Rust MSVC 툴체인과 PowerShell 7을 사용합니다. .NET SDK 버전은 `windows/global.json`을 따릅니다. 빌드 스크립트는 `.tools/dotnet`과 `.tools/rust`에 설치된 도구를 우선 사용하며, 각 도구가 없으면 PATH에서 찾습니다.
 
 ```powershell
 .\windows\scripts\build.ps1

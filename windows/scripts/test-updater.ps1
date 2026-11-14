@@ -13,8 +13,8 @@ try {
     [IO.File]::WriteAllText($keyPath, $key.ExportPkcs8PrivateKeyPem())
     [IO.File]::WriteAllText($publicPath, $key.ExportSubjectPublicKeyInfoPem())
     [IO.File]::WriteAllText($versionPath, '{"version":"0.1.0","build":6}')
-    Invoke-Dotnet @('build', (Join-Path $RepoRoot 'windows\tests\QuotaBar.Tests\QuotaBar.Tests.csproj'), '-c', 'Release', '--nologo', '-m:1', '-nodeReuse:false', '-p:UseSharedCompilation=false')
     & "$PSScriptRoot\package.ps1" -OutputFolder 'Updater-Old'
+    Invoke-Dotnet @('build', (Join-Path $RepoRoot 'windows\tests\QuotaBar.Tests\QuotaBar.Tests.csproj'), '-c', 'Release', '--nologo', '-m:1', '-nodeReuse:false', '-p:UseSharedCompilation=false')
     $probePath = Join-Path $RepoRoot 'artifacts\update-manager-probe.json'
     $probeInfo = [Diagnostics.ProcessStartInfo]::new((Join-Path $RepoRoot 'artifacts\Updater-Old\QuotaBar.Monitor.exe'))
     $probeInfo.UseShellExecute = $false

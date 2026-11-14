@@ -36,61 +36,6 @@ public enum ClaudeSubscriptionStatusLine {
                          fiveHour: window(limits.five_hour), sevenDay: window(limits.seven_day))
     }
 
-    /// 从入口最先调用，避免状态栏启动服务、监听端口或输出启动日志。
-    public static func run(arguments: [String]) -> Int32 {
-        guard arguments.count >= 4 else { return 1 }
-        let id = arguments[2], generation = arguments[3]
-        let store = arguments.count > 4 ? ClaudeSubscriptionStore(root: URL(fileURLWithPath: arguments[4])) : ClaudeSubscriptionStore()
-        guard let profile = try? store.loadProfile(id: id) else { return 1 }
-        let input = FileHandle.standardInput.readDataToEndOfFile()
-        let env = ProcessInfo.processInfo.environment
-        let nonSubscription = ClaudeSubscriptionLaunch.authEnvironmentKeys.contains { !(env[$0] ?? "").isEmpty }
-        if profile.generation == generation, !nonSubscription,
-           let sample = try? snapshot(input: input, profile: profile) {
-            try? store.saveSnapshot(sample)
-        }
-
-        // 原状态栏 stdin / stdout 原样传递，额度落盘失败不改变原命令的输出。
-        if let original = profile.originalStatusLine,
-           let object = try? JSONSerialization.jsonObject(with: original) as? [String: Any],
-           let command = object["command"] as? String {
-            // 兼容已写入错误备份的旧 profile，禁止启动自身或另一层回传 wrapper。
-            guard !ClaudeSubscriptionConnection.isFeedbackCommand(command) else {
-                print("Claude · reconnect quota feedback")
-                return 1
-            }
-            let process = Process()
-            process.executableURL = URL(fileURLWithPath: "/bin/sh")
-            process.arguments = ["-c", command]
-            let pipe = Pipe()
-            process.standardInput = pipe
-            process.standardOutput = FileHandle.standardOutput
-            process.standardError = FileHandle.standardError
-            do {
-                try process.run()
-                // 仅影响父进程的写端；原命令可以不读 stdin 或提前退出。
-                #if canImport(Darwin)
-                _ = fcntl(pipe.fileHandleForWriting.fileDescriptor, F_SETNOSIGPIPE, 1)
-                #endif
-                try? pipe.fileHandleForWriting.write(contentsOf: input)
-                try? pipe.fileHandleForWriting.close()
-                process.waitUntilExit()
-                return process.terminationStatus
-            } catch { return 1 }
-        }
-        if nonSubscription {
-            print("Claude · API / proxy session")
-        } else if profile.generation != generation {
-            print("Claude · reconnect quota feedback")
-        } else if let sample = try? store.latestSnapshot(for: profile) {
-            let values = [("5h", sample.fiveHour), ("7d", sample.sevenDay)].compactMap { label, window -> String? in
-                guard let window, window.resetAt > Date() else { return nil }
-                return "\(label) \(Int((100 - window.usedPercent).rounded()))%"
-            }
-            print(values.isEmpty ? "Claude · waiting for quota" : values.joined(separator: " · "))
-        } else { print("Claude · waiting for quota") }
-        return 0
-    }
 }
 
 public enum ClaudeSubscriptionLaunch {

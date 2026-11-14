@@ -6,7 +6,8 @@ let package = Package(
     platforms: [.macOS(.v14)],
     products: [.executable(name: "QuotaBar", targets: ["QuotaBar"])],
     targets: [
-        .target(name: "UsageCore"),
+        .systemLibrary(name: "CQuotaBar"),
+        .target(name: "UsageCore", dependencies: ["CQuotaBar"], linkerSettings: [.linkedLibrary("iconv")]),
         .executableTarget(name: "QuotaBar", dependencies: ["UsageCore"], resources: [.process("Resources")]),
         .testTarget(name: "UsageCoreTests", dependencies: ["UsageCore"])
     ]

@@ -3,6 +3,7 @@
 .DS_Store
 artifacts/
 .tools/
+/target/
 **/bin/
 **/obj/
 .vs/

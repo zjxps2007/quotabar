@@ -9,12 +9,15 @@ cp ../shared/assets/* Sources/QuotaBar/Resources/
 export CLANG_MODULE_CACHE_PATH="$PWD/.build/module-cache"
 export SWIFTPM_MODULECACHE_OVERRIDE="$PWD/.build/module-cache"
 mkdir -p .build/cache .build/config .build/security "$artifacts"
-options=(--build-system native --cache-path .build/cache --config-path .build/config --security-path .build/security --disable-sandbox -c "$configuration")
+bash scripts/build-native.sh "$configuration"
+options=(--build-system native --cache-path .build/cache --config-path .build/config --security-path .build/security --disable-sandbox -c "$configuration" -Xlinker "$PWD/../target/$configuration/libquotabar_native.a")
 swift build "${options[@]}" --product QuotaBar
 binary_dir="$(swift build "${options[@]}" --show-bin-path)"
 app="$artifacts/QuotaBar.app"
 # Keep the original bundle identifiers for upgrades; all visible names are QuotaBar.
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
+cp "$PWD/../target/$configuration/quotabar-statusline" "$app/Contents/MacOS/quotabar-statusline"
+codesign --force --sign - "$app/Contents/MacOS/quotabar-statusline"
 cp "$binary_dir/QuotaBar" "$app/Contents/MacOS/QuotaBar"
 cp ../LICENSE ../NOTICE "$app/Contents/Resources/"
 cp -R "$binary_dir/QuotaBar_QuotaBar.bundle" "$app/Contents/Resources/"
@@ -43,6 +46,7 @@ if [[ "$configuration" == "release" ]]; then strip -x "$app/Contents/MacOS/Quota
 helper="$app/Contents/Helpers/QuotaBar Dashboard.app"
 mkdir -p "$helper/Contents/MacOS" "$helper/Contents/Resources"
 cp "$app/Contents/MacOS/QuotaBar" "$helper/Contents/MacOS/QuotaBar"
+cp "$app/Contents/MacOS/quotabar-statusline" "$helper/Contents/MacOS/quotabar-statusline"
 cp ../LICENSE ../NOTICE "$helper/Contents/Resources/"
 cp -R "$binary_dir/QuotaBar_QuotaBar.bundle" "$helper/Contents/Resources/"
 cp "$app/Contents/Resources/AppIcon-4.icns" "$helper/Contents/Resources/"

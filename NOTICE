@@ -35,3 +35,7 @@ processes are new platform implementations. Shared synthetic fixtures exercise
 both native implementations. shared/assets retains the existing logo originals.
 Windows self-contained builds include Microsoft's .NET and Windows Desktop runtime
 files with their runtime package licenses and notices under licenses/.
+The native Rust Claude callback adapts the same AIUsage subscription snapshot,
+profile and command forwarding rules for the original Windows and macOS formats.
+The Rust usage scanner ports the existing streaming projection, session fork
+accounting and Claude message aggregation for both platforms.

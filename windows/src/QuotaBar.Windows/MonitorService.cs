@@ -196,15 +196,14 @@ public sealed class MonitorService : IDisposable
         var roots = Settings.Accounts.Where(a => a.Provider == Provider.Claude).Select(a => a.SourcePath).Append(AppPaths.ClaudeHome).Distinct(StringComparer.OrdinalIgnoreCase).Select(p => Path.Combine(p, "projects")).ToArray();
         try
         {
-            var result = await Task.Run(() => scanner.Scan([Path.Combine(AppPaths.CodexHome, "sessions"), Path.Combine(AppPaths.CodexHome, "archived_sessions")], roots, cancel.Token,
-                fileIdentity: file => Native.GetFileInformationByHandle(file.SafeFileHandle, out var info) ? $"{info.Volume}:{info.IndexHigh}:{info.IndexLow}" : "unknown"));
+            var result = await Task.Run(() => scanner.Scan([Path.Combine(AppPaths.CodexHome, "sessions"), Path.Combine(AppPaths.CodexHome, "archived_sessions")], roots, cancel.Token));
             if (!cancel.IsCancellationRequested && !disposed) activity = result;
         }
         catch (OperationCanceledException) { }
         catch (Exception error) { if (!disposed) message = Explain(error); }
-        finally { if (releaseCache) scanner.ReleaseCache(); scanning = false; scanToken = null; Notify(); }
+        finally { if (disposed) scanner.Dispose(); else if (releaseCache) scanner.ReleaseCache(); scanning = false; scanToken = null; Notify(); }
     }
-    public void Dispose() { disposed = true; loginToken?.Cancel(); Suspend(); client.Dispose(); }
+    public void Dispose() { if (disposed) return; disposed = true; loginToken?.Cancel(); Suspend(); if (!scanning) scanner.Dispose(); client.Dispose(); }
     public async Task PrepareUpdateExit()
     {
         updatePaused = true; Suspend();

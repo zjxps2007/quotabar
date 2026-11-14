@@ -145,7 +145,6 @@ internal sealed class MonitorContext : ApplicationContext
     private static string Helper()
     {
         string path = Path.Combine(AppContext.BaseDirectory, "StatusLine", "QuotaBar.StatusLine.exe");
-        if (!File.Exists(path)) path = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../QuotaBar.StatusLine/bin/", AppContext.BaseDirectory.Contains("Debug") ? "Debug" : "Release", "net10.0-windows/QuotaBar.StatusLine.exe"));
         if (!File.Exists(path)) throw new UsageException("helper", "StatusLine 실행 파일을 찾지 못했습니다."); return path;
     }
     private async Task Scan() { if (visible && route == "dashboard" && !suspended && service != null) await service.Scan(); }

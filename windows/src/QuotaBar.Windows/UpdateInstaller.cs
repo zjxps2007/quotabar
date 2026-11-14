@@ -1,6 +1,5 @@
 using System.Diagnostics;
 using System.IO.Compression;
-using System.Reflection;
 using Microsoft.Win32;
 using QuotaBar.Core;
 
@@ -66,89 +65,6 @@ public static class UpdateInstaller
         return Process.Start(info) ?? throw new IOException("Update helper did not start.");
     }
 
-    public static async Task<int> Apply(string job)
-    {
-        WindowsUpdatePlan? plan = null; UpdateReplacement? replacement = null; SingleInstance? lease = null;
-        bool changed = false;
-        try
-        {
-            job = Path.GetFullPath(job); PrivateFiles.RejectLinks(job);
-            string directory = Path.GetDirectoryName(job)!;
-            if (Path.GetFileName(job) != "install.json" || !Guid.TryParse(Path.GetFileName(directory), out var transaction)) return 1;
-            PrivateFiles.EnsureDirectory(directory);
-            var value = Json.Read<WindowsUpdatePlan>(PrivateFiles.ReadBounded(job, 64 * 1024));
-            var paths = new AppPaths(value.DataRoot);
-            if (!SamePath(directory, value.Staged.Directory) || !SamePath(Path.GetDirectoryName(directory)!, UpdatesRoot(paths))) return 1;
-            PrivateFiles.RejectLinks(value.Target);
-            ValidateVersion(value.Target, value.CurrentVersion);
-            if (Installed(value.Target) != value.Installer) return 1;
-            plan = value; replacement = new(value.Target, transaction);
-            await Verify(value, CancellationToken.None);
-            if (!value.Installer) ValidateVersion(replacement.Incoming, value.Staged.Update.Release.Version);
-            WriteResult(Path.Combine(directory, "installer-ready.json"), value, true, "ready");
-            await WaitForParent(value);
-            lease = await WaitForLease(paths, TimeSpan.FromSeconds(30));
-            ValidateVersion(value.Target, value.CurrentVersion);
-            if (value.Installer)
-            {
-                CopyTree(value.Target, replacement.Backup, CancellationToken.None);
-                changed = true;
-                var info = new ProcessStartInfo(value.Staged.Archive) { UseShellExecute = false, CreateNoWindow = true, WorkingDirectory = directory };
-                foreach (string argument in new[] { "/SP-", "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/RESTARTEXITCODE=3010", "/NORESTARTAPPLICATIONS", "/NOCLOSEAPPLICATIONS", "/DIR=" + value.Target,
-                    "/LOG=" + Path.Combine(directory, "setup.log") }) info.ArgumentList.Add(argument);
-                using var setup = Process.Start(info) ?? throw new IOException("Setup did not start.");
-                // Never restore files while a running installer can still write to them.
-                await setup.WaitForExitAsync();
-                if (setup.ExitCode != 0) throw new IOException("Setup failed.");
-            }
-            else { replacement.Commit(); changed = true; }
-            ValidateVersion(value.Target, value.Staged.Update.Release.Version);
-            lease.Dispose(); lease = null;
-            Start(value, transaction);
-            string acknowledgement = Path.Combine(directory, "started.json");
-            for (int attempt = 0; attempt < 200; attempt++)
-            {
-                if (ReadResult(acknowledgement) is { Success: true } result && result.Version == value.Staged.Update.Release.Version)
-                {
-                    PrivateFiles.Write(ResultPath(paths), Json.Bytes(result));
-                    try { Directory.Delete(replacement.Backup, true); } catch (IOException) { }
-                    // Windows keeps this helper's executable mapped; clean its stage on the next launch.
-                    PrivateFiles.Write(Path.Combine(directory, "completed.json"), Json.Bytes(result));
-                    return 0;
-                }
-                await Task.Delay(200);
-            }
-            throw new IOException("Updated application did not acknowledge startup.");
-        }
-        catch
-        {
-            if (plan == null) return 1;
-            bool restored = !changed; var paths = new AppPaths(plan.DataRoot);
-            if (changed && replacement != null)
-            {
-                try
-                {
-                    lease ??= await WaitForLease(paths, TimeSpan.FromSeconds(1));
-                    replacement.Rollback();
-                    if (plan.Installer)
-                    {
-                        using var key = Registry.CurrentUser.OpenSubKey(UninstallKey, true);
-                        key?.SetValue("DisplayVersion", plan.CurrentVersion);
-                    }
-                    restored = true;
-                }
-                catch { restored = false; }
-            }
-            try { WriteResult(ResultPath(paths), plan, false, restored
-                ? "자동 업데이트 설치에 실패해 기존 버전을 유지했습니다. 업데이트를 다시 확인해 주세요."
-                : "업데이트 시작을 확인하지 못했습니다. 복구용 이전 앱을 보관했습니다."); } catch { }
-            lease?.Dispose(); lease = null;
-            if (restored) { try { Start(plan, null); } catch { } }
-            return 1;
-        }
-        finally { lease?.Dispose(); }
-    }
-
     public static void Acknowledge(string[] args, AppPaths paths)
     {
         if (!Guid.TryParse(Arguments.Value(args, "--update-ack"), out var transaction)) return;
@@ -187,37 +103,16 @@ public static class UpdateInstaller
         if (verified != staged.Update || verified.Asset.Name != expected) throw new IOException("Update platform mismatch.");
         PrivateFiles.RejectLinks(staged.Archive); await UpdateSignature.VerifyFile(staged.Archive, verified.Asset, token);
     }
-    private static async Task WaitForParent(WindowsUpdatePlan plan)
-    {
-        Process parent;
-        try { parent = Process.GetProcessById(plan.ParentPid); } catch (ArgumentException) { return; }
-        using (parent)
-        {
-            if (parent.HasExited) return;
-            if (parent.StartTime.ToUniversalTime().Ticks != plan.ParentStarted) return;
-            using var timeout = new CancellationTokenSource(TimeSpan.FromMinutes(2)); await parent.WaitForExitAsync(timeout.Token);
-        }
-    }
-    private static async Task<SingleInstance> WaitForLease(AppPaths paths, TimeSpan timeout)
-    {
-        var deadline = DateTime.UtcNow + timeout;
-        do { var lease = new SingleInstance(paths); if (lease.IsOwner) return lease; lease.Dispose(); await Task.Delay(200); }
-        while (DateTime.UtcNow < deadline);
-        throw new IOException("QuotaBar is still running.");
-    }
-    private static void Start(WindowsUpdatePlan plan, Guid? transaction)
-    {
-        var info = new ProcessStartInfo(Path.Combine(plan.Target, "QuotaBar.Monitor.exe")) { UseShellExecute = false, WorkingDirectory = plan.Target };
-        info.ArgumentList.Add("--background"); info.ArgumentList.Add("--data-dir"); info.ArgumentList.Add(plan.DataRoot);
-        if (transaction != null) { info.ArgumentList.Add("--update-ack"); info.ArgumentList.Add(transaction.Value.ToString("D")); }
-        using var process = Process.Start(info) ?? throw new IOException("QuotaBar did not start.");
-    }
     private static void ValidateVersion(string root, string version)
     {
         foreach (string relative in new[] { "QuotaBar.Monitor", "Dashboard/QuotaBar.Dashboard", "StatusLine/QuotaBar.StatusLine" })
         {
-            string path = Path.Combine(root, relative.Replace('/', Path.DirectorySeparatorChar)); PrivateFiles.RejectLinks(path + ".dll");
-            if (!File.Exists(path + ".exe") || AssemblyName.GetAssemblyName(path + ".dll").Version?.ToString(3) != version)
+            string path = Path.Combine(root, relative.Replace('/', Path.DirectorySeparatorChar));
+            string exe = path + ".exe"; PrivateFiles.RejectLinks(exe);
+            string resource = relative.StartsWith("StatusLine/") ? exe : path + ".dll";
+            PrivateFiles.RejectLinks(resource);
+            var info = FileVersionInfo.GetVersionInfo(resource);
+            if (!File.Exists(exe) || new Version(info.FileMajorPart, info.FileMinorPart, info.FileBuildPart).ToString(3) != version)
                 throw new IOException("Update package version mismatch.");
         }
     }
