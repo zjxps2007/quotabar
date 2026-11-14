@@ -24,7 +24,7 @@ internal static class Program
 internal sealed class MonitorContext : ApplicationContext
 {
     private readonly Control dispatcher = new();
-    private readonly NotifyIcon tray;
+    private readonly NotificationIcon tray;
     private readonly TrayMenu menu;
     private readonly DashboardHost dashboard;
     private readonly MonitorService? service;
@@ -36,8 +36,6 @@ internal sealed class MonitorContext : ApplicationContext
     private bool visible, suspended, quitting;
     private DateTimeOffset lastRefresh = DateTimeOffset.UtcNow;
     private string route = "dashboard";
-    private Icon? icon;
-    private (string Text, bool Logo, bool Warning, int Size, bool Light)? iconKey;
     private string? captured;
     public MonitorContext(string[] args)
     {
@@ -59,8 +57,7 @@ internal sealed class MonitorContext : ApplicationContext
         dashboard.Command += async m => await Command(m);
         dashboard.Exited += () => { visible = false; service?.StopScan(); Schedule(); ConfigureUpdates(); };
         menu = new TrayMenu(State, Open, Quit);
-        // NotifyIcon opens ContextMenuStrip on right-click. Left-click and double-click intentionally have no action.
-        tray = new NotifyIcon { Visible = true, ContextMenuStrip = menu };
+        tray = new NotificationIcon(menu);
         if (service != null) updater = new(service.Paths, Publish, service.PrepareUpdateExit,
             () => { service.ResumeAfterUpdate(); Schedule(); }, Quit);
         timer.Tick += async (_, _) => { timer.Stop(); await Refresh(automatic: true); };
@@ -170,13 +167,7 @@ internal sealed class MonitorContext : ApplicationContext
     private void Publish()
     {
         if (quitting) return;
-        var summary = TraySummary.From(State()); tray.Text = summary.Tooltip;
-        var key = (summary.Text, summary.UseLogo, summary.Warning, TrayIconRenderer.PixelSize(), TrayIconRenderer.LightTaskbar());
-        if (iconKey != key)
-        {
-            Icon next = TrayIconRenderer.Create(summary, key.Item4, key.Item5);
-            tray.Icon = next; icon?.Dispose(); icon = next; iconKey = key;
-        }
+        tray.Publish(TraySummary.From(State()));
         menu.RefreshIfVisible(); dashboard.Publish(); Schedule(); ConfigureUpdates();
     }
     private void PreferencesChanged(object sender, UserPreferenceChangedEventArgs e) => Post(Publish);
@@ -227,7 +218,7 @@ internal sealed class MonitorContext : ApplicationContext
             if (!tray.Visible || traySummary.Text != "16" || traySummary.UseLogo || !tray.Text.Contains("16%"))
                 throw new InvalidOperationException("Numeric tray did not survive Dashboard close.");
             File.WriteAllBytes(path, Json.Bytes(new { passed = true, captures, trayMenu, dashboardPids = pids, dashboardRunning = dashboard.IsRunning,
-                trayText = traySummary.Text, trayVisibleAfterDashboardClose = tray.Visible, trayPixelSize = icon!.Width,
+                trayText = traySummary.Text, trayVisibleAfterDashboardClose = tray.Visible, trayPixelSize = tray.PixelSize,
                 monitorPid = current.Id, privateBytes = current.PrivateMemorySize64, workingSet = current.WorkingSet64,
                 wpfLoadedInMonitor = AppDomain.CurrentDomain.GetAssemblies().Any(a => a.GetName().Name == "PresentationFramework") }));
         }
@@ -246,6 +237,6 @@ internal sealed class MonitorContext : ApplicationContext
     {
         quitting = true; SystemEvents.PowerModeChanged -= Power; SystemEvents.UserPreferenceChanged -= PreferencesChanged;
         SystemEvents.DisplaySettingsChanged -= DisplayChanged; timer.Dispose(); updater?.Dispose(); service?.Dispose(); dashboard.Dispose();
-        tray.Visible = false; tray.Dispose(); menu.Dispose(); icon?.Dispose(); instance?.Dispose(); dispatcher.Dispose(); base.ExitThreadCore();
+        tray.Dispose(); menu.Dispose(); instance?.Dispose(); dispatcher.Dispose(); base.ExitThreadCore();
     }
 }

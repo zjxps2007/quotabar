@@ -66,6 +66,39 @@ impl<T> Drop for Owned<T> {
     }
 }
 
+pub(crate) struct ShellIcon(pub windows_sys::Win32::UI::WindowsAndMessaging::HICON);
+impl Drop for ShellIcon {
+    fn drop(&mut self) {
+        unsafe {
+            windows_sys::Win32::UI::WindowsAndMessaging::DestroyIcon(self.0);
+        }
+    }
+}
+
+pub(crate) fn shell_icon(
+    text: &str,
+    logo: bool,
+    warning: bool,
+    size: i32,
+    light: bool,
+) -> io::Result<ShellIcon> {
+    use windows_sys::Win32::Graphics::GdiPlus::GdipCreateHICONFromBitmap;
+    let mut pixels = render(text, logo, warning, size, light)?;
+    unsafe {
+        let bitmap = Owned::new(
+            |out| {
+                GdipCreateBitmapFromScan0(size, size, size * 4, ARGB_32, pixels.as_mut_ptr(), out)
+            },
+            |p: *mut GpBitmap| {
+                GdipDisposeImage(p.cast());
+            },
+        )?;
+        let mut icon = null_mut();
+        checked(GdipCreateHICONFromBitmap(bitmap.raw, &mut icon))?;
+        Ok(ShellIcon(icon))
+    }
+}
+
 fn bars() -> &'static [[f32; 5]] {
     BARS.get_or_init(|| {
         LOGO.split("<rect ")

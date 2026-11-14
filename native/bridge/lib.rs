@@ -1,6 +1,8 @@
 //! C entry points used by the platform application hosts.
 mod credentials;
 mod login_item;
+#[cfg(windows)]
+mod notification_icon;
 mod vault;
 #[cfg(windows)]
 #[unsafe(no_mangle)]

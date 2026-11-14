@@ -1,23 +1,11 @@
 using System.Drawing.Imaging;
 using System.Runtime.InteropServices;
-using Microsoft.Win32;
 using QuotaBar.Core;
 
 namespace QuotaBar.Monitor;
 
 internal static class TrayIconRenderer
 {
-    public static bool LightTaskbar()
-    {
-        try { return Registry.GetValue(@"HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize", "SystemUsesLightTheme", 0) is int mode && mode == 1; }
-        catch (System.Security.SecurityException) { return false; }
-    }
-    public static int PixelSize()
-    {
-        uint dpi = GetDpiForWindow(FindWindow("Shell_TrayWnd", null));
-        int size = dpi == 0 ? SystemInformation.SmallIconSize.Width : GetSystemMetricsForDpi(49, dpi); // SM_CXSMICON
-        return Math.Clamp(size == 0 ? 16 : size, 16, 64);
-    }
     public static Icon Create(TraySummary summary, int size, bool light)
     {
         using var bitmap = Render(summary, size, light);
@@ -76,8 +64,5 @@ internal static class TrayIconRenderer
         }
     }
 
-    [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern IntPtr FindWindow(string name, string? title);
-    [DllImport("user32.dll")] private static extern uint GetDpiForWindow(IntPtr window);
-    [DllImport("user32.dll")] private static extern int GetSystemMetricsForDpi(int index, uint dpi);
     [DllImport("user32.dll")] private static extern bool DestroyIcon(IntPtr handle);
 }

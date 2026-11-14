@@ -5,21 +5,25 @@ using QuotaBar.Core;
 
 namespace QuotaBar.Monitor;
 
-// Runs only for --probe with synthetic accounts; send callbacks to our own NotifyIcon, never to Explorer.
+// Runs only for --probe with synthetic accounts and sends shell-format events to the app's own window.
 internal static class TrayMenuProbe
 {
     internal sealed record Result(bool LeftClickIgnored, bool LeftDoubleClickIgnored, bool RightClickOpens,
         bool EscapeDismisses, bool OverflowReachable, bool LiveUpdate, bool ActionsDispatch, int Dpi, List<string> Captures);
-    public static async Task<Result> Run(NotifyIcon icon, TrayMenu menu, Func<DisplayState> getState, Action<DisplayState> setState,
+    public static async Task<Result> Run(NotificationIcon icon, TrayMenu menu, Func<DisplayState> getState, Action<DisplayState> setState,
         Func<bool> dashboardRunning, string directory)
     {
         var original = getState(); var captures = new List<string>();
-        var window = (NativeWindow)typeof(NotifyIcon).GetField("_window", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(icon)!;
-        void Mouse(int message) => SendMessage(window.Handle, 0x800, 0, message); // WinForms WM_TRAYMOUSEMESSAGE.
+        void Mouse(int message)
+        {
+            var cursor = Cursor.Position;
+            int anchor = (cursor.X & 0xffff) | ((cursor.Y & 0xffff) << 16);
+            SendMessage(icon.Window, 0x8018, anchor, 0x10000 | message);
+        }
         void Check(bool value, string error) { if (!value) throw new InvalidOperationException("Tray menu: " + error); }
         async Task Open()
         {
-            Mouse(0x204); Mouse(0x205); // WM_RBUTTONDOWN/UP uses NotifyIcon's normal ContextMenuStrip path.
+            Mouse(0x204); Mouse(0x205); Mouse(0x7b); // Right click and the shell v4 WM_CONTEXTMENU notification.
             await Task.Delay(50); Check(menu.Visible, "right-click did not open the menu");
             Check(!dashboardRunning(), "opening the tray menu started Dashboard");
         }
