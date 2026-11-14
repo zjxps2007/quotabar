@@ -37,21 +37,7 @@ public sealed class ProviderClient : IDisposable
         var credentials = Credentials.Parse(auth, Provider.Codex);
         return ParseCodex(await Request("https://chatgpt.com/backend-api/wham/usage", credentials.AccessToken, credentials.AccountId, null, token), credentials.Email);
     }
-    public static Snapshot ParseCodex(JsonElement json, string? email = null)
-    {
-        List<QuotaWindow> windows = [];
-        foreach (var (value, fallback) in new[] { (json.Get("rate_limit").Get("primary_window"), "5시간"),
-            (json.Get("rate_limit").Get("secondary_window"), "주간"), (json.Get("code_review_rate_limit").Get("primary_window"), "Code review") })
-        {
-            if (value.Get("used_percent").Number() is not { } used) continue;
-            double? duration = value.Get("limit_window_seconds").Number();
-            string label = duration == 604800 ? "Weekly Window" : duration is > 0 && duration % 86400 == 0 ? $"{duration / 86400:0}d Window" : duration is > 0 && duration % 3600 == 0 ? $"{duration / 3600:0}h Window" : fallback;
-            if (fallback == "Code review") label = "Code review";
-            double? reset = value.Get("reset_at").Number();
-            windows.Add(new(label, Math.Clamp(100 - used, 0, 100), reset is > 0 and < 253402300799 ? DateTimeOffset.FromUnixTimeSeconds((long)reset) : null));
-        }
-        return new(DateTimeOffset.UtcNow, windows, json.Get("plan_type").Text(), json.Get("email").Text() ?? email);
-    }
+    public static Snapshot ParseCodex(JsonElement json, string? email = null) => NativeDisplay.Quota("codex", json, email);
     public async Task<byte[]> Refresh(byte[] current)
     {
         var old = Credentials.Parse(current, Provider.Codex);
@@ -104,17 +90,6 @@ public sealed class ProviderClient : IDisposable
             project == null ? new Dictionary<string,string>() : new() { ["project"] = project }, token);
         return ParseGemini(result) with { Email = credentials.Email, Plan = tier ?? "Code Assist" };
     }
-    public static Snapshot ParseGemini(JsonElement root)
-    {
-        var buckets = root.Get("buckets"); List<QuotaWindow> windows = [];
-        if (buckets.ValueKind == JsonValueKind.Array)
-        {
-            var groups = buckets.EnumerateArray().Where(b => b.Get("modelId").Text() != null && b.Get("remainingFraction").Number() != null)
-                .GroupBy(b => b.Get("modelId").Text()!.Contains("flash-lite") ? "Flash Lite" : b.Get("modelId").Text()!.Contains("flash") ? "Flash" : b.Get("modelId").Text()!.Contains("pro") ? "Pro" : "Other");
-            foreach (var group in groups.Where(g => g.Key != "Other").OrderBy(g => g.Key == "Pro" ? 0 : g.Key == "Flash" ? 1 : 2))
-            { var lowest = group.MinBy(b => b.Get("remainingFraction").Number()); windows.Add(new(group.Key, Math.Clamp(lowest.Get("remainingFraction").Number()!.Value * 100, 0, 100), DateTimeOffset.TryParse(lowest.Get("resetTime").Text(), out var d) ? d : null)); }
-        }
-        return new(DateTimeOffset.UtcNow, windows);
-    }
+    public static Snapshot ParseGemini(JsonElement root) => NativeDisplay.Quota("gemini", root);
     public void Dispose() => http.Dispose();
 }

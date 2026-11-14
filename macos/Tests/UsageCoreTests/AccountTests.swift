@@ -38,10 +38,10 @@ final class AccountTests{
         checkThrows(try ImportedIdentity.parse(Data("not JSON".utf8), provider: .codex))
         checkThrows(try ImportedIdentity.parse(Data(repeating: 32, count: 1_048_577), provider: .gemini))
     }
-    @Test func testCodexDurationLabelsFollowAPIAndKeepWorkspaceAnchor() {
+    @Test func testCodexDurationLabelsFollowAPIAndKeepWorkspaceAnchor() throws {
         let provider = CodexProvider()
         let response: [String: Any] = ["account_id": "old-user", "plan_type": "plus", "rate_limit": ["primary_window": ["used_percent": 25.0, "limit_window_seconds": 604800, "reset_at": 1900000000.0]]]
-        let raw = provider.parseResponse(response, accountId: "workspace", source: SourceInfo(mode: "test", type: "test"), fallbackEmail: nil)
+        let raw = try provider.parseResponse(response, accountId: "workspace", source: SourceInfo(mode: "test", type: "test"), fallbackEmail: nil)
         let summary = AccountSnapshot(usage: raw, provider: .codex)
         checkEqual(raw.usageAccountId, "workspace")
         checkEqual(summary.windows.first?.title, "Weekly Window")

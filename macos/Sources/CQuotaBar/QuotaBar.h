@@ -1,6 +1,7 @@
 #ifndef QUOTABAR_H
 #define QUOTABAR_H
 #include <stdint.h>
+#include <stddef.h>
 typedef struct QBScanner QBScanner;
 typedef struct QBCancel QBCancel;
 
@@ -14,4 +15,13 @@ void qb_cancel_set(const QBCancel *);
    Cancellation returns 1. Other failures return -1. */
 int32_t qb_scanner_scan(const QBScanner *, const QBCancel *, const char *request, char **output);
 void qb_string_free(char *);
+char *qb_parse_quota(const char *request);
+char *qb_tray_summary(const char *request);
+int32_t qb_mac_login_item(int32_t operation);
+/* Load returns 0 for success, 1 for a missing credential and -1 on error.
+   The returned buffer must be released with its original size. */
+int32_t qb_vault_load(const char *directory, const char *uuid, uint8_t **data, size_t *length);
+int32_t qb_vault_save(const char *directory, const char *uuid, const uint8_t *data, size_t length);
+int32_t qb_vault_delete(const char *directory, const char *uuid);
+void qb_secret_free(uint8_t *data, size_t length);
 #endif

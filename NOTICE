@@ -39,3 +39,5 @@ The native Rust Claude callback adapts the same AIUsage subscription snapshot,
 profile and command forwarding rules for the original Windows and macOS formats.
 The Rust usage scanner ports the existing streaming projection, session fork
 accounting and Claude message aggregation for both platforms.
+The Rust quota adapters and status summaries preserve QuotaBar's platform-specific
+display rules. The Windows notification icon uses GDI+ and the shared AppMark.

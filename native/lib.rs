@@ -1,4 +1,10 @@
 pub mod claude;
 pub mod files;
+pub mod login_item;
+pub mod quota;
+pub mod tray;
+#[cfg(windows)]
+pub mod tray_icon;
 pub mod updates;
 pub mod usage;
+pub mod vault;

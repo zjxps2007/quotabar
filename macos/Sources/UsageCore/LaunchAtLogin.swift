@@ -1,6 +1,6 @@
 import Foundation
 import CoreServices
-import ServiceManagement
+import CQuotaBar
 
 public enum LaunchAtLoginState: String, Codable, Sendable {
     case disabled, enabled, requiresApproval, unavailable
@@ -15,20 +15,15 @@ protocol LoginItemService {
 
 private struct SystemLoginItem: LoginItemService {
     var state: LaunchAtLoginState {
-        // Only the packaged monitor may register itself, never the Dashboard,
-        // command-line build or test runner.
-        guard Bundle.main.bundleURL.pathExtension == "app",
-              Bundle.main.bundleIdentifier == "com.aiusage.lite" else { return .unavailable }
-        switch SMAppService.mainApp.status {
-        case .notRegistered: return .disabled
-        case .enabled: return .enabled
-        case .requiresApproval: return .requiresApproval
-        case .notFound: return .unavailable
-        @unknown default: return .unavailable
+        switch qb_mac_login_item(0) {
+        case 0: return .disabled
+        case 1: return .enabled
+        case 2: return .requiresApproval
+        default: return .unavailable
         }
     }
-    func register() throws { try SMAppService.mainApp.register() }
-    func unregister() throws { try SMAppService.mainApp.unregister() }
+    func register() throws { if qb_mac_login_item(1) != 0 { throw CocoaError(.fileWriteNoPermission) } }
+    func unregister() throws { if qb_mac_login_item(2) != 0 { throw CocoaError(.fileWriteNoPermission) } }
 }
 
 /// The OS owns persistence and approval; merely launching the app never registers it.
@@ -47,7 +42,7 @@ public final class LaunchAtLoginManager {
         else if !enabled && current.isRegistered { try service.unregister() }
     }
 
-    public static func openSettings() { SMAppService.openSystemSettingsLoginItems() }
+    public static func openSettings() { _ = qb_mac_login_item(3) }
 
     public static func isLoginLaunch(_ event: NSAppleEventDescriptor?) -> Bool {
         event?.eventClass == kCoreEventClass && event?.eventID == kAEOpenApplication

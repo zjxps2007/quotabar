@@ -134,53 +134,14 @@ final class MonitorStore: ObservableObject {
     var menuBarAccounts: [MonitoredAccount] { accounts.filter { $0.enabled && $0.isShownInMenuBar } }
     var attentionCount: Int { accounts.lazy.filter { $0.enabled && self.needsAttention($0) }.count }
 
-    var menuBarTitle: String { menuBarSummary(includeProvider: true) }
-    var menuBarRemaining: String { menuBarSummary(includeProvider: false) }
-
-    private func menuBarSummary(includeProvider: Bool) -> String {
-        let visible = menuBarAccounts
-        guard !visible.isEmpty else {
-            if !includeProvider { return "—" }
-            return accounts.isEmpty ? "계정 연결" : enabledAccounts.isEmpty ? "일시 정지" : "QuotaBar"
-        }
-        return ProviderKind.allCases.compactMap { provider -> String? in
-            let accounts = visible.filter { $0.provider == provider }
-            guard !accounts.isEmpty else { return nil }
-            let prefix = includeProvider ? "\(provider.title) " : ""
-            let remaining = accounts.lazy.compactMap { self.snapshots[$0.id]?.lowestRemaining }.min()
-            guard let remaining else { return "\(prefix)—" }
-            let incomplete = accounts.contains { menuBarValueNeedsUpdate($0) }
-            return "\(prefix)\(Int(remaining.rounded()))%\(incomplete ? "*" : "")"
-        }.joined(separator: " · ")
+    private let menuBarCache = MenuBarSummary.Cache()
+    private var menuBarSummary: MenuBarSummary {
+        menuBarCache.summary(accounts: accounts, snapshots: snapshots, errors: errors)
     }
-
-    var menuBarHelp: String {
-        let visible = menuBarAccounts
-        guard !visible.isEmpty else { return "QuotaBar · \(menuBarEmptyMessage)" }
-        var lines = ["남은 사용량 · 상단바에 표시한 계정과 사용 기간 중 Provider별 가장 낮은 잔여율"]
-        for account in visible {
-            let value = snapshots[account.id]?.lowestRemaining.map { "\(Int($0.rounded()))% 남음" } ?? "잔여량 확인 중"
-            let status = menuBarValueNeedsUpdate(account) && snapshots[account.id]?.lowestRemaining != nil ? " · 이전 값" : ""
-            lines.append("\(account.provider.title)(\(account.name)): \(value)\(status)")
-        }
-        if visible.contains(where: menuBarValueNeedsUpdate) {
-            lines.append("* 일부 계정의 최신 잔여량 확인 필요 · — 조회된 잔여량 없음")
-        }
-        return lines.joined(separator: "\n")
-    }
-
-    var menuBarEmptyMessage: String {
-        if accounts.isEmpty { return "Dashboard에서 계정을 연결하세요." }
-        if accounts.contains(where: \.isShownInMenuBar) {
-            return "표시할 계정의 모니터링이 일시 정지되어 있습니다."
-        }
-        return "Dashboard의 계정 카드에서 ‘상단바에 표시’를 켜세요."
-    }
-
-    private func menuBarValueNeedsUpdate(_ account: MonitoredAccount) -> Bool {
-        errors[account.id] != nil || snapshots[account.id]?.lowestRemaining == nil
-            || ["waiting", "stale", "disconnected", "api-routed"].contains(snapshots[account.id]?.state ?? "")
-    }
+    var menuBarTitle: String { menuBarSummary.title }
+    var menuBarRemaining: String { menuBarSummary.remaining }
+    var menuBarHelp: String { menuBarSummary.help }
+    var menuBarEmptyMessage: String { menuBarSummary.emptyMessage }
 
     init(demo: Bool = ProcessInfo.processInfo.arguments.contains("--demo"),
          remote: DashboardClient? = nil, managesDashboard: Bool = true) {

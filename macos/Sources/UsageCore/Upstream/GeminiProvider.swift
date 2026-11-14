@@ -20,8 +20,8 @@ public struct GeminiProvider: Sendable {
         if let value = assist.projectId { project = value }
         else { project = await discoverProjectId(accessToken: token) }
         let response = try await retrieveQuota(accessToken: token, projectId: project)
-        return parseQuotaResponse(response, creds: creds, projectId: project, tierId: assist.tierId,
-            source: SourceInfo(mode: "read-only", type: "gemini-cli"))
+        return try NativeQuota.parse(provider: "gemini", response: response, source: SourceInfo(mode: "read-only", type: "gemini-cli"),
+            email: creds.accountEmail, project: project, tier: assist.tierId)
     }
     private struct GeminiCredentials {
         let accessToken: String?
@@ -166,89 +166,6 @@ public struct GeminiProvider: Sendable {
         let body = String(decoding: data, as: UTF8.self).lowercased()
         return body.contains("unsupported_client")
             || body.contains("no longer supported for gemini code assist for individuals")
-    }
-
-    // MARK: - Response Parsing
-
-    private func parseQuotaResponse(_ response: [String: Any], creds: GeminiCredentials, projectId: String?, tierId: String?, source: SourceInfo) -> ProviderUsage {
-        let buckets = response["buckets"] as? [[String: Any]] ?? []
-
-        // Group by modelId, keep lowest remainingFraction
-        var byModel: [String: (remainingFraction: Double, resetTime: String?, tokenType: String?)] = [:]
-        for bucket in buckets {
-            guard let modelId = bucket["modelId"] as? String,
-                  let remainingFraction = bucket["remainingFraction"] as? Double else { continue }
-            if let existing = byModel[modelId], existing.remainingFraction <= remainingFraction { continue }
-            byModel[modelId] = (
-                remainingFraction: remainingFraction,
-                resetTime: bucket["resetTime"] as? String,
-                tokenType: bucket["tokenType"] as? String
-            )
-        }
-
-        let models = byModel.map { (modelId, info) -> [String: Any] in
-            let percentLeft = info.remainingFraction * 100
-            return [
-                "modelId": modelId,
-                "tokenType": info.tokenType ?? "",
-                "percentLeft": percentLeft,
-                "usedPercent": max(0, 100 - percentLeft),
-                "resetAt": info.resetTime ?? "",
-                "resetDescription": formatGeminiReset(info.resetTime)
-            ]
-        }.sorted { ($0["modelId"] as? String ?? "") < ($1["modelId"] as? String ?? "") }
-
-        // Select model groups
-        let proModels    = models.filter { ($0["modelId"] as? String ?? "").lowercased().contains("pro") }
-        let flashModels  = models.filter { let id = ($0["modelId"] as? String ?? "").lowercased(); return id.contains("flash") && !id.contains("flash-lite") }
-        let liteModels   = models.filter { ($0["modelId"] as? String ?? "").lowercased().contains("flash-lite") }
-
-        let lowestPercent = models.compactMap { $0["percentLeft"] as? Double }.min() ?? 100
-
-        var usage = ProviderUsage(provider: "gemini", label: "Gemini CLI")
-        usage.accountEmail = creds.accountEmail
-        usage.usageAccountId = projectId ?? creds.accountEmail
-        usage.accountPlan = parsePlan(tierId, email: creds.accountEmail)
-        usage.primary   = selectGeminiWindow(from: proModels)
-        usage.secondary = selectGeminiWindow(from: flashModels)
-        usage.tertiary  = selectGeminiWindow(from: liteModels)
-
-        usage.extra["projectId"]        = AnyCodable(projectId ?? "")
-        usage.extra["lowestPercentLeft"] = AnyCodable(lowestPercent)
-
-        usage.source = source
-        return usage
-    }
-
-    private func selectGeminiWindow(from models: [[String: Any]]) -> RawQuotaWindow? {
-        guard let lowest = models.min(by: { ($0["percentLeft"] as? Double ?? 100) < ($1["percentLeft"] as? Double ?? 100) }) else { return nil }
-        let percentLeft = lowest["percentLeft"] as? Double ?? 100
-        var window = RawQuotaWindow()
-        window.remainingPercent = percentLeft
-        window.usedPercent = max(0, 100 - percentLeft)
-        window.resetAt = lowest["resetAt"] as? String
-        window.resetDescription = lowest["resetDescription"] as? String
-        return window
-    }
-
-    private func formatGeminiReset(_ resetTime: String?) -> String {
-        guard let s = resetTime, let date = SharedFormatters.parseISO8601(s) else { return "Resets soon" }
-        let diff = date.timeIntervalSinceNow
-        if diff <= 0 { return "Resets soon" }
-        let totalMin = Int(diff / 60)
-        let hours = totalMin / 60
-        let mins = totalMin % 60
-        return hours > 0 ? "Resets in \(hours)h \(mins)m" : "Resets in \(mins)m"
-    }
-
-    private func parsePlan(_ tierId: String?, email: String?) -> String? {
-        guard let tier = tierId else { return email?.hasSuffix(".edu") == true ? "Education" : nil }
-        switch tier.lowercased() {
-        case "free": return "Free"
-        case "standard": return "Standard"
-        case "enterprise": return "Enterprise"
-        default: return tier.capitalized
-        }
     }
 
     private func normalizeProjectId(_ value: Any?) -> String? {

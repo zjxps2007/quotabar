@@ -14,7 +14,7 @@ public struct CodexProvider: Sendable {
             throw ProviderError("api_key_unsupported", "ChatGPT subscription login is required; API keys do not expose subscription quota.")
         }
         let response = try await requestUsage(creds: creds, url: Self.resolveUsageEndpointURL(homeDirectory: ""))
-        return parseResponse(response, accountId: creds.accountId,
+        return try parseResponse(response, accountId: creds.accountId,
             source: SourceInfo(mode: "read-only", type: "codex-auth-json"),
             fallbackEmail: creds.accountEmail, jwtPlanType: creds.jwtPlanType, jwtUserId: creds.jwtUserId)
     }
@@ -142,91 +142,10 @@ public struct CodexProvider: Sendable {
         return json
     }
 
-    func parseResponse(
-        _ json: [String: Any],
-        accountId: String?,
-        source: SourceInfo,
-        fallbackEmail: String?,
-        jwtPlanType: String? = nil,
-        jwtUserId: String? = nil
-    ) -> ProviderUsage {
-        let rateLimit = json["rate_limit"] as? [String: Any] ?? [:]
-        let codeReviewLimit = json["code_review_rate_limit"] as? [String: Any] ?? [:]
-
-        var usage = ProviderUsage(provider: "codex", label: "Codex")
-        usage.accountEmail = stringValue(json["email"]) ?? fallbackEmail
-
-        // 请求使用的工作区 ID 是身份锚点；响应中的 account_id 可能是旧式用户级 ID。
-        let rawAccountId = accountId ?? stringValue(json["account_id"])
-        usage.usageAccountId = rawAccountId
-
-        let apiPlan = stringValue(json["plan_type"])
-        let rawPlan = apiPlan ?? jwtPlanType
-        // 规范成展示名（Plus/Pro/Business/...），未知值原样保留。
-        usage.accountPlan = Self.planDisplayName(forRaw: rawPlan) ?? rawPlan
-
-        // 工作区归类仍以原始 plan 计算（兼容 *_usage_based / hc 等变体）。
-        let wsType = Self.workspaceType(fromPlan: rawPlan)
-        usage.extra["workspaceType"] = AnyCodable(wsType)
-        if let rawAccountId { usage.extra["workspaceId"] = AnyCodable(rawAccountId) }
-        if let jwtUserId { usage.extra["userId"] = AnyCodable(jwtUserId) }
-
-        usage.primary = parseWindow(rateLimit["primary_window"] as? [String: Any])
-        usage.secondary = parseWindow(rateLimit["secondary_window"] as? [String: Any])
-        usage.tertiary = parseWindow(codeReviewLimit["primary_window"] as? [String: Any])
-        usage.source = source
-
-        return usage
-    }
-
-    private func parseWindow(_ window: [String: Any]?) -> RawQuotaWindow? {
-        guard let window,
-              let usedPercent = window["used_percent"] as? Double else {
-            return nil
-        }
-        var result = RawQuotaWindow()
-        result.usedPercent = usedPercent
-        result.remainingPercent = max(0, 100 - usedPercent)
-        result.label = Self.windowLabel(
-            forLimitSeconds: (window["limit_window_seconds"] as? NSNumber)?.doubleValue
-        )
-
-        if let resetAtRaw = window["reset_at"] as? Double, resetAtRaw > 0 {
-            let resetDate = Date(timeIntervalSince1970: resetAtRaw)
-            result.resetAt = SharedFormatters.iso8601String(from: resetDate)
-            result.resetDescription = formatResetDescription(resetDate)
-        }
-        return result
-    }
-
-    /// OpenAI may temporarily move a remaining quota window into `primary_window`.
-    /// The reported duration is therefore the source of truth, not its position.
-    static func windowLabel(forLimitSeconds seconds: Double?) -> String? {
-        guard let seconds, seconds > 0 else { return nil }
-
-        let totalSeconds = Int(seconds.rounded())
-        let minute = 60
-        let hour = 60 * minute
-        let day = 24 * hour
-        let week = 7 * day
-
-        if totalSeconds == week { return "Weekly Window" }
-        if totalSeconds.isMultiple(of: day) { return "\(totalSeconds / day)d Window" }
-        if totalSeconds.isMultiple(of: hour) { return "\(totalSeconds / hour)h Window" }
-        if totalSeconds.isMultiple(of: minute) { return "\(totalSeconds / minute)m Window" }
-        return "Quota Window"
-    }
-
-    private func formatResetDescription(_ date: Date) -> String {
-        let diff = date.timeIntervalSinceNow
-        if diff <= 0 { return "Resets soon" }
-        let totalMinutes = Int(diff / 60)
-        let days = totalMinutes / 1440
-        let hours = (totalMinutes % 1440) / 60
-        let minutes = totalMinutes % 60
-        if days > 0 { return "Resets in \(days)d \(hours)h" }
-        if hours > 0 { return "Resets in \(hours)h \(minutes)m" }
-        return "Resets in \(minutes)m"
+    func parseResponse(_ response: [String: Any], accountId: String?, source: SourceInfo, fallbackEmail: String?,
+                       jwtPlanType: String? = nil, jwtUserId: String? = nil) throws -> ProviderUsage {
+        try NativeQuota.parse(provider: "codex", response: response, source: source, email: fallbackEmail,
+                              accountID: accountId, jwtPlan: jwtPlanType, userID: jwtUserId)
     }
 
     private func parseDate(_ value: String) -> Date? {
@@ -310,22 +229,4 @@ public struct CodexProvider: Sendable {
         default: return raw
         }
     }
-
-    /// Derive a workspace type label from the plan string.
-    /// 个人计划 (free/go/plus/pro) → "Personal"；团队/企业/教育 → 对应工作区名。
-    static func workspaceType(fromPlan plan: String?) -> String {
-        guard let plan, !plan.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            return "Personal"
-        }
-        switch normalizePlanKey(plan) {
-        case "team", "self_serve_business_usage_based", "business": return "Business"
-        case "enterprise_cbp_usage_based", "enterprise", "hc": return "Enterprise"
-        case "education", "edu": return "Edu"
-        default: return "Personal"
-        }
-    }
 }
-
-/// Serializes Codex OAuth refresh per workspace so parallel account fetches
-/// cannot rotate the same refresh_token. Callers must reload/persist inside
-/// `run`; awaiting across the actor boundary is not a lock.

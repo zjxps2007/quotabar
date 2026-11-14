@@ -1,4 +1,3 @@
-using System.Drawing.Drawing2D;
 using System.Drawing.Imaging;
 using System.Runtime.InteropServices;
 using Microsoft.Win32;
@@ -29,40 +28,25 @@ internal static class TrayIconRenderer
     public static Bitmap Render(TraySummary summary, int size, bool light)
     {
         var bitmap = new Bitmap(size, size, PixelFormat.Format32bppArgb);
-        using var g = Graphics.FromImage(bitmap);
-        g.SmoothingMode = SmoothingMode.AntiAlias;
-        using var brush = new SolidBrush(summary.Warning ? light ? Color.FromArgb(166, 85, 0) : Color.FromArgb(255, 183, 77) : light ? Color.Black : Color.White);
-        if (summary.UseLogo)
+        try
         {
-            float scale = (size - 2f) / 282, left = (size - 266 * scale) / 2;
-            foreach (var bar in Brand.Bars)
+            var data = bitmap.LockBits(new Rectangle(0, 0, size, size), ImageLockMode.WriteOnly, PixelFormat.Format32bppArgb);
+            try
             {
-                float x = left + (float)bar.X * scale, y = 1 + (float)bar.Y * scale,
-                    width = (float)bar.Width * scale, height = (float)bar.Height * scale, diameter = (float)bar.Radius * scale * 2;
-                using var path = new GraphicsPath();
-                path.AddArc(x, y, diameter, diameter, 180, 90);
-                path.AddArc(x + width - diameter, y, diameter, diameter, 270, 90);
-                path.AddArc(x + width - diameter, y + height - diameter, diameter, diameter, 0, 90);
-                path.AddArc(x, y + height - diameter, diameter, diameter, 90, 90);
-                path.CloseFigure(); g.FillPath(brush, path);
+                if (data.Stride != size * 4 || RenderNative(summary.Text, size, summary.UseLogo ? 1 : 0,
+                    summary.Warning ? 1 : 0, light ? 1 : 0, data.Scan0, (nuint)(size * data.Stride)) != 0)
+                    throw new InvalidOperationException("Tray icon rendering failed.");
             }
+            finally { bitmap.UnlockBits(data); }
+            return bitmap;
         }
-        else
-        {
-            // Fit the actual glyph bounds, so 100 remains readable without clipping. No ClearType on transparent pixels.
-            using var family = new FontFamily("Segoe UI");
-            using var path = new GraphicsPath();
-            path.AddString(summary.Text, family, (int)FontStyle.Bold, 32, PointF.Empty, StringFormat.GenericTypographic);
-            var bounds = path.GetBounds();
-            float scale = Math.Min((size - 1f) / bounds.Width, (size * .84f) / bounds.Height);
-            // A dash or exclamation mark should not expand to a full-width glyph.
-            scale = Math.Min(scale, size / 24f);
-            g.TranslateTransform((size - bounds.Width * scale) / 2, (size - bounds.Height * scale) / 2);
-            g.ScaleTransform(scale, scale); g.TranslateTransform(-bounds.X, -bounds.Y);
-            g.FillPath(brush, path);
-        }
-        return bitmap;
+        catch { bitmap.Dispose(); throw; }
     }
+
+    [DllImport("quotabar_native", EntryPoint = "qb_tray_render")]
+    private static extern int RenderNative([MarshalAs(UnmanagedType.LPUTF8Str)] string label, int size, int logo, int warning,
+        int light, IntPtr pixels, nuint length);
+
     public static void SaveSamples(string directory)
     {
         string[] labels = ["0", "7", "16", "38", "99", "100", "—", "!", "logo"];

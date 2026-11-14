@@ -1,6 +1,46 @@
-//! C entry points for hosts using the shared Rust usage scanner.
+//! C entry points used by the platform application hosts.
+mod login_item;
+mod vault;
+#[cfg(windows)]
+#[unsafe(no_mangle)]
+/// Draws straight-alpha BGRA into the caller's square icon buffer.
+/// # Safety
+/// Supply NUL-terminated UTF-8 text and a writable buffer of exactly length bytes.
+pub unsafe extern "C" fn qb_tray_render(
+    text: *const c_char,
+    size: i32,
+    logo: i32,
+    warning: i32,
+    light: i32,
+    output: *mut u8,
+    length: usize,
+) -> i32 {
+    if text.is_null()
+        || output.is_null()
+        || !(1..=256).contains(&size)
+        || length != size as usize * size as usize * 4
+    {
+        return -1;
+    }
+    let rendered = std::panic::catch_unwind(|| {
+        let label = unsafe { CStr::from_ptr(text) }
+            .to_str()
+            .map_err(io::Error::other)?;
+        quotabar::tray_icon::render(label, logo != 0, warning != 0, size, light != 0)
+    });
+    match rendered {
+        Ok(Ok(pixels)) => {
+            unsafe {
+                ptr::copy_nonoverlapping(pixels.as_ptr(), output, length);
+            }
+            0
+        }
+        _ => -1,
+    }
+}
 use chrono::{DateTime, FixedOffset, Local, Utc};
 use chrono_tz::Tz;
+use quotabar::quota;
 use quotabar::usage::{Report, Scanner};
 use serde::Deserialize;
 use std::{
@@ -55,6 +95,58 @@ fn report(handle: &ScanHandle, cancel: &CancelHandle, request: &CStr) -> io::Res
 #[unsafe(no_mangle)]
 pub extern "C" fn qb_scanner_new() -> *mut ScanHandle {
     Box::into_raw(Box::new(ScanHandle(Mutex::new(Scanner::default()))))
+}
+
+/// # Safety
+/// The request must be a NUL-terminated UTF-8 JSON object. Release the
+/// result with qb_string_free. A null result indicates an invalid response.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn qb_parse_quota(request: *const c_char) -> *mut c_char {
+    json_response(request, |bytes| {
+        let request = serde_json::from_slice(bytes)?;
+        let format = if cfg!(windows) {
+            quota::Format::Windows
+        } else {
+            quota::Format::Mac
+        };
+        Ok(serde_json::to_vec(&quota::parse(
+            &request,
+            format,
+            Utc::now(),
+        )?)?)
+    })
+}
+
+/// # Safety
+/// The NUL-terminated UTF-8 input must remain valid until return. Release the
+/// returned summary with qb_string_free.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn qb_tray_summary(request: *const c_char) -> *mut c_char {
+    json_response(request, |bytes| {
+        let state = serde_json::from_slice(bytes)?;
+        if cfg!(windows) {
+            Ok(serde_json::to_vec(&quotabar::tray::windows(&state))?)
+        } else {
+            Ok(serde_json::to_vec(&quotabar::tray::mac(&state))?)
+        }
+    })
+}
+
+fn json_response(
+    request: *const c_char,
+    parse: impl FnOnce(&[u8]) -> io::Result<Vec<u8>> + std::panic::UnwindSafe,
+) -> *mut c_char {
+    if request.is_null() {
+        return ptr::null_mut();
+    }
+    std::panic::catch_unwind(|| -> io::Result<CString> {
+        Ok(CString::new(parse(
+            unsafe { CStr::from_ptr(request) }.to_bytes(),
+        )?)?)
+    })
+    .ok()
+    .and_then(Result::ok)
+    .map_or(ptr::null_mut(), CString::into_raw)
 }
 /// # Safety
 /// Pass one live handle returned by qb_scanner_new, after all calls on it finish.

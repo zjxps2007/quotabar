@@ -7,7 +7,7 @@ let package = Package(
     products: [.executable(name: "QuotaBar", targets: ["QuotaBar"])],
     targets: [
         .systemLibrary(name: "CQuotaBar"),
-        .target(name: "UsageCore", dependencies: ["CQuotaBar"], linkerSettings: [.linkedLibrary("iconv")]),
+        .target(name: "UsageCore", dependencies: ["CQuotaBar"], linkerSettings: [.linkedLibrary("iconv"), .linkedFramework("ServiceManagement")]),
         .executableTarget(name: "QuotaBar", dependencies: ["UsageCore"], resources: [.process("Resources")]),
         .testTarget(name: "UsageCoreTests", dependencies: ["UsageCore"])
     ]

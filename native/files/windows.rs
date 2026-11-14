@@ -164,6 +164,39 @@ fn attributes(descriptor: &Local) -> SECURITY_ATTRIBUTES {
     }
 }
 
+pub(crate) fn open_owned_credential(path: &Path) -> io::Result<File> {
+    use windows_sys::Win32::Foundation::GENERIC_READ;
+    let path = wide(path)?;
+    unsafe {
+        let raw = CreateFileW(
+            path.as_ptr(),
+            GENERIC_READ,
+            FILE_SHARE_READ,
+            null(),
+            OPEN_EXISTING,
+            FILE_FLAG_OPEN_REPARSE_POINT,
+            null_mut(),
+        );
+        if raw == INVALID_HANDLE_VALUE {
+            return Err(io::Error::last_os_error());
+        }
+        let handle = OwnedHandle::from_raw_handle(raw);
+        let mut info = BY_HANDLE_FILE_INFORMATION::default();
+        succeeded(GetFileInformationByHandle(
+            handle.as_raw_handle(),
+            &mut info,
+        ))?;
+        if info.nNumberOfLinks != 1
+            || info.dwFileAttributes & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT)
+                != 0
+        {
+            return Err(invalid("Unexpected credential file type or link count"));
+        }
+        CurrentUser::get()?.check_owner(&handle)?;
+        Ok(File::from(handle))
+    }
+}
+
 pub fn ensure_private_directory(path: &Path) -> io::Result<()> {
     reject_links(path)?;
     if let Some(parent) = path.parent() {

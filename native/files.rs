@@ -24,6 +24,8 @@ pub fn read_file(path: &Path, limit: usize) -> io::Result<Vec<u8>> {
 }
 
 #[cfg(windows)]
+pub(crate) use windows::open_owned_credential;
+#[cfg(windows)]
 pub(crate) use windows::wide;
 #[cfg(windows)]
 pub use windows::{ensure_private_directory, reject_links};
