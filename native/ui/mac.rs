@@ -206,10 +206,11 @@ pub fn intrinsic_symbol(
     ui: &mut eframe::egui::Ui,
     name: &str,
     points: f32,
+    semibold: bool,
     tint: eframe::egui::Color32,
 ) -> bool {
     use eframe::egui::{Pos2, Rect, Sense, pos2};
-    let Some(texture) = symbol_texture(ui.ctx(), name, points, false) else {
+    let Some(texture) = symbol_texture(ui.ctx(), name, points, semibold) else {
         return false;
     };
     let size = texture.size_vec2() / ui.ctx().pixels_per_point();

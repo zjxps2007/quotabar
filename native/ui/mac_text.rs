@@ -27,6 +27,7 @@ use std::collections::HashMap;
 #[derive(Clone, Copy, Hash, Eq, PartialEq)]
 enum Face {
     Regular,
+    Monospace,
     Underlined,
     Emphasized,
     TabularDigits,
@@ -57,7 +58,7 @@ fn attributed(value: &str, size: f64, face: Face) -> CFMutableAttributedString {
     // logical point size so Retina drawing preserves its optical size.
     let weight = unsafe {
         match face {
-            Face::Regular | Face::Underlined => NSFontWeightRegular,
+            Face::Regular | Face::Monospace | Face::Underlined => NSFontWeightRegular,
             Face::Emphasized if size >= 17. => NSFontWeightBold,
             Face::Emphasized | Face::TabularDigits | Face::RoundedDigits => NSFontWeightSemibold,
         }
@@ -69,6 +70,8 @@ fn attributed(value: &str, size: f64, face: Face) -> CFMutableAttributedString {
             .fontDescriptorWithDesign(unsafe { objc2_app_kit::NSFontDescriptorSystemDesignRounded })
             .and_then(|descriptor| NSFont::fontWithDescriptor_size(&descriptor, size))
             .unwrap_or(digits)
+    } else if face == Face::Monospace {
+        NSFont::monospacedSystemFontOfSize_weight(size, weight)
     } else if face == Face::TabularDigits {
         NSFont::monospacedDigitSystemFontOfSize_weight(size, weight)
     } else {
@@ -206,6 +209,7 @@ impl Renderer {
         let format = &section.format;
         let face = match &format.font_id.family {
             FontFamily::Proportional => Face::Regular,
+            FontFamily::Monospace => Face::Monospace,
             FontFamily::Name(name) if name.as_ref() == "system-semibold" => Face::Emphasized,
             _ => return None,
         };
@@ -323,10 +327,22 @@ pub fn quota_percent(ui: &mut Ui, text: &str, color: Color32) -> Option<Response
     draw_label(ui, text, 11., Face::TabularDigits, color, LineBox::Stack)
 }
 
-pub fn hyperlink(ui: &mut Ui, title: &str, url: &str, size: f32, color: Color32) -> Response {
+pub fn hyperlink(
+    ui: &mut Ui,
+    title: &str,
+    url: &str,
+    size: f32,
+    color: Color32,
+    underline: bool,
+) -> Response {
     let native = ui.ctx().plugin_opt::<Renderer>().and_then(|renderer| {
         let mut renderer = renderer.lock();
-        let run = renderer.run(ui.ctx(), title, size, Face::Underlined, color)?;
+        let face = if underline {
+            Face::Underlined
+        } else {
+            Face::Regular
+        };
+        let run = renderer.run(ui.ctx(), title, size, face, color)?;
         let height = system_line_height(ui, f64::from(size)).max(run.size.y);
         let (rect, response) = ui.allocate_exact_size(vec2(run.size.x, height), Sense::click());
         let top = pos2(rect.left(), rect.center().y - run.size.y * 0.5);

@@ -935,7 +935,7 @@ impl Connect {
                         let orange = if p.dark { Color32::from_rgb(255, 159, 10) } else { Color32::from_rgb(255, 149, 0) };
                         note(ui, "Code Assist Standard · Enterprise 전용. 개인용 Google 로그인은 2026년 6월 18일에 종료되었습니다.", orange);
                         crate::mac_text::hyperlink(ui, "Google 지원 범위 확인",
-                            "https://developers.google.com/gemini-code-assist/docs/deprecations/code-assist-individuals", 12., p.accent);
+                            "https://developers.google.com/gemini-code-assist/docs/deprecations/code-assist-individuals", 12., p.accent, true);
                     }
                     note(ui, if self.provider == "Codex" { "먼저 터미널에서 codex login을 실행하세요." } else { "먼저 Gemini CLI에서 지원되는 계정으로 로그인하세요." }, p.muted);
                 }

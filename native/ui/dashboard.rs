@@ -188,7 +188,7 @@ impl Dashboard {
                         ui.spacing_mut().interact_size.y = 0.;
                         ui.horizontal_top(|ui| {
                             ui.spacing_mut().item_spacing.x = 7.;
-                            if !crate::mac::intrinsic_symbol(ui, "eye", 10., p.muted) {
+                            if !crate::mac::intrinsic_symbol(ui, "eye", 10., false, p.muted) {
                                 ui.allocate_exact_size(vec2(16., 13.), Sense::hover());
                             }
                             if crate::mac_text::paragraph(ui, note, 10., 0., p.muted).is_none() {
@@ -334,6 +334,7 @@ impl Dashboard {
                                     ui,
                                     system_symbol_name(symbol),
                                     13.,
+                                    false,
                                     color,
                                 ) {
                                     return;

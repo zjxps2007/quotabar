@@ -602,12 +602,27 @@ impl Dashboard {
             }
         });
         ui.add_space(20.);
-        p.frame(20).show(ui,|ui|{ui.set_width(ui.available_width());settings_title(ui,"오픈소스 라이선스","doc.text",p);ui.add_space(14.);
-            label(ui,"AIUsage · sylearn 및 기여자",12.,true,p.ink);ui.add_space(6.);caption(ui,"Apache License 2.0",p);ui.add_space(12.);
-            label(ui,"QuotaBar는 AIUsage의 사용량 조회 코드와 Claude 연결 기능 등을 재사용·수정한 독립 프로젝트입니다.",12.,false,p.ink);
-            ui.add_space(14.);ui.horizontal(|ui|{if MAC { ui.spacing_mut().item_spacing.x = 16.; }
-                if sheet_button(ui,"라이선스 및 고지 보기",p).clicked(){self.dialog=Some(Dialog::licenses());}
-                ui.hyperlink_to("원본 프로젝트","https://github.com/sylearn/AIUsage");});
+        p.frame(20).show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            settings_title(ui, "오픈소스 라이선스", "doc.text", p);
+            ui.add_space(if MAC { 12. } else { 14. });
+            label(ui, "AIUsage · sylearn 및 기여자", 12., true, p.ink);
+            ui.add_space(if MAC { 12. } else { 6. });
+            system_label(ui, "Apache License 2.0", if MAC { 10. } else { 11. }, false, p.muted);
+            ui.add_space(12.);
+            label(ui, "QuotaBar는 AIUsage의 사용량 조회 코드와 Claude 연결 기능 등을 재사용·수정한 독립 프로젝트입니다.", 12., false, p.ink);
+            ui.add_space(if MAC { 12. } else { 14. });
+            ui.horizontal(|ui| {
+                if MAC { ui.spacing_mut().item_spacing.x = 16.; }
+                if sheet_button(ui, "라이선스 및 고지 보기", p).clicked() {
+                    self.dialog = Some(Dialog::licenses());
+                }
+                let url = "https://github.com/sylearn/AIUsage";
+                #[cfg(target_os = "macos")]
+                crate::mac_text::hyperlink(ui, "원본 프로젝트", url, 13., p.accent, false);
+                #[cfg(windows)]
+                ui.hyperlink_to("원본 프로젝트", url);
+            });
         });
     }
     fn app_settings(&mut self, ui: &mut Ui, p: Palette) {
@@ -689,23 +704,25 @@ impl Dashboard {
                 ui.add_space(12.);
                 ui.add(ProgressBar::new(progress as f32 / 100.).desired_height(5.));
             }
-            ui.add_space(16.);
+            ui.add_space(if MAC { 14. } else { 16. });
             ui.horizontal(|ui| {
                 if ui.add_enabled_ui(!busy && (MAC || !self.state.demo), |ui| {
-                    action(ui, "업데이트 확인", false, p)
+                    sheet_button(ui, "업데이트 확인", p)
                 }).inner.clicked() {
                     self.wire.action("check-app-update", Value::Null);
                 }
                 if matches!(phase, "available" | "ready") {
                     let enabled = !self.state.demo && self.state.raw["loggingIn"] != true;
-                    if ui.add_enabled_ui(enabled, |ui| action(ui, "설치 후 다시 시작", false, p)).inner.clicked() {
+                    if ui.add_enabled_ui(enabled, |ui| sheet_button(ui, "설치 후 다시 시작", p)).inner.clicked() {
                         self.wire.action("install-app-update", Value::Null);
                     }
                 }
             });
-            if MAC {
-                divider(ui, p);
-                ui.hyperlink_to("QuotaBar · GitHub", "https://github.com/zjxps2007/quotabar");
+            #[cfg(target_os = "macos")]
+            {
+                let contrast = if p.dark { Color32::WHITE } else { Color32::BLACK };
+                spaced_divider(ui, p.card.lerp_to_gamma(contrast, 0.10), 18., 18.);
+                crate::mac_text::hyperlink(ui, "QuotaBar · GitHub", "https://github.com/zjxps2007/quotabar", 13., p.accent, false);
             }
         });
     }
@@ -713,9 +730,8 @@ impl Dashboard {
 fn settings_title(ui: &mut Ui, text: &str, _symbol: &str, p: Palette) {
     #[cfg(target_os = "macos")]
     ui.horizontal(|ui| {
-        let (icon, _) = ui.allocate_exact_size(Vec2::splat(18.), Sense::hover());
-        crate::mac::symbol(ui.painter(), icon, _symbol, 14., true, p.ink);
-        label(ui, text, 13., true, p.ink);
+        crate::mac::intrinsic_symbol(ui, _symbol, 13., true, p.ink);
+        system_label(ui, text, 13., true, p.ink);
     });
     #[cfg(windows)]
     label(ui, text, 14., true, p.ink);

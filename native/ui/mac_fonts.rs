@@ -4,6 +4,8 @@ use core_foundation::{
 };
 use core_text::font::{self, CTFont, CTFontRef};
 use eframe::egui::FontData;
+use objc2::rc::Retained;
+use objc2_app_kit::{NSFont, NSFontWeightRegular};
 
 pub fn load(family: &str, semibold: bool) -> Option<FontData> {
     let system = font::new_ui_font_for_language(
@@ -16,6 +18,14 @@ pub fn load(family: &str, semibold: bool) -> Option<FontData> {
         None,
     );
     match family {
+        "system-monospaced" => {
+            let nsfont =
+                NSFont::monospacedSystemFontOfSize_weight(11., unsafe { NSFontWeightRegular });
+            let fixed =
+                unsafe { CTFont::wrap_under_get_rule(Retained::as_ptr(&nsfont) as CTFontRef) };
+            data_for(&fixed, '0')
+                .or_else(|| data_for(&font::new_from_name("Menlo", 11.).ok()?, '0'))
+        }
         "Apple SD Gothic Neo" => {
             let name = if semibold {
                 "AppleSDGothicNeo-SemiBold"

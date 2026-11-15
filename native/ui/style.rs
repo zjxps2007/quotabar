@@ -44,7 +44,7 @@ pub fn fonts(ctx: &Context) {
     let fixed = if cfg!(windows) {
         ["Consolas", "Malgun Gothic"]
     } else {
-        ["Menlo", "Apple SD Gothic Neo"]
+        ["system-monospaced", "Apple SD Gothic Neo"]
     };
     for (family, weight, candidates, fallback) in [
         (FontFamily::Proportional, Weight::NORMAL, sans, &fallback),
