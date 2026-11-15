@@ -4,7 +4,7 @@ use crate::instance::acquire_lease;
 use objc2_foundation::{NSBundle, NSString, NSURL};
 use serde::Deserialize;
 use std::{
-    ffi::{CStr, CString, OsStr, OsString},
+    ffi::{CString, OsStr, OsString},
     fs, io,
     os::unix::{ffi::OsStrExt, fs::MetadataExt},
     path::{Path, PathBuf},
@@ -12,6 +12,7 @@ use std::{
     thread,
     time::Duration,
 };
+use unicode_normalization::UnicodeNormalization;
 use uuid::Uuid;
 
 #[derive(Deserialize)]
@@ -35,12 +36,47 @@ fn local_url(value: &str) -> io::Result<PathBuf> {
                     .is_none_or(|h| h.is_empty() || h.to_string().eq_ignore_ascii_case("localhost"))
         })
         .ok_or_else(|| invalid("Expected a local file URL"))?;
-    let path = unsafe { CStr::from_ptr(url.fileSystemRepresentation().as_ptr()) };
-    let path = PathBuf::from(OsStr::from_bytes(path.to_bytes()));
-    if !path.is_absolute() {
+    // Foundation's fileSystemRepresentation decomposes Unicode, even when the
+    // serialized Swift URL and the on-volume spelling both use composed text.
+    let path = url.path().ok_or_else(|| invalid("Missing file URL path"))?;
+    let path = PathBuf::from(path.to_string());
+    if !path.is_absolute() || path.as_os_str().as_bytes().contains(&0) {
         return Err(invalid("Expected an absolute file URL"));
     }
     Ok(path)
+}
+
+fn same_location(a: &Path, b: &Path) -> io::Result<bool> {
+    if a == b {
+        return Ok(true);
+    }
+    let same_spelling = a
+        .to_str()
+        .zip(b.to_str())
+        .is_some_and(|(a, b)| a.nfc().eq(b.nfc()));
+    if !same_spelling {
+        return Ok(false);
+    }
+    let a = fs::symlink_metadata(a)?;
+    let b = fs::symlink_metadata(b)?;
+    Ok(a.dev() == b.dev() && a.ino() == b.ino())
+}
+
+fn is_resolved(path: &Path) -> io::Result<bool> {
+    let resolved = fs::canonicalize(path)?;
+    if resolved == path {
+        return Ok(true);
+    }
+    if !same_location(path, &resolved)? {
+        return Ok(false);
+    }
+    // A volume may also contain distinct Unicode spellings and symlinks.
+    for ancestor in path.ancestors() {
+        if fs::symlink_metadata(ancestor)?.is_symlink() {
+            return Ok(false);
+        }
+    }
+    Ok(true)
 }
 
 fn bundle_field(bundle: &Path, key: &str) -> io::Result<String> {
@@ -134,7 +170,7 @@ struct Replacement {
 }
 impl Replacement {
     fn new(target: PathBuf, transaction: &str) -> io::Result<Self> {
-        if target.extension() != Some(OsStr::new("app")) || fs::canonicalize(&target)? != target {
+        if target.extension() != Some(OsStr::new("app")) || !is_resolved(&target)? {
             return Err(invalid("Invalid bundle replacement path"));
         }
         let stem = target
@@ -190,8 +226,13 @@ pub fn apply(job: &Path) -> io::Result<()> {
     let updates = root.join("Updates");
     let stage = job.parent().ok_or_else(|| invalid("Invalid job path"))?;
     if job.file_name() != Some(OsStr::new("install.json"))
-        || stage.parent() != Some(&updates)
-        || fs::canonicalize(job)? != job
+        || !same_location(
+            stage
+                .parent()
+                .ok_or_else(|| invalid("Missing updates root"))?,
+            &updates,
+        )?
+        || !is_resolved(job)?
     {
         return Err(invalid("Unexpected update job location"));
     }
@@ -209,7 +250,7 @@ pub fn apply(job: &Path) -> io::Result<()> {
         .to_ascii_uppercase();
     let plan: Plan = serde_json::from_slice(&read_file(job, 64 * 1024)?)?;
     let target = local_url(&plan.target)?;
-    if local_url(&plan.staged.directory)? != stage
+    if !same_location(&local_url(&plan.staged.directory)?, stage)?
         || bundle_field(&target, "CFBundleIdentifier")? != "com.aiusage.lite"
     {
         return Err(invalid("Unexpected update target"));
@@ -287,25 +328,28 @@ mod tests {
 
     #[test]
     fn swift_file_urls_with_directory_hints_roundtrip() {
-        let path = Path::new("/Applications/QuotaBar 한글.app");
-        for suffix in ["", "/"] {
-            assert_eq!(
-                local_url(&format!(
-                    "file:///Applications/QuotaBar%20%ED%95%9C%EA%B8%80.app{suffix}"
-                ))
-                .unwrap(),
-                path
-            );
+        for (encoded, name) in [("%ED%95%9C%EA%B8%80", "한글"), ("%65%CC%81", "e\u{301}")] {
+            for suffix in ["", "/"] {
+                let url = format!("file:///Applications/QuotaBar%20{encoded}.app{suffix}");
+                let expected = format!("/Applications/QuotaBar {name}.app");
+                assert_eq!(local_url(&url).unwrap(), Path::new(&expected));
+            }
         }
         assert!(local_url("https://example.invalid/QuotaBar.app").is_err());
+        assert!(local_url("file://example.invalid/QuotaBar.app").is_err());
     }
 
     #[test]
     fn swap_and_rollback_keep_the_bundle_present() {
         let directory = std::env::temp_dir().join(Uuid::new_v4().to_string());
         fs::create_dir(&directory).unwrap();
-        let target = fs::canonicalize(&directory).unwrap().join("QuotaBar.app");
+        let target = fs::canonicalize(&directory)
+            .unwrap()
+            .join("QuotaBar 한글.app");
         fs::create_dir(&target).unwrap();
+        let alias = target.with_file_name("link.app");
+        std::os::unix::fs::symlink(&target, &alias).unwrap();
+        assert!(Replacement::new(alias, "test").is_err());
         fs::write(target.join("old"), b"original").unwrap();
         let paths = Replacement::new(target, "test").unwrap();
         fs::create_dir(&paths.incoming).unwrap();

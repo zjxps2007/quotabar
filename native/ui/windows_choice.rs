@@ -12,6 +12,62 @@ struct TypeSearch {
     last_input: f64,
 }
 
+fn keyboard_cues(ui: &Ui) -> bool {
+    let id = Id::new(("Windows keyboard cues", ui.ctx().viewport_id()));
+    let input = ui.input(|i| {
+        i.raw.events.iter().rev().find_map(|e| match e {
+            Event::Key { pressed: true, .. } => Some(true),
+            Event::PointerButton { pressed: true, .. } => Some(false),
+            _ => None,
+        })
+    });
+    ui.data_mut(|d| {
+        let cues = d.get_temp_mut_or_default::<bool>(id);
+        if let Some(keyboard) = input {
+            *cues = keyboard;
+        }
+        *cues
+    })
+}
+
+fn draw_keyboard_cues(ui: &Ui, rect: Rect, ink: Color32) {
+    // WPF's focus adorner has a two-DIP margin and a one-on, two-off pen.
+    let r = rect.shrink(2.5);
+    let corners = [
+        r.left_top(),
+        r.right_top(),
+        r.right_bottom(),
+        r.left_bottom(),
+        r.left_top(),
+    ];
+    let clip = ui.clip_rect().expand(1.);
+    let mut perimeter = 0.;
+    for pair in corners.windows(2) {
+        let (from, to) = (pair[0], pair[1]);
+        let delta = to - from;
+        let length = delta.length();
+        if length > 0. && clip.intersects(Rect::from_two_pos(from, to).expand(0.5)) {
+            // A selected license document can be much taller than the viewport.
+            let direction = delta / length;
+            let begin = (clip.clamp(from) - from).dot(direction);
+            let end = (clip.clamp(to) - from).dot(direction);
+            let mut dash = ((perimeter + begin) / 3.).floor() * 3. - perimeter;
+            while dash < end {
+                let a = dash.max(0.);
+                let b = (dash + 1.).min(length);
+                if a < b {
+                    ui.painter().line_segment(
+                        [from + direction * a, from + direction * b],
+                        Stroke::new(1.0_f32, ink),
+                    );
+                }
+                dash += 3.;
+            }
+        }
+        perimeter += length;
+    }
+}
+
 impl TypeSearch {
     fn find(
         &mut self,
@@ -127,6 +183,7 @@ fn choose_presented(
     documents: Option<&[(String, String)]>,
 ) -> Option<usize> {
     let id = ui.make_persistent_id(Id::new(name));
+    let show_focus = keyboard_cues(ui);
     let popup = id.with("popup");
     let was_open = ComboBox::is_open(ui.ctx(), id);
     let highlight = id.with("highlighted");
@@ -336,6 +393,9 @@ fn choose_presented(
             Stroke::new(1.0_f32, ink),
             StrokeKind::Inside,
         );
+        if show_focus {
+            draw_keyboard_cues(ui, response.rect, ink);
+        }
     } else if response.hovered() {
         let theme = if ui.visuals().dark_mode {
             "dark"

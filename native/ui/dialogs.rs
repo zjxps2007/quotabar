@@ -240,12 +240,6 @@ impl Dashboard {
                 )
                 .show(ctx, |ui| match &mut dialog {
                     Dialog::Connect(c) => {
-                        let scroll =
-                            ScrollArea::vertical()
-                                .auto_shrink([false, true])
-                                .show(ui, |ui| {
-                                    close |= self.connect_panel(ui, c, p, &mut browse);
-                                });
                         #[cfg(target_os = "macos")]
                         let limit = (ctx
                             .input(|i| i.viewport().monitor_size.map(|size| size.y))
@@ -254,6 +248,20 @@ impl Dashboard {
                             .max(160.);
                         #[cfg(windows)]
                         let limit = super::client_size(frame, ctx, [590., 720.]).y;
+                        let scroll = ScrollArea::vertical().auto_shrink([false, true]);
+                        // The Windows dialog sizes itself to the controls. A fractional
+                        // pixel at its natural height must not reserve scrollbar space.
+                        #[cfg(windows)]
+                        let scroll = if c.content_height.is_none_or(|height| height < limit) {
+                            scroll.scroll_bar_visibility(
+                                scroll_area::ScrollBarVisibility::AlwaysHidden,
+                            )
+                        } else {
+                            scroll
+                        };
+                        let scroll = scroll.show(ui, |ui| {
+                            close |= self.connect_panel(ui, c, p, &mut browse);
+                        });
                         let scale = if MAC { 1. } else { ctx.pixels_per_point() };
                         let pixels = (scroll.content_size.y + 56.) * scale;
                         let measured =
