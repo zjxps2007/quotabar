@@ -2,14 +2,13 @@ use super::{InstallResult, Platform, Verified, Version, verified_stage};
 use crate::files::{
     ensure_private_directory, invalid, read_file, reject_links, wide, write_private,
 };
+use crate::instance::acquire_lease;
 use serde::Deserialize;
 use std::{
     ffi::OsString,
-    fs::{self, File},
-    io,
+    fs, io,
     os::windows::{
         ffi::OsStringExt,
-        fs::OpenOptionsExt,
         io::{AsRawHandle, FromRawHandle, OwnedHandle},
         process::CommandExt,
     },
@@ -17,7 +16,7 @@ use std::{
     process::Command,
     ptr::null_mut,
     thread,
-    time::{Duration, Instant},
+    time::Duration,
 };
 use uuid::Uuid;
 use windows_sys::Win32::{
@@ -177,7 +176,7 @@ fn file_version(path: &Path) -> io::Result<Version> {
         ))
     }
 }
-fn validate_version(folder: &Path, version: &str) -> io::Result<()> {
+pub fn validate_version(folder: &Path, version: &str) -> io::Result<()> {
     let version: Version = version.parse()?;
     for base in [
         "QuotaBar.Monitor",
@@ -189,15 +188,18 @@ fn validate_version(folder: &Path, version: &str) -> io::Result<()> {
         if !exe.is_file() {
             return Err(invalid("Missing update program"));
         }
-        let legacy = folder.join(format!("{base}.dll"));
-        let resource = if base == "StatusLine/QuotaBar.StatusLine" {
-            &exe
-        } else {
-            &legacy
-        };
-        reject_links(resource)?;
-        if file_version(resource)? != version {
+        // A Rust helper carries its version in its EXE. An older .NET helper
+        // also has a runtimeconfig and must have a matching managed assembly.
+        if base != "QuotaBar.Monitor" && file_version(&exe)? != version {
             return Err(invalid("Update package version mismatch"));
+        }
+        if base == "QuotaBar.Monitor" || folder.join(format!("{base}.runtimeconfig.json")).is_file()
+        {
+            let assembly = folder.join(format!("{base}.dll"));
+            reject_links(&assembly)?;
+            if file_version(&assembly)? != version {
+                return Err(invalid("Update package version mismatch"));
+            }
         }
     }
     Ok(())
@@ -316,32 +318,6 @@ fn wait_parent(pid: u32, started: i64) -> io::Result<()> {
     }
 }
 
-fn lease(root: &Path, timeout: Duration) -> io::Result<File> {
-    ensure_private_directory(root)?;
-    let path = root.join("monitor.lock");
-    reject_links(&path)?;
-    let deadline = Instant::now() + timeout;
-    loop {
-        match File::options()
-            .create(true)
-            .truncate(false)
-            .read(true)
-            .write(true)
-            .share_mode(0)
-            .open(&path)
-        {
-            Ok(file) => return Ok(file),
-            Err(e)
-                if e.raw_os_error() == Some(ERROR_SHARING_VIOLATION as i32)
-                    && Instant::now() < deadline =>
-            {
-                thread::sleep(RETRY)
-            }
-            Err(e) => return Err(e),
-        }
-    }
-}
-
 impl Plan {
     fn platform(&self) -> Platform {
         if self.installer {
@@ -449,7 +425,7 @@ pub fn apply(job: &Path) -> io::Result<()> {
         }
         plan.result(&stage.join("installer-ready.json"), true, "ready")?;
         wait_parent(plan.parent_pid, plan.parent_started)?;
-        lock = Some(lease(&plan.data_root, Duration::from_secs(30))?);
+        lock = Some(acquire_lease(&plan.data_root, Duration::from_secs(30))?);
         validate_version(&plan.target, &plan.current_version)?;
         if plan.installer {
             copy_tree(&plan.target, &replacement.backup)?;
@@ -485,7 +461,7 @@ pub fn apply(job: &Path) -> io::Result<()> {
                 return Ok(());
             }
             if lock.is_none() {
-                lock = Some(lease(&plan.data_root, Duration::from_secs(1))?);
+                lock = Some(acquire_lease(&plan.data_root, Duration::from_secs(1))?);
             }
             replacement.swap(true)?;
             if plan.installer {

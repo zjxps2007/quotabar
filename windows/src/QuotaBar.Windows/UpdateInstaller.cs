@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.IO.Compression;
+using System.Runtime.InteropServices;
 using Microsoft.Win32;
 using QuotaBar.Core;
 
@@ -103,18 +104,12 @@ public static class UpdateInstaller
         if (verified != staged.Update || verified.Asset.Name != expected) throw new IOException("Update platform mismatch.");
         PrivateFiles.RejectLinks(staged.Archive); await UpdateSignature.VerifyFile(staged.Archive, verified.Asset, token);
     }
+    [DllImport("quotabar_native", EntryPoint = "qb_release_windows_components")]
+    private static extern int ValidateComponents([MarshalAs(UnmanagedType.LPUTF8Str)] string root, [MarshalAs(UnmanagedType.LPUTF8Str)] string version);
     private static void ValidateVersion(string root, string version)
     {
-        foreach (string relative in new[] { "QuotaBar.Monitor", "Dashboard/QuotaBar.Dashboard", "StatusLine/QuotaBar.StatusLine" })
-        {
-            string path = Path.Combine(root, relative.Replace('/', Path.DirectorySeparatorChar));
-            string exe = path + ".exe"; PrivateFiles.RejectLinks(exe);
-            string resource = relative.StartsWith("StatusLine/") ? exe : path + ".dll";
-            PrivateFiles.RejectLinks(resource);
-            var info = FileVersionInfo.GetVersionInfo(resource);
-            if (!File.Exists(exe) || new Version(info.FileMajorPart, info.FileMinorPart, info.FileBuildPart).ToString(3) != version)
-                throw new IOException("Update package version mismatch.");
-        }
+        if (root.Contains('\0') || version.Contains('\0') || ValidateComponents(root, version) != 0)
+            throw new IOException("Update package version mismatch.");
     }
 
     public static void CopyTree(string source, string destination, CancellationToken token)

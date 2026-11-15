@@ -1,5 +1,7 @@
 // The callback and stored data formats derive from sylearn/AIUsage and QuotaBar. See NOTICE.
-use crate::files::{invalid, read_file, write_private};
+use crate::files::invalid;
+#[cfg(windows)]
+use crate::files::{read_file, write_private};
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use std::ffi::OsString;
@@ -7,8 +9,15 @@ use std::fs;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+#[cfg(windows)]
 use uuid::Uuid;
 
+#[cfg(windows)]
+pub mod connection;
+#[cfg(any(test, target_os = "macos", feature = "mac-settings-compat"))]
+pub mod mac_connection;
+#[cfg(any(test, target_os = "macos", feature = "mac-settings-compat"))]
+pub mod mac_snapshots;
 #[cfg(target_os = "macos")]
 #[path = "claude/macos.rs"]
 mod platform;
@@ -37,24 +46,26 @@ struct Window {
     resets_at: f64,
 }
 
-fn parse_input(bytes: &[u8]) -> io::Result<(String, Limits)> {
+fn parse_input(
+    bytes: &[u8],
+    valid_session: fn(&str) -> bool,
+) -> io::Result<Option<(String, Limits)>> {
     if bytes.len() > MAX_INPUT {
-        return Err(invalid("Oversized Claude callback"));
+        return Err(invalid("Status line input is too large."));
     }
     let input: Input = serde_json::from_slice(bytes)?;
-    let session = input.session_id.as_str();
-    if !platform::valid_session(session) {
-        return Err(invalid("Invalid session ID"));
-    }
-    let limits = input
+    let Some(limits) = input
         .rate_limits
-        .ok_or_else(|| invalid("Missing rate limits"))?;
+        .filter(|_| valid_session(&input.session_id))
+    else {
+        return Ok(None);
+    };
     for item in [&limits.five_hour, &limits.seven_day].into_iter().flatten() {
         if !(0.0..=100.0).contains(&item.used_percentage) || item.resets_at <= 0.0 {
-            return Err(invalid("Invalid quota window"));
+            return Err(invalid("Claude returned an invalid quota window."));
         }
     }
-    Ok((input.session_id, limits))
+    Ok(Some((input.session_id, limits)))
 }
 
 fn digest(path: &str) -> String {
@@ -128,7 +139,7 @@ pub fn run(arguments: &[OsString]) -> io::Result<i32> {
     let routed = platform::routed();
     if profile.generation == generation
         && !routed
-        && let Ok((session, limits)) = parse_input(&bytes)
+        && let Ok(Some((session, limits))) = parse_input(&bytes, platform::valid_session)
     {
         let _ = platform::capture(&folder, &profile, &session, &limits);
     }

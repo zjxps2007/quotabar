@@ -2,6 +2,13 @@ import CQuotaBar
 import Foundation
 
 enum NativeCredentials {
+    static func take(_ pointer: UnsafeMutablePointer<UInt8>?, count: Int) -> Data {
+        guard let pointer else { return Data() }
+        return Data(bytesNoCopy: pointer, count: count, deallocator: .custom { address, length in
+            qb_secret_free(address.assumingMemoryBound(to: UInt8.self), length)
+        })
+    }
+
     static func decode<T: Decodable>(_ type: T.Type, data: Data, provider: ProviderKind, mode: Int32) throws -> T {
         var output: UnsafeMutablePointer<UInt8>?
         var count = 0
@@ -32,7 +39,7 @@ enum NativeCredentials {
         return Data(bytes: output, count: count)
     }
 
-    private static func failure(_ status: Int32, provider: ProviderKind) -> ProviderError {
+    static func failure(_ status: Int32, provider: ProviderKind) -> Error {
         switch status {
         case -4: return ProviderError("missing_token", "구독 계정의 CLI 로그인 파일이 필요합니다. API 키는 지원하지 않습니다.")
         case -5: return ProviderError("missing_identity", provider == .codex
@@ -48,6 +55,7 @@ enum NativeCredentials {
         case -12: return provider == .codex ? ProviderError("missing_tokens", "Codex login exists but has no access token.")
             : ProviderError("not_logged_in", "Gemini login has no access token. Sign in through Gemini CLI and reconnect.")
         case -13: return ProviderError("api_key_unsupported", "ChatGPT subscription login is required; API keys do not expose subscription quota.")
+        case -14: return NSError(domain: NSCocoaErrorDomain, code: 3840)
         default: return ProviderError("invalid_auth", "로그인 파일을 읽을 수 없습니다. JSON 형식을 확인하세요.")
         }
     }

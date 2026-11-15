@@ -1,8 +1,14 @@
 use std::{fs, process::Command};
 
 fn main() {
-    println!("cargo:rerun-if-changed=shared/version.json");
-    println!("cargo:rerun-if-changed=windows/assets/QuotaBar.ico");
+    let dashboard = std::env::var("CARGO_PKG_NAME").as_deref() == Ok("quotabar-ui");
+    if dashboard {
+        std::env::set_current_dir("../..").expect("Locate the shared application resources");
+    }
+    let root = std::env::current_dir().expect("Locate the repository");
+    for watched in ["shared/version.json", "windows/assets/QuotaBar.ico"] {
+        println!("cargo:rerun-if-changed={}", root.join(watched).display());
+    }
     let metadata: serde_json::Value =
         serde_json::from_slice(&fs::read("shared/version.json").unwrap()).unwrap();
     let version = metadata["version"]
@@ -13,14 +19,22 @@ fn main() {
         ["rev-parse", "--git-path", "HEAD"],
         ["rev-parse", "--git-path", "packed-refs"],
     ] {
-        if let Some(path) = git(&args) {
-            println!("cargo:rerun-if-changed={path}");
+        if let Some(path) = git(&args)
+            && std::path::Path::new(&path).exists()
+        {
+            println!(
+                "cargo:rerun-if-changed={}",
+                std::path::absolute(path).unwrap().display()
+            );
         }
     }
     if let Some(branch) = git(&["symbolic-ref", "-q", "HEAD"])
         && let Some(path) = git(&["rev-parse", "--git-path", &branch])
     {
-        println!("cargo:rerun-if-changed={path}");
+        println!(
+            "cargo:rerun-if-changed={}",
+            std::path::absolute(path).unwrap().display()
+        );
     }
     #[cfg(windows)]
     if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {
@@ -39,7 +53,14 @@ fn main() {
         let mut resource = WindowsResource::new();
         resource
             .set_icon("windows/assets/QuotaBar.ico")
-            .set("OriginalFilename", "QuotaBar.StatusLine.exe")
+            .set(
+                "OriginalFilename",
+                if dashboard {
+                    "QuotaBar.Dashboard.exe"
+                } else {
+                    "QuotaBar.StatusLine.exe"
+                },
+            )
             .set("FileDescription", "QuotaBar")
             .set("ProductName", "QuotaBar")
             .set("FileVersion", version)

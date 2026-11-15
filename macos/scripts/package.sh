@@ -15,10 +15,10 @@ for bundle in "$app" "$helper"; do
   cmp "$repo/LICENSE" "$bundle/Contents/Resources/LICENSE"
   cmp "$repo/NOTICE" "$bundle/Contents/Resources/NOTICE"
   lipo "$bundle/Contents/MacOS/QuotaBar" -verify_arch "$architecture"
-  lipo "$bundle/Contents/MacOS/quotabar-statusline" -verify_arch "$architecture"
-  codesign --verify --strict "$bundle/Contents/MacOS/quotabar-statusline"
   codesign --verify --strict "$bundle"
 done
+lipo "$app/Contents/MacOS/quotabar-statusline" -verify_arch "$architecture"
+codesign --verify --strict "$app/Contents/MacOS/quotabar-statusline"
 archive="$repo/artifacts/QuotaBar-$version-macOS-$architecture.zip"
 stage="$(mktemp -d "$repo/artifacts/macos-package.XXXXXX")"
 trap 'rm -rf "$stage"' EXIT

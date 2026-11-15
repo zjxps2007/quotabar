@@ -6,11 +6,20 @@ publish = false
 license = "Apache-2.0"
 
 [workspace]
-members = ["native/bridge"]
+members = ["native/bridge", "native/ui"]
+exclude = ["vendor/accesskit_consumer"]
 resolver = "3"
+
+# AccessKit 0.31 reports every ScrollBar as read-only to Windows UI Automation.
+[patch.crates-io]
+accesskit_consumer = { path = "vendor/accesskit_consumer" }
 
 [lib]
 path = "native/lib.rs"
+
+[features]
+# Exercise the macOS monitor storage ABI with a host Swift Foundation toolchain.
+mac-settings-compat = []
 
 [[bin]]
 name = "quotabar-statusline"
@@ -21,9 +30,9 @@ base64 = "0.22"
 chrono = { version = "0.4", default-features = false, features = ["clock", "serde", "std"] }
 p256 = { version = "0.13", default-features = false, features = ["ecdsa", "pem", "std"] }
 memchr = "2"
-indexmap = "2"
+indexmap = { version = "2", features = ["serde"] }
 serde = { version = "1", features = ["derive", "rc"] }
-serde_json = "1"
+serde_json = { version = "1", features = ["float_roundtrip", "raw_value", "unbounded_depth"] }
 sha2 = "0.10"
 uuid = { version = "1", features = ["v4"] }
 zeroize = { version = "1", features = ["alloc"] }
@@ -31,15 +40,27 @@ unicode-normalization = "0.1"
 unicode-segmentation = "1"
 
 [target.'cfg(windows)'.dependencies]
+curl = { version = "0.4.51", features = ["static-curl", "ntlm", "poll_7_68_0"] }
+curl-sys = "0.4.91"
+percent-encoding = "2"
+url = "2"
+image = { version = "0.25", default-features = false, features = ["png"] }
+windows = { version = "0.61", default-features = false, features = ["Foundation", "Storage_Streams", "Web_Http_Filters", "Web_Http_Headers", "Win32_System_WinRT"] }
+windows-future = "0.2"
 windows-sys = { version = "0.61", features = [
     "Win32_Foundation", "Win32_Globalization", "Win32_Security", "Win32_Security_Authorization", "Win32_Security_Cryptography",
-    "Win32_Storage_FileSystem", "Win32_System_Registry", "Win32_System_Threading", "Win32_Graphics_GdiPlus", "Win32_System_Ole", "Win32_System_Variant",
+    "Win32_Storage_FileSystem", "Win32_System_Registry", "Win32_System_Threading", "Win32_Graphics_GdiPlus", "Win32_System_Com", "Win32_System_Ole", "Win32_System_Variant",
     "Win32_Graphics_Gdi", "Win32_System_LibraryLoader", "Win32_UI_HiDpi", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging",
+    "Win32_System_IO", "Win32_System_JobObjects", "Win32_System_Pipes", "Win32_UI_Controls", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_Accessibility",
 ] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 libc = "0.2"
-objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSBundle", "NSPathUtilities", "NSString", "NSURL", "NSValue"] }
+block2 = "0.6"
+objc2 = "0.6"
+objc2-quartz-core = { version = "0.3", default-features = false, features = ["CALayer","objc2-core-foundation","objc2-core-graphics"] }
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std","block2","NSStringDrawing","NSAccessibilityConstants","NSAccessibilityProtocols","NSAppearance","NSApplication","NSAttributedString","NSButton","NSButtonCell","NSCell","NSColor","NSControl","NSEvent","NSFont","NSFontDescriptor","NSGraphics","NSImage","NSImageView","NSMenu","NSMenuItem","NSPopover","NSProgressIndicator","NSResponder","NSRunningApplication","NSScrollView","NSStatusBar","NSStatusBarButton","NSStatusItem","NSText","NSTextField","NSView","NSViewController","NSWindow","objc2-quartz-core","objc2-core-graphics","objc2-core-foundation","NSClipView"] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "block2", "NSBundle", "NSData", "NSDate", "NSDateFormatter", "NSEnumerator", "NSError", "NSFormatter", "NSHTTPCookieStorage", "NSISO8601DateFormatter", "NSJSONSerialization", "NSOperation", "NSPathUtilities", "NSString", "NSURL", "NSURLCache", "NSURLRequest", "NSURLResponse", "NSURLSession", "NSValue"] }
 objc2-service-management = { version = "0.3", default-features = false, features = ["std", "SMAppService", "objc2", "objc2-foundation"] }
 
 [build-dependencies]

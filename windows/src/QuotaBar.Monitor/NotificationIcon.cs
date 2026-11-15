@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using System.Drawing;
 using QuotaBar.Core;
 
 namespace QuotaBar.Monitor;
@@ -16,7 +17,7 @@ internal sealed class NotificationIcon : IDisposable
         callback = (x, y) => menu.Show(new Point(x, y));
         handle = Create(callback);
         if (handle == IntPtr.Zero) throw new InvalidOperationException("트레이 알림 창을 만들 수 없습니다.");
-        menu.Closed += Closed;
+        menu.KeyboardClosed += Closed;
     }
     public string Text { get; private set; } = "";
     public int PixelSize { get; private set; }
@@ -29,14 +30,14 @@ internal sealed class NotificationIcon : IDisposable
         Text = summary.Tooltip;
         PixelSize = size;
     }
-    private void Closed(object? sender, ToolStripDropDownClosedEventArgs e)
+    private void Closed()
     {
-        if (e.CloseReason == ToolStripDropDownCloseReason.Keyboard && handle != 0) FocusIcon(handle);
+        if (handle != 0) FocusIcon(handle);
     }
     public void Dispose()
     {
         if (handle == 0) return;
-        menu.Closed -= Closed;
+        menu.KeyboardClosed -= Closed;
         Free(handle);
         handle = 0;
         GC.KeepAlive(callback);

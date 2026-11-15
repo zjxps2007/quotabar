@@ -95,10 +95,17 @@ final class AccountTests{
             checkFalse(settings.scanLocalLogs)
         }
     }
-    @Test func testCacheIsDisabledBetweenAccountRequests() {
-        checkNil(QuotaHTTP.session.configuration.urlCache)
-        checkEqual(QuotaHTTP.session.configuration.requestCachePolicy, .reloadIgnoringLocalCacheData)
-        checkEqual(QuotaHTTP.request(url: URL(string: "https://example.invalid")!, timeout: 1).value(forHTTPHeaderField: "Cache-Control"), "no-cache, no-store, max-age=0")
+    @Test func testCacheIsDisabledBetweenAccountRequests() async throws {
+        for id in ["first", "second"] {
+            let auth = try JSONSerialization.data(withJSONObject: ["tokens": ["account_id": id, "access_token": id]])
+            _ = try await NativeProviderQuery.run(.codex, auth: auth, timeout: 20) { request in
+                checkEqual(request.cachePolicy, .reloadIgnoringLocalCacheData)
+                checkEqual(request.value(forHTTPHeaderField: "Cache-Control"), "no-cache, no-store, max-age=0")
+                checkEqual(request.value(forHTTPHeaderField: "ChatGPT-Account-Id"), id)
+                checkEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer " + id)
+                return (Data("{}".utf8), HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!)
+            }
+        }
     }
     @Test func testAutomaticRefreshPreferenceRoundTripsWithoutLosingInterval() throws {
         var settings = LiteSettings()

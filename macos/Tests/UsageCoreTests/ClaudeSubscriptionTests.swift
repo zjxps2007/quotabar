@@ -202,4 +202,26 @@ final class ClaudeSubscriptionTests{
         checkEqual(recovered.originalStatusLine, first.originalStatusLine)
     }
 
+    @Test func testFoundationBackupBytesAndExistingCLIDirectoryPermissions() throws {
+        let (root, store, path) = try fixture()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let fm = FileManager.default
+        try fm.createDirectory(atPath: path, withIntermediateDirectories: true)
+        try fm.setAttributes([.posixPermissions: 0o750], ofItemAtPath: path)
+        let url = URL(fileURLWithPath: path).appendingPathComponent("settings.json")
+        let original: [String: Any] = ["type": "command", "command": "printf /tmp/한글", "padding": 4,
+            "custom": ["key10": 45, "key2": true, "ß": "é"]]
+        let external = try JSONSerialization.data(withJSONObject: ["statusLine": original, "other": UInt64.max])
+        try external.write(to: url)
+        let connection = ClaudeSubscriptionConnection(store: store)
+        let installed = try connection.install(directory: path, name: "예전 계정", helperPath: "/helper's path")
+        checkEqual(installed.originalStatusLine, try JSONSerialization.data(withJSONObject: original, options: [.sortedKeys]))
+        checkEqual((try fm.attributesOfItem(atPath: path)[.posixPermissions] as? NSNumber)?.intValue, 0o750)
+        checkTrue(try connection.uninstall(profileID: installed.id))
+        let restored = try requireValue(JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [String: Any])
+        checkEqual((restored["other"] as? NSNumber)?.uint64Value, UInt64.max)
+        checkEqual(try JSONSerialization.data(withJSONObject: restored, options: [.sortedKeys]),
+                   try JSONSerialization.data(withJSONObject: JSONSerialization.jsonObject(with: external), options: [.sortedKeys]))
+    }
+
 }

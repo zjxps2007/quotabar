@@ -9,7 +9,7 @@ internal sealed class AppUpdateManager : IDisposable
 {
     private readonly ReleaseClient client;
     private readonly UpdateDownloader downloader = new();
-    private readonly System.Windows.Forms.Timer timer = new();
+    private readonly MonitorLoop dispatcher;
     private readonly AppPaths paths;
     private readonly Action changed;
     private readonly Func<Task> exit;
@@ -22,15 +22,17 @@ internal sealed class AppUpdateManager : IDisposable
     private bool enabled, canInstall, suspended, disposed;
     public AppUpdateState State { get; private set; } = new();
 
-    public AppUpdateManager(AppPaths paths, Action changed, Func<Task> prepareExit, Action resume, Func<Task> exit, ReleaseClient? releaseClient = null)
+    public AppUpdateManager(MonitorLoop dispatcher, AppPaths paths, Action changed, Func<Task> prepareExit, Action resume, Func<Task> exit, ReleaseClient? releaseClient = null)
     {
+        this.dispatcher = dispatcher;
         client = releaseClient ?? new();
         this.paths = paths; this.changed = changed; this.prepareExit = prepareExit; this.resume = resume; this.exit = exit;
         if (UpdateInstaller.ReadResult(UpdateInstaller.ResultPath(paths)) is { Success: false } previous)
         { blockedVersion = previous.Version; State = new(UpdatePhase.Failed, previous.Version, Message: previous.Message); }
-        timer.Tick += (_, _) => Check(manual: false);
+        dispatcher.Received += OnSystemEvent;
         try { UpdateInstaller.CleanCompleted(paths); } catch (IOException) { } catch (UnauthorizedAccessException) { }
     }
+    private void OnSystemEvent(MonitorLoop.Event value) { if (value == MonitorLoop.Event.Update) Check(manual: false); }
     public void Configure(bool enabled, bool canInstall, bool suspended)
     {
         bool stop = (this.enabled && !enabled) || (!this.suspended && suspended);
@@ -113,7 +115,7 @@ internal sealed class AppUpdateManager : IDisposable
     }
     private async Task Run(Func<CancellationToken, Task> work)
     {
-        timer.Stop(); var cancel = operation = new();
+        dispatcher.Schedule(MonitorLoop.Timer.Update, 0); var cancel = operation = new();
         try { await work(cancel.Token); }
         catch (OperationCanceledException) when (cancel.IsCancellationRequested)
         { lastAttempt = null; Discard(); Set(new()); }
@@ -125,9 +127,10 @@ internal sealed class AppUpdateManager : IDisposable
     private void Schedule()
     {
         if (disposed) return;
-        timer.Stop(); if (!enabled || suspended || operation != null || (staged != null && staged.Update.Release.Version != blockedVersion)) return;
+        if (!enabled || suspended || operation != null || (staged != null && staged.Update.Release.Version != blockedVersion))
+        { dispatcher.Schedule(MonitorLoop.Timer.Update, 0); return; }
         var delay = lastAttempt == null ? TimeSpan.FromSeconds(15) : lastAttempt.Value.AddDays(1) - DateTimeOffset.UtcNow;
-        timer.Interval = (int)Math.Clamp(delay.TotalMilliseconds, 15000, int.MaxValue); timer.Start();
+        dispatcher.Schedule(MonitorLoop.Timer.Update, (int)Math.Clamp(delay.TotalMilliseconds, 15000, int.MaxValue));
     }
     private void Discard()
     {
@@ -144,5 +147,10 @@ internal sealed class AppUpdateManager : IDisposable
         catch (IOException) { } catch (UnauthorizedAccessException) { }
         staged = null; job = null;
     }
-    public void Dispose() { disposed = true; operation?.Cancel(); timer.Dispose(); client.Dispose(); downloader.Dispose(); }
+    public void Dispose()
+    {
+        disposed = true; operation?.Cancel();
+        dispatcher.Received -= OnSystemEvent; dispatcher.Schedule(MonitorLoop.Timer.Update, 0);
+        client.Dispose(); downloader.Dispose();
+    }
 }

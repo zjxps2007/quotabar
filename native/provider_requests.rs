@@ -6,7 +6,7 @@ use serde_json::{Value, json};
 use std::collections::BTreeMap;
 use zeroize::Zeroize;
 
-#[derive(Clone, Copy, Deserialize, PartialEq)]
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub enum Endpoint {
     Codex,
@@ -32,7 +32,7 @@ impl Drop for Parameters {
 }
 #[derive(Serialize)]
 pub struct Request {
-    pub url: &'static str,
+    pub url: String,
     pub method: &'static str,
     pub headers: BTreeMap<&'static str, String>,
     pub body: Option<Value>,
@@ -116,7 +116,7 @@ pub fn build(params: &Parameters, platform: Platform) -> Request {
         headers.insert("Content-Type", "application/json".into());
     }
     Request {
-        url,
+        url: url.into(),
         method: if body.is_some() { "POST" } else { "GET" },
         headers,
         body,
@@ -188,9 +188,10 @@ impl Drop for QueryCredentials {
     }
 }
 pub fn mac_query(bytes: &[u8], codex: bool) -> Result<QueryCredentials, i32> {
-    let json = credentials::document(bytes, Platform::Mac).map_err(|_| -11)?;
+    let json =
+        credentials::document(bytes, Platform::Mac).map_err(|_| if codex { -11 } else { -14 })?;
     if !json.is_object() {
-        return Err(-11);
+        return Err(if codex || json.is_array() { -11 } else { -14 });
     }
     if !codex {
         let access = json["access_token"]

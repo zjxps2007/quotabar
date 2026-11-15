@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Runtime.InteropServices;
 
 namespace QuotaBar.Core;
 
@@ -51,7 +52,22 @@ public interface ICredentialStore
 }
 public static class RefreshSchedule
 {
-    public static readonly IReadOnlyList<int> Intervals = Array.AsReadOnly(new[] { 60, 300, 900, 1800, 3600 });
+    [StructLayout(LayoutKind.Sequential)]
+    private struct Delays { public int Accounts, Local; }
+    [DllImport("quotabar_native", EntryPoint = "qb_refresh_delays")]
+    private static extern Delays Calculate(int suspended, int automatic, int accounts, int dashboard, int logs, int scanning, int interval);
+    [DllImport("quotabar_native", EntryPoint = "qb_refresh_interval")]
+    private static extern int Interval(nuint index);
+    public static readonly IReadOnlyList<int> Intervals = Array.AsReadOnly(ReadIntervals());
+    private static int[] ReadIntervals()
+    {
+        var values = new List<int>();
+        for (int value; (value = Interval((nuint)values.Count)) > 0;) values.Add(value);
+        return values.ToArray();
+    }
     public static DateTimeOffset? Next(bool suspended, bool hasAccounts, bool visible, int seconds, DateTimeOffset last, bool autoRefresh = true)
-        => suspended || !autoRefresh || !hasAccounts || seconds <= 0 ? null : last.AddSeconds(seconds);
+    {
+        int delay = Calculate(suspended ? 1 : 0, autoRefresh ? 1 : 0, hasAccounts ? 1 : 0, visible ? 1 : 0, 0, 0, seconds).Accounts;
+        return delay < 0 ? null : last.AddSeconds(delay);
+    }
 }

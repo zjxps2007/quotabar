@@ -61,6 +61,22 @@ pub enum Platform {
     WindowsPortable,
 }
 impl Platform {
+    pub fn for_asset(release: &Release) -> io::Result<Self> {
+        let version = release.version()?;
+        let asset = release
+            .asset
+            .as_ref()
+            .ok_or_else(|| invalid("Missing release asset"))?;
+        [
+            Self::MacArm64,
+            Self::MacX64,
+            Self::WindowsInstaller,
+            Self::WindowsPortable,
+        ]
+        .into_iter()
+        .find(|platform| platform.asset_name(version) == asset.name)
+        .ok_or_else(|| invalid("Unsupported release asset"))
+    }
     pub fn asset_name(self, version: Version) -> String {
         let suffix = match self {
             Self::MacArm64 => "macOS-arm64.zip",
@@ -272,12 +288,37 @@ pub fn verify_manifest(
 }
 
 pub fn verify_file(path: &Path, asset: &Asset) -> io::Result<()> {
-    let file = File::open(path)?;
+    verify_file_while(path, asset, || false)
+}
+pub fn verify_file_while(
+    path: &Path,
+    asset: &Asset,
+    cancelled: impl Fn() -> bool,
+) -> io::Result<()> {
+    let mut file = File::open(path)?;
     if file.metadata()?.len() != asset.bytes {
         return Err(invalid("Update size mismatch"));
     }
     let mut hash = Sha256::new();
-    let read = io::copy(&mut file.take(asset.bytes + 1), &mut hash)?;
+    let mut buffer = vec![0; 64 * 1024];
+    let mut read = 0u64;
+    loop {
+        if cancelled() {
+            return Err(io::ErrorKind::Interrupted.into());
+        }
+        let n = match file.read(&mut buffer) {
+            Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
+            n => n?,
+        };
+        if n == 0 {
+            break;
+        }
+        read = read
+            .checked_add(n as u64)
+            .filter(|total| *total <= asset.bytes)
+            .ok_or_else(|| invalid("Update size mismatch"))?;
+        hash.update(&buffer[..n]);
+    }
     if read != asset.bytes || format!("{:x}", hash.finalize()) != asset.sha256 {
         return Err(invalid("Update digest mismatch"));
     }

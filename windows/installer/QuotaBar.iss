@@ -59,3 +59,26 @@ Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueName: 
 
 ; User settings and credentials live outside {app} and are never removed.
 ; Claude connections must be disconnected in the app before uninstalling.
+
+[Code]
+procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+var
+  DashboardFile: String;
+  Attempt: Integer;
+begin
+  if CurUninstallStep <> usPostUninstall then Exit;
+  DashboardFile := ExpandConstant('{app}\Dashboard\QuotaBar.Dashboard.exe');
+  if not FileExists(DashboardFile) then Exit;
+  Log('Waiting for the dashboard executable to be released.');
+  for Attempt := 1 to 50 do
+  begin
+    if DeleteFile(DashboardFile) or not FileExists(DashboardFile) then
+    begin
+      RemoveDir(ExtractFileDir(DashboardFile));
+      RemoveDir(ExpandConstant('{app}'));
+      Exit;
+    end;
+    Sleep(100);
+  end;
+  Log('The dashboard executable is still in use: ' + DashboardFile);
+end;

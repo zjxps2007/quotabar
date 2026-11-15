@@ -9,11 +9,7 @@ public struct CodexProvider: Sendable {
 
     /// Read access tokens in memory. The CLI retains ownership of OAuth refresh.
     public func fetch(authData: Data) async throws -> ProviderUsage {
-        let creds = try NativeCredentials.decode(NativeProviderRequest.Credentials.self, data: authData, provider: .codex, mode: 4)
-        let request = try NativeProviderRequest.make(.codex, token: creds.accessToken, account: creds.accountId, timeout: timeoutSeconds)
-        let response = try await requestUsage(request)
-        return try parseResponse(response, accountId: creds.accountId, source: SourceInfo(mode: "read-only", type: "codex-auth-json"),
-            fallbackEmail: creds.email, jwtPlanType: creds.plan, jwtUserId: creds.userId)
+        try await NativeProviderQuery.usage(.codex, auth: authData, timeout: timeoutSeconds)
     }
 
     static func resolveUsageEndpointURL(homeDirectory _: String) throws -> URL {
@@ -21,23 +17,6 @@ public struct CodexProvider: Sendable {
             throw ProviderError("invalid_url", "Codex usage URL is invalid.")
         }
         return url
-    }
-
-    private func requestUsage(_ request: URLRequest) async throws -> [String: Any] {
-        let (data, response) = try await QuotaHTTP.data(for: request)
-        if let http = response as? HTTPURLResponse {
-            if http.statusCode == 401 || http.statusCode == 403 {
-                throw ProviderError("unauthorized", "Codex OAuth token is invalid or expired.")
-            }
-            if !((200..<300).contains(http.statusCode)) {
-                throw ProviderError("api_error", "Codex usage API returned HTTP \(http.statusCode).")
-            }
-        }
-
-        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            throw ProviderError("parse_failed", "Codex usage API returned invalid JSON.")
-        }
-        return json
     }
 
     func parseResponse(_ response: [String: Any], accountId: String?, source: SourceInfo, fallbackEmail: String?,

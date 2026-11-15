@@ -33,13 +33,25 @@ aggregation in windows/src/QuotaBar.Core and windows/src/QuotaBar.Windows port t
 corresponding QuotaBar/AIUsage rules. Windows DPAPI/ACL storage, native tray and WPF
 processes are new platform implementations. Shared synthetic fixtures exercise
 both native implementations. shared/assets retains the existing logo originals.
-Windows self-contained builds include Microsoft's .NET and Windows Desktop runtime
-files with their runtime package licenses and notices under licenses/.
+Windows self-contained builds include Microsoft's .NET runtime with its license
+and notices under licenses/.
+The Windows menu scroll arrows in windows/assets/MenuScrollArrows.png are
+the ScrollButtonUp and ScrollButtonDown images from .NET Windows Forms.
+Copyright (c) .NET Foundation and Contributors. They are distributed under the
+MIT license included in licenses/Windows Forms/LICENSE in the Windows distribution.
+The Rust dashboard uses AccessKit. The vendored accesskit_consumer 0.31.0 is
+copyright 2021 The AccessKit Authors and distributed under Apache License 2.0.
+QuotaBar enables writable scrollbars in its accessibility state mapping.
 The native Rust Claude callback adapts the same AIUsage subscription snapshot,
 profile and command forwarding rules for the original Windows and macOS formats.
+The Rust macOS connection also adapts AIUsage's subscription installation,
+reconnection, command backup and field-level restoration rules.
 The Rust usage scanner ports the existing streaming projection, session fork
 accounting and Claude message aggregation for both platforms.
 The Rust quota adapters and status summaries preserve QuotaBar's platform-specific
 display rules. The Windows notification icon uses GDI+ and the shared AppMark.
 The Rust credential parser and OAuth rotation retain QuotaBar and AIUsage's
 workspace identity rules and the existing platform-specific import formats.
+The Windows native provider transport uses libcurl and Schannel for explicitly
+configured proxies. The libcurl, curl-rust, schannel and zlib notices are
+included in licenses/libcurl/LICENSE in the Windows distribution.

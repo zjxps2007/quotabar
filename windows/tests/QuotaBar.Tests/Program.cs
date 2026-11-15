@@ -8,6 +8,66 @@ using QuotaBar.Core;
 using QuotaBar.Windows;
 using QuotaBar.Protocol;
 
+if (args.Length == 6 && args[0] == "--in" && args[2] == "--out" && args[4] == "--capture")
+    return await DashboardLifecycle.Child(args[1], args[3], args[5]);
+
+if (args.Length == 4 && args[0] == "--compare-dashboards")
+{
+    try { return DashboardLifecycle.CompareScreens(args[1], args[2], args[3]) ? 0 : 1; }
+    catch (InvalidDataException error) { return InconclusiveCapture(args[3], error); }
+}
+
+if (args.Length == 5 && args[0] == "--compare-visible-dashboards")
+{
+    try { return DashboardActions.CompareVisible(args[1], args[2], args[3], args[4]) ? 0 : 1; }
+    catch (Exception error) { return InconclusiveCapture(args[3], error); }
+}
+
+static int InconclusiveCapture(string directory, Exception error)
+{
+    Directory.CreateDirectory(directory);
+    File.WriteAllBytes(Path.Combine(directory, "result.json"), Json.Bytes(new { status = "inconclusive", reason = error.Message }));
+    Console.Error.WriteLine(error.Message);
+    return 2;
+}
+
+if (args.Length == 4 && args[0] == "--compare-tray")
+{
+    return DashboardLifecycle.CompareTray(args[1], args[2], args[3]) ? 0 : 1;
+}
+if (args.Length == 4 && args[0] == "--compare-tray-apps")
+{
+    return DashboardLifecycle.CompareTrayApplications(args[1], args[2], args[3]) ? 0 : 1;
+}
+
+if (args.Length == 3 && args[0] is "--compare-dashboard-actions" or "--compare-dashboard-commands")
+{
+    DashboardActions.Compare(args[1], args[2], includeKeyboard: args[0] == "--compare-dashboard-actions");
+    return 0;
+}
+
+if (args.Length == 2 && args[0] == "--compare-claude")
+{
+    ClaudeConnections.Compare(args[1]);
+    return 0;
+}
+
+if (args.Length == 2 && args[0] == "--compare-providers")
+{
+    await ProviderCompatibility.Compare(args[1]);
+    await EnvironmentProxyCompatibility.Compare(args[1]);
+    return 0;
+}
+
+if (args.Length == 3 && args[0] == "--provider-proxy-child")
+    return await EnvironmentProxyCompatibility.Child(args[1], args[2]);
+
+if (args.Length == 2 && args[0] == "--compare-settings")
+{
+    SettingsCompatibility.Compare(args[1]);
+    return 0;
+}
+
 if (args.Length == 6 && args[0] == "--update-integration")
 {
     await UpdateIntegration.Run(args[1], args[2], args[3], args[4], args[5]);
@@ -56,6 +116,8 @@ if (args.FirstOrDefault() is "--persist-write" or "--persist-read")
     return 0;
 }
 var suite = new Suite();
+await suite.Run("native dashboard exchanges ordered frames across inherited pipes", DashboardLifecycle.RoundTrip);
+await suite.Run("native dashboard enforces startup and shutdown deadlines", DashboardLifecycle.Deadlines);
 await suite.Run("credential identity separates workspaces", () =>
 {
     Suite.Check(Credentials.Parse(Fixtures.Auth("a"), Provider.Codex).Identity != Credentials.Parse(Fixtures.Auth("b"), Provider.Codex).Identity);
@@ -115,8 +177,8 @@ await suite.Run("Claude wrapping capture original output and field restoration",
     var settingsFile = Path.Combine(folder, "settings.json");
     string original = ClaudeConnection.Bash() != null ? "cat" : "[Console]::Out.Write([Console]::In.ReadToEnd())";
     File.WriteAllText(settingsFile, new JsonObject { ["theme"] = "dark", ["statusLine"] = new JsonObject { ["type"] = "command", ["command"] = original } }.ToJsonString());
-    var service = new ClaudeConnection(suite.Paths);
     string helper = Fixtures.Helper;
+    var service = new ClaudeConnection(suite.Paths, helper);
     var profile = service.Install(folder, helper);
     byte[] payload = Json.Bytes(new { session_id = Guid.NewGuid().ToString(), rate_limits = new { five_hour = new { used_percentage = 25, resets_at = DateTimeOffset.UtcNow.AddHours(3).ToUnixTimeSeconds() } }, secret = "omit-this" });
     using var output = new MemoryStream();
@@ -152,6 +214,11 @@ await suite.Run("Claude packaged callback through both shells", async () =>
         Suite.Check(output.ToArray().SequenceEqual(expected), "Original UTF-8 bytes were changed.");
         Suite.Check(service.Latest(profile)!.Windows.Single().Remaining == 58);
     }
+});
+await suite.Run("Claude reconnect preserves the CLI file after a failed or interrupted replacement", () =>
+{
+    ClaudeConnections.Recovery(suite);
+    return Task.CompletedTask;
 });
 await suite.Run("IPC rejects oversized and truncated frames", async () =>
 {

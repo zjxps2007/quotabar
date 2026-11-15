@@ -1,8 +1,6 @@
 using System.IO;
-using System.IO.Pipes;
 using System.Windows;
 using QuotaBar.Protocol;
-using Channel = QuotaBar.Protocol.Channel;
 
 namespace QuotaBar.Dashboard;
 internal static class Program
@@ -13,7 +11,7 @@ internal static class Program
         if (Value("--in") is not { } input || Value("--out") is not { } output) return;
         try
         {
-            using var channel = new Channel(new AnonymousPipeClientStream(PipeDirection.In, input), new AnonymousPipeClientStream(PipeDirection.Out, output));
+            using var channel = new DashboardEndpoint(input, output);
             var app = new Application { ShutdownMode = ShutdownMode.OnExplicitShutdown };
             var window = new DashboardWindow(channel);
             window.Closed += (_, _) => app.Shutdown();
@@ -24,7 +22,7 @@ internal static class Program
                     await channel.SendAsync(Message.Create("ready", true));
                     await channel.ReadAsync(m => app.Dispatcher.InvokeAsync(() => window.Receive(m)).Task);
                 }
-                catch (Exception e) when (e is IOException or OperationCanceledException or ObjectDisposedException or System.Text.Json.JsonException) { }
+                catch (Exception e) when (e is IOException or InvalidDataException or OperationCanceledException or ObjectDisposedException or System.Text.Json.JsonException) { }
                 finally { if (!app.Dispatcher.HasShutdownStarted) _ = app.Dispatcher.BeginInvoke(() => app.Shutdown()); }
             });
             app.Run();

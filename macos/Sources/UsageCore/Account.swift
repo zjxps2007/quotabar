@@ -1,4 +1,6 @@
 import Foundation
+import CQuotaBar
+import Darwin
 
 public enum ProviderKind: String, Codable, CaseIterable, Identifiable, Sendable {
     case codex, claude, gemini
@@ -120,18 +122,12 @@ public struct LiteSettings: Codable, Equatable, Sendable {
     public init() {}
 }
 
-public struct SettingsFile: Sendable {
-    public let url: URL
-    public init(url: URL) { self.url = url }
-    public func load() throws -> LiteSettings {
-        guard FileManager.default.fileExists(atPath: url.path) else { return LiteSettings() }
-        let data = try Data(contentsOf: url)
-        return try JSONDecoder().decode(LiteSettings.self, from: data)
+func writePrivateFile(_ data: Data, to url: URL) throws {
+    let code = data.withUnsafeBytes {
+        qb_private_write(url.path, $0.bindMemory(to: UInt8.self).baseAddress, $0.count)
     }
-    public func save(_ value: LiteSettings) throws {
-        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true,
-            attributes: [.posixPermissions: 0o700])
-        try JSONEncoder().encode(value).write(to: url, options: .atomic)
-        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+    guard code == 0 else {
+        throw NSError(domain: NSPOSIXErrorDomain, code: Int(code > 0 ? code : EIO),
+                      userInfo: [NSFilePathErrorKey: url.path])
     }
 }

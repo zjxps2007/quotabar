@@ -19,11 +19,7 @@ public sealed record Credentials(string Identity, string Label, string AccessTok
     [DllImport("quotabar_native", EntryPoint = "qb_secret_free")]
     private static extern void Release(IntPtr output, nuint count);
 
-    private static byte[] TakeBytes(int status, IntPtr output, nuint count)
-    {
-        if (status != 0)
-        {
-            throw status switch {
+    internal static Exception Failure(int status) => status switch {
                 -2 => new UsageException("invalid_auth", "로그인 파일이 너무 큽니다."),
                 -4 => new UsageException("missing_token", "API 키 대신 구독 계정의 로그인 파일을 연결하세요."),
                 -5 => new UsageException("missing_identity", "로그인 파일에서 계정과 워크스페이스를 확인할 수 없습니다."),
@@ -31,8 +27,10 @@ public sealed record Credentials(string Identity, string Label, string AccessTok
                 -9 => new UsageException("account_mismatch", "갱신된 계정이 다릅니다. 다시 연결하세요."),
                 -10 => new UsageException("account_mismatch", "계정 정체성이 변경되었습니다."),
                 _ => (Exception)new JsonException("로그인 파일의 JSON 형식을 확인하세요.")
-            };
-        }
+        };
+    internal static byte[] TakeBytes(int status, IntPtr output, nuint count)
+    {
+        if (status != 0) throw Failure(status);
         try
         {
             var buffer = new byte[checked((int)count)];

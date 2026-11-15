@@ -118,6 +118,36 @@ struct CodexOAuthTests {
         catch { #expect((error as? ProviderError)?.code == "oauth_response") }
         #expect(box.value == before); #expect(box.writes == 0)
     }
+    @Test func storedLoginPreservesFoundationAndProviderErrors() async {
+        for (data, expected) in [(Data("{".utf8), "Cocoa:3840"), (Data("null".utf8), "Cocoa:3840"),
+                                 (Data("[]".utf8), "invalid_auth"), (Data("{}".utf8), "missing_token"),
+                                 (Data(repeating: 32, count: 1_048_577), "invalid_auth")] {
+            let box = MemoryVault(data)
+            let wire = Wire(body: Data())
+            let manager = box.manager(CodexOAuthClient(transport: { try await wire.send($0) }))
+            do { _ = try await manager.credential(id: UUID(), identity: "fixture"); Issue.record("Invalid login accepted") }
+            catch {
+                let cocoa = error as NSError
+                let code = (error as? ProviderError)?.code ?? (cocoa.domain == NSCocoaErrorDomain ? "Cocoa:\(cocoa.code)" : cocoa.domain)
+                #expect(code == expected)
+            }
+            #expect(await wire.requests.isEmpty)
+            #expect(box.writes == 0)
+        }
+    }
+    @Test func loginMetadataKeepsTheFoundationNestingLimit() throws {
+        for depth in [127, 128, 256, 512, 513] {
+            let metadata = String(repeating: "[", count: depth - 1) + "1" + String(repeating: "]", count: depth - 1)
+            let fields = #"{"access_token":"test","account_id":"w","chatgpt_user_id":"u","metadata":"#
+            let login = Data((fields + metadata + "}").utf8)
+            if depth <= 512 {
+                #expect(try CodexOAuthCredentials(data: login).identity.key == "codex:account:w:user:u")
+            } else {
+                do { _ = try CodexOAuthCredentials(data: login); Issue.record("Nesting limit was ignored") }
+                catch { #expect((error as NSError).domain == NSCocoaErrorDomain && (error as NSError).code == 3840) }
+            }
+        }
+    }
     @Test func concurrentRequestsShareOneRotation() async throws {
         let box = MemoryVault(try loginData()), id = UUID()
         let identity = try CodexOAuthCredentials(data: box.value!).identity.key
@@ -139,6 +169,24 @@ struct CodexOAuthTests {
         let second = try await manager.credential(id: id, identity: identity, rejected: original)
         #expect(first == second); #expect(await wire.requests.count == 1)
     }
+    @Test func concurrentMacCallersShareAFailedRotationAndTheNextCallerRetries() async throws {
+        let box = MemoryVault(try loginData()), id = UUID()
+        let identity = try CodexOAuthCredentials(data: box.value!).identity.key
+        let wire = Wire(body: Data(), status: 503, delay: 30_000_000)
+        let manager = box.manager(CodexOAuthClient(transport: { try await wire.send($0) }))
+        @Sendable @MainActor func query() async -> String? {
+            do { _ = try await manager.credential(id: id, identity: identity); return nil }
+            catch { return (error as? ProviderError)?.code }
+        }
+        async let first = query()
+        async let second = query()
+        let errors = await (first, second)
+        #expect(errors.0 == "oauth_unavailable" && errors.1 == errors.0)
+        #expect(await wire.requests.count == 1)
+        #expect(await query() == errors.0)
+        #expect(await wire.requests.count == 2)
+        #expect(box.writes == 0)
+    }
     @Test func unauthorizedCurrentTokenForcesRefreshBeforeExpiry() async throws {
         let original = try loginData(expired: false)
         let box = MemoryVault(original), id = UUID()
@@ -158,10 +206,10 @@ struct CodexOAuthTests {
         let identity = try CodexOAuthCredentials(data: original).identity.key
         let wire = Wire(body: try tokenResponse())
         let client = CodexOAuthClient(transport: { try await wire.send($0) })
-        let manager = CodexSessionManager(client: client, read: { try vault.load($0) }, write: { try vault.save($1, id: $0) })
+        let manager = CodexSessionManager(client: client, vault: vault)
         let rotated = try await manager.credential(id: id, identity: identity)
         let reopened = SecretVault(directory: directory)
-        let restarted = CodexSessionManager(client: client, read: { try reopened.load($0) }, write: { try reopened.save($1, id: $0) })
+        let restarted = CodexSessionManager(client: client, vault: reopened)
         #expect(try await restarted.credential(id: id, identity: identity) == rotated)
         #expect(try CodexOAuthCredentials(data: requireValue(reopened.load(id))).refreshToken == "rotated-refresh")
         #expect(await wire.requests.count == 1)

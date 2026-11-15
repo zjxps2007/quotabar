@@ -1,26 +1,10 @@
-using System.Globalization;
 using System.Net;
-using System.Text.Json;
-using System.Security.Cryptography;
 
 namespace QuotaBar.Core;
 
 public readonly record struct ReleaseVersion(int Major, int Minor, int Patch) : IComparable<ReleaseVersion>
 {
-    public static ReleaseVersion? Parse(string text)
-    {
-        if (text.StartsWith('v')) text = text[1..];
-        var parts = text.Split('.');
-        if (parts.Length != 3) return null;
-        int[] values = new int[3];
-        for (int i = 0; i < parts.Length; i++)
-        {
-            string part = parts[i];
-            if (part.Length is 0 or > 10 || (part.Length > 1 && part[0] == '0') || part.Any(c => c is < '0' or > '9')
-                || !int.TryParse(part, NumberStyles.None, CultureInfo.InvariantCulture, out values[i])) return null;
-        }
-        return new(values[0], values[1], values[2]);
-    }
+    public static ReleaseVersion? Parse(string text) => NativeRelease.ParseVersion(text);
     public int CompareTo(ReleaseVersion other)
     {
         int major = Major.CompareTo(other.Major), minor = Minor.CompareTo(other.Minor);
@@ -45,38 +29,7 @@ public static class ReleaseFeed
     public const long MaximumAssetBytes = 512 * 1024 * 1024;
 
     public static AppRelease? Parse(ReadOnlyMemory<byte> data, ReleasePlatform platform)
-    {
-        if (data.Length > MaximumResponseBytes) throw Invalid();
-        using var document = JsonDocument.Parse(data);
-        var release = document.RootElement;
-        if (release.GetProperty("draft").GetBoolean() || release.GetProperty("prerelease").GetBoolean()) return null;
-        string? tag = release.Get("tag_name").Text();
-        if (tag == null || ReleaseVersion.Parse(tag) is not { } version
-            || release.Get("html_url").Text() != $"{Repository}/releases/tag/{tag}") throw Invalid();
-        string suffix = platform switch {
-            ReleasePlatform.MacOSArm64 => "macOS-arm64.zip", ReleasePlatform.MacOSX64 => "macOS-x86_64.zip",
-            ReleasePlatform.WindowsInstaller => "Windows-x64-Setup.exe", ReleasePlatform.WindowsPortable => "Windows-x64.zip",
-            _ => throw Invalid()
-        };
-        string name = $"QuotaBar-{version}-{suffix}";
-        var matches = release.GetProperty("assets").EnumerateArray().Where(a => a.Get("name").Text() == name).ToArray();
-        if (matches.Length > 1) throw Invalid();
-        ReleaseAsset? asset = null;
-        if (matches.Length == 1)
-        {
-            var candidate = matches[0];
-            string url = $"{Repository}/releases/download/{tag}/{name}";
-            string? digest = candidate.Get("digest").Text();
-            if (candidate.Get("state").Text() != "uploaded" || candidate.Get("browser_download_url").Text() != url
-                || !candidate.Get("size").TryGetInt64(out long size) || size is <= 0 or > MaximumAssetBytes
-                || digest == null || !digest.StartsWith("sha256:", StringComparison.Ordinal)) throw Invalid();
-            string hash = digest[7..].ToLowerInvariant();
-            if (hash.Length != 64 || hash.Any(c => !(c is >= '0' and <= '9' or >= 'a' and <= 'f'))) throw Invalid();
-            asset = new(name, new Uri(url), size, hash);
-        }
-        return new(tag, version.ToString(), new Uri($"{Repository}/releases/tag/{tag}"), asset);
-    }
-    private static UsageException Invalid() => new("invalid_release", "업데이트 정보를 확인할 수 없습니다. 잠시 후 다시 확인하세요.");
+        => NativeRelease.ParseFeed(data, platform);
 }
 
 public sealed record VerifiedUpdate(AppRelease Release, int Build, ReleaseAsset Asset);
@@ -85,34 +38,11 @@ public sealed record AppUpdateState(UpdatePhase Phase = UpdatePhase.Idle, string
     string? Message = null, DateTimeOffset? CheckedAt = null);
 public static class UpdateSignature
 {
-    private sealed record Manifest(int SchemaVersion, string Version, int Build, List<SignedAsset> Assets);
-    private sealed record SignedAsset(string Name, long Bytes, string Sha256);
-
     public static VerifiedUpdate Verify(byte[] manifest, byte[] signature, string publicKeyPem, AppRelease release, string currentVersion)
-    {
-        if (manifest.Length > 128 * 1024 || signature.Length is < 8 or > 128 || !release.IsNewer(currentVersion) || release.Asset is not { } asset)
-            throw Invalid();
-        try
-        {
-            using var key = ECDsa.Create(); key.ImportFromPem(publicKeyPem);
-            if (!key.VerifyData(manifest, signature, HashAlgorithmName.SHA256, DSASignatureFormat.Rfc3279DerSequence)) throw Invalid();
-            var value = Json.Read<Manifest>(manifest);
-            var matches = value.Assets?.Where(a => a.Name == asset.Name).ToArray();
-            if (value.SchemaVersion != 1 || value.Version != release.Version || value.Build <= 0 || matches?.Length != 1
-                || matches[0].Bytes != asset.Bytes || matches[0].Sha256 != asset.Sha256) throw Invalid();
-            return new(release, value.Build, asset);
-        }
-        catch (Exception e) when (e is CryptographicException or ArgumentException or JsonException or UsageException) { throw Invalid(); }
-    }
+        => NativeRelease.VerifyManifest(manifest, signature, publicKeyPem, release, currentVersion);
 
-    public static async Task VerifyFile(string path, ReleaseAsset asset, CancellationToken token = default)
-    {
-        using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
-        if (stream.Length != asset.Bytes) throw Invalid();
-        var hash = await SHA256.HashDataAsync(stream, token);
-        if (Convert.ToHexString(hash).ToLowerInvariant() != asset.Sha256) throw Invalid();
-    }
-    private static UsageException Invalid() => new("update_signature", "업데이트 파일의 서명을 확인하지 못했습니다. 현재 버전을 유지합니다.");
+    public static Task VerifyFile(string path, ReleaseAsset asset, CancellationToken token = default)
+        => NativeRelease.VerifyPayload(path, asset, token);
 }
 
 /// Public release checks use their own HTTP client without provider credentials.

@@ -10,17 +10,20 @@ $compiler = & "$PSScriptRoot\get-inno.ps1"
 $stage = Join-Path $repo ('artifacts\windows\installer-' + [Guid]::NewGuid().ToString('N'))
 [IO.Compression.ZipFile]::ExtractToDirectory($PackagePath, $stage)
 $payload = Join-Path $stage 'QuotaBar-Windows-x64'
-foreach ($relative in @('QuotaBar.Monitor.exe','quotabar_native.dll','Dashboard\QuotaBar.Dashboard.exe','Dashboard\quotabar_native.dll','StatusLine\QuotaBar.StatusLine.exe','LICENSE','NOTICE')) {
+foreach ($relative in @('QuotaBar.Monitor.exe','quotabar_native.dll','Dashboard\QuotaBar.Dashboard.exe','StatusLine\QuotaBar.StatusLine.exe','LICENSE','NOTICE')) {
     if (-not (Test-Path -LiteralPath (Join-Path $payload $relative))) { throw "Package file missing: $relative" }
 }
 $productVersion = [Diagnostics.FileVersionInfo]::GetVersionInfo((Join-Path $payload 'QuotaBar.Monitor.dll')).ProductVersion
 if ($productVersion -notmatch ('^' + [Regex]::Escape($version) + '\+([a-f0-9]{40})$')) { throw 'Package version or source revision mismatch.' }
 $applicationCommit = $matches[1]
-foreach ($relative in @('Dashboard\QuotaBar.Dashboard.dll','StatusLine\QuotaBar.StatusLine.exe')) {
+foreach ($relative in @('Dashboard\QuotaBar.Dashboard.exe','StatusLine\QuotaBar.StatusLine.exe')) {
     if ([Diagnostics.FileVersionInfo]::GetVersionInfo((Join-Path $payload $relative)).ProductVersion -ne $productVersion) { throw 'Mixed application revisions in package.' }
 }
 foreach ($relative in @('QuotaBar.Monitor.dll','Dashboard\QuotaBar.Dashboard.dll','StatusLine\QuotaBar.StatusLine.dll')) {
-    if ([Reflection.AssemblyName]::GetAssemblyName((Join-Path $payload $relative)).Version.ToString(3) -ne $version) {
+    $file = Join-Path $payload $relative
+    $resource = [Diagnostics.FileVersionInfo]::GetVersionInfo($file)
+    if ([Reflection.AssemblyName]::GetAssemblyName($file).Version.ToString(3) -ne $version -or
+        [version]::new($resource.FileMajorPart, $resource.FileMinorPart, $resource.FileBuildPart).ToString(3) -ne $version) {
         throw "Existing updaters cannot verify the version of $relative."
     }
 }

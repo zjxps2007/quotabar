@@ -9,6 +9,9 @@ license = "Apache-2.0"
 path = "lib.rs"
 crate-type = ["cdylib", "staticlib"]
 
+[features]
+mac-settings-compat = ["quotabar/mac-settings-compat"]
+
 [dependencies]
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 chrono-tz = "0.10"
@@ -17,3 +20,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 uuid = "1"
 zeroize = "1"
+parking_lot = "0.12"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation"] }

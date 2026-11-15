@@ -1,0 +1,657 @@
+use crate::{Dashboard, dialogs::Dialog, model::*, style::*};
+use eframe::egui::*;
+use serde_json::{Value, json};
+
+use crate::account_text::{AccountField, contains_query, email_matches_alias};
+
+fn provider_filter(ui: &mut Ui, filter: &mut String, width: f32) {
+    let providers = ["전체 Provider", "Codex", "Claude", "Gemini"];
+    let selected = providers
+        .iter()
+        .position(|s| *s == filter.as_str())
+        .unwrap_or(0);
+    if let Some(index) = choose(ui, "Provider 필터", width, &providers, selected, 12.) {
+        *filter = providers[index].into();
+    }
+}
+
+impl Dashboard {
+    pub fn accounts(&mut self, ui: &mut Ui, p: Palette) {
+        let width = ui.available_width();
+        let matches = |a: &Account, filter: &str, query: &str, attention: bool| {
+            (filter == "전체 Provider" || filter == a.provider)
+                && (!attention || a.attention())
+                && (query.is_empty()
+                    || contains_query(
+                        &format!(
+                            "{} {} {}",
+                            a.name,
+                            a.provider,
+                            text(&a.snapshot, "email", "")
+                        ),
+                        query,
+                    ))
+        };
+        ui.horizontal(|ui| {
+            if MAC {
+                ui.spacing_mut().item_spacing.x = 12.;
+            }
+            let w = (width - 300.).clamp(64., 280.);
+            let field = ui.add_sized(
+                [w, if MAC { 31. } else { 46. }],
+                TextEdit::singleline(&mut AccountField(&mut self.query))
+                    .hint_text(if MAC {
+                        RichText::new("계정 이름 또는 이메일 검색")
+                    } else {
+                        rich("계정 이름 또는 이메일 검색", 11., false, p.muted)
+                    })
+                    .margin(if MAC {
+                        Margin::symmetric(5, 5)
+                    } else {
+                        Margin::symmetric(11, 15)
+                    }),
+            );
+            crate::accessibility::text_value(
+                ui,
+                field,
+                &mut self.query,
+                "계정 이름 또는 이메일 검색",
+            );
+            if MAC {
+                provider_filter(ui, &mut self.filter, 150.);
+            }
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                ui.spacing_mut().item_spacing.x = 12.;
+                let count = self
+                    .state
+                    .accounts
+                    .iter()
+                    .filter(|a| matches(a, &self.filter, &self.query, self.attention))
+                    .count();
+                caption(ui, format!("{count} 계정"), p);
+                checkbox(ui, &mut self.attention, "연결 확인 필요", 12., p);
+                if !MAC {
+                    provider_filter(ui, &mut self.filter, 128.);
+                }
+            });
+        });
+        ui.add_space(18.);
+        let rows: Vec<_> = self
+            .state
+            .accounts
+            .iter()
+            .filter(|a| matches(a, &self.filter, &self.query, self.attention))
+            .cloned()
+            .collect();
+        if rows.is_empty() {
+            ui.add_space(60.);
+            ui.vertical_centered(|ui| {
+                let empty = self.state.accounts.is_empty();
+                #[cfg(target_os = "macos")]
+                {
+                    let (bounds, _) = ui.allocate_exact_size(vec2(56., 44.), Sense::hover());
+                    crate::mac::symbol(ui.painter(), bounds, "person.2", 36., false, p.muted);
+                    ui.add_space(8.);
+                }
+                label(
+                    ui,
+                    if empty {
+                        "연결된 계정이 없습니다"
+                    } else {
+                        "조건에 맞는 계정이 없습니다"
+                    },
+                    18.,
+                    true,
+                    p.ink,
+                );
+                ui.add_space(10.);
+                caption(
+                    ui,
+                    if empty {
+                        "오른쪽 위의 계정 연결에서 Codex, Claude, Gemini를 추가하세요."
+                    } else {
+                        "다른 검색어나 Provider를 선택하세요."
+                    },
+                    p,
+                );
+                if !empty {
+                    ui.add_space(16.);
+                    if action(ui, "필터 초기화", false, p).clicked() {
+                        self.query.clear();
+                        self.filter = "전체 Provider".into();
+                        self.attention = false;
+                    }
+                }
+            });
+        }
+        for account in rows {
+            ui.push_id(&account.id, |ui| {
+                p.frame(20)
+                    .show(ui, |ui| self.connection_card(ui, p, &account))
+            });
+            ui.add_space(14.);
+        }
+    }
+    fn connection_card(&mut self, ui: &mut Ui, p: Palette, a: &Account) {
+        ui.set_width(ui.available_width());
+        let tint = p.tint(a.provider);
+        let status = if !a.enabled {
+            "일시 정지"
+        } else if a.loading {
+            "확인 중"
+        } else if a.attention() {
+            "확인 필요"
+        } else if a.snapshot.is_null() {
+            "조회 대기"
+        } else {
+            "연결됨"
+        };
+        let color = if MAC && a.loading {
+            p.muted
+        } else if a.enabled && a.attention() {
+            p.warning
+        } else if !a.enabled || a.snapshot.is_null() {
+            p.muted
+        } else {
+            tint
+        };
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 12.;
+            self.assets.logo(ui, a.provider, 36.);
+            let width = (ui.available_width() - 112.).max(48.);
+            ui.allocate_ui_with_layout(vec2(width, 36.), Layout::top_down(Align::Min), |ui| {
+                ui.set_max_width(width);
+                label(ui, a.provider, 13., true, p.ink);
+                ui.add_space(4.);
+                ui.add(Label::new(rich(&a.name, 12., false, p.ink)).truncate())
+                    .on_hover_text(&a.name);
+                if let Some(email) = a.snapshot["email"]
+                    .as_str()
+                    .filter(|s| !email_matches_alias(s, &a.name))
+                {
+                    caption(ui, email, p);
+                }
+            });
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                if MAC {
+                    let menu = ui.menu_button("•••", |ui| {
+                        if ui.add_enabled(a.enabled, Button::new("새로고침")).clicked() {
+                            self.wire.action("refresh-account", json!(a.id));
+                            ui.close();
+                        }
+                        ui.separator();
+                        if ui.button("계정 삭제…").clicked() {
+                            self.dialog = Some(Dialog::remove(a.clone()));
+                            ui.close();
+                        }
+                    });
+                    menu.response.widget_info(|| {
+                        WidgetInfo::labeled(
+                            WidgetType::Button,
+                            true,
+                            format!("{} 계정 메뉴", a.name),
+                        )
+                    });
+                    label(ui, status, 11., false, color);
+                    if a.loading {
+                        ui.add(Spinner::new().size(10.));
+                    } else {
+                        let (dot, _) = ui.allocate_exact_size(Vec2::splat(6.), Sense::hover());
+                        ui.painter().circle_filled(dot.center(), 3., color);
+                    }
+                } else {
+                    label(ui, format!("●  {status}"), 11., false, color);
+                }
+            });
+        });
+        if let Some(message) = a.connection_message() {
+            ui.add_space(16.);
+            label(ui, message, 11., false, p.warning);
+        }
+        if let Some(note) = &a.note {
+            ui.add_space(8.);
+            caption(ui, note, p);
+        }
+        ui.add_space(18.);
+        ui.scope(|ui| {
+            if !MAC {
+                ui.spacing_mut().interact_size.y = 16.;
+            }
+            ui.horizontal(|ui| {
+                let connection = if a.managed {
+                    "앱 로그인 · 자동 갱신"
+                } else if a.provider == "Claude" {
+                    "Claude CLI 연결"
+                } else {
+                    "로그인 파일 연결"
+                };
+                caption(ui, connection, p);
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    ui.allocate_ui_with_layout(
+                        vec2(86., if MAC { 20. } else { 16. }),
+                        Layout::top_down(Align::Min),
+                        |ui| {
+                            if named_toggle(
+                                ui,
+                                "모니터링",
+                                &a.control_label("모니터링"),
+                                a.enabled,
+                                tint,
+                                p,
+                            )
+                            .clicked()
+                            {
+                                self.edit_account(a, &a.name, !a.enabled, a.tray);
+                            }
+                        },
+                    );
+                    if MAC && a.provider == "Codex" {
+                        let login = if a.managed {
+                            "다시 로그인…"
+                        } else {
+                            "앱에서 로그인…"
+                        };
+                        if ui
+                            .add_enabled_ui(!self.state.demo, |ui| action(ui, login, false, p))
+                            .inner
+                            .clicked()
+                        {
+                            self.open_connect("Codex", Some(a));
+                        }
+                    }
+                });
+            });
+        });
+        if !a.path.is_empty() {
+            ui.add_space(14.);
+            let title = if a.provider == "Claude" {
+                "연결한 설정 폴더"
+            } else {
+                "연결한 로그인 파일"
+            };
+            disclosure(ui, (&a.id, "source"), title, 11., p, |ui| {
+                caption(ui, &a.path, p);
+                let detail = match (MAC, a.provider) {
+                    (true, "Claude") => {
+                        "Claude에서 메시지를 보내면 잔여량이 갱신됩니다. 계정 삭제 시 기존 statusLine 명령을 복구합니다."
+                    }
+                    (false, "Claude") => {
+                        "Claude에서 메시지를 보내면 잔여량이 갱신됩니다. 연결 해제 시 기존 status line을 복구합니다."
+                    }
+                    _ => {
+                        "CLI가 갱신한 로그인 파일을 읽습니다. 로그인 만료 시 CLI에서 다시 로그인하세요."
+                    }
+                };
+                caption(ui, detail, p);
+            });
+        }
+        if !MAC {
+            ui.add_space(16.);
+            ui.horizontal_wrapped(|ui| {
+                if ui
+                    .add_enabled_ui(a.enabled && !a.loading, |ui| {
+                        action(ui, "새로고침", false, p)
+                    })
+                    .inner
+                    .clicked()
+                {
+                    self.wire.action("refresh-account", json!(a.id));
+                }
+                if action(ui, "이름 변경", false, p).clicked() {
+                    self.dialog = Some(Dialog::Rename(a.clone(), a.name.clone()));
+                }
+                if action(ui, "연결 해제", false, p).clicked() {
+                    self.dialog = Some(Dialog::remove(a.clone()));
+                }
+            });
+        }
+    }
+    fn preference(&mut self, key: &str, mac: &str, value: Value) {
+        self.state.raw["settings"][key] = value.clone();
+        if MAC {
+            self.wire.action(mac, value);
+            return;
+        }
+        let s = &self.state.raw["settings"];
+        self.wire.action("preferences",json!({"seconds":s["refreshSeconds"].as_i64().unwrap_or(300),"autoRefresh":s["autoRefresh"].as_bool().unwrap_or(true),
+            "theme":text(s,"appearance","system"),"scan":s["scanLocalLogs"].as_bool().unwrap_or(true),"taskbar":s["showTaskbarIcon"].as_bool().unwrap_or(true),
+            "trayDisplay":text(s,"trayDisplayMode","remaining"),"automaticUpdates":s["automaticUpdates"].as_bool().unwrap_or(true)}));
+    }
+    fn preview(&self, p: Palette, ui: &mut Ui) {
+        let native = quotabar::tray::State {
+            accounts: self
+                .state
+                .accounts
+                .iter()
+                .map(|a| quotabar::tray::Account {
+                    provider: a.provider.into(),
+                    name: a.name.clone(),
+                    enabled: a.enabled,
+                    visible: a.tray,
+                    remaining: a
+                        .windows()
+                        .iter()
+                        .filter_map(|w| w["remaining"].as_f64())
+                        .collect(),
+                    error: a.error.is_some(),
+                    state: a.snapshot["state"].as_str().map(str::to_owned),
+                })
+                .collect(),
+            icon: self.state.setting("trayDisplayMode", "remaining") == "icon",
+            demo: self.state.demo,
+        };
+        let summary = if MAC {
+            serde_json::to_value(quotabar::tray::mac(&native))
+        } else {
+            serde_json::to_value(quotabar::tray::windows(&native))
+        }
+        .unwrap_or_default();
+        Frame::new()
+            .fill(p.bg)
+            .inner_margin(Margin {
+                left: 12,
+                right: if MAC { 12 } else { 22 },
+                top: 8,
+                bottom: 8,
+            })
+            .corner_radius(7)
+            .show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    if !MAC {
+                        ui.spacing_mut().item_spacing.x = 10.;
+                    }
+                    if MAC {
+                        caption(ui, "미리보기", p);
+                        let mode = self
+                            .state
+                            .setting("menuBarDisplayMode", "providerAndRemaining");
+                        if mode == "iconOnly" {
+                            mark(ui, 22., p);
+                        } else {
+                            label(
+                                ui,
+                                text(
+                                    &summary,
+                                    if mode == "remainingOnly" {
+                                        "remaining"
+                                    } else {
+                                        "title"
+                                    },
+                                    "",
+                                ),
+                                12.,
+                                true,
+                                p.ink,
+                            );
+                        }
+                    } else if summary["useLogo"] == true {
+                        mark(ui, 22., p);
+                        caption(ui, "QuotaBar", p);
+                    } else {
+                        let value = text(&summary, "text", "—");
+                        label(
+                            ui,
+                            value,
+                            22.,
+                            true,
+                            if summary["warning"] == true {
+                                p.warning
+                            } else {
+                                p.ink
+                            },
+                        );
+                        caption(
+                            ui,
+                            if matches!(value, "!" | "—") {
+                                "조회 대기 · 연결 상태 확인".into()
+                            } else {
+                                format!("최소 잔여 {value}%")
+                            },
+                            p,
+                        );
+                    }
+                })
+            });
+    }
+    pub fn settings(&mut self, ui: &mut Ui, p: Palette) {
+        p.frame(20).show(ui,|ui|{ui.set_width(ui.available_width());label(ui,"화면 및 표시",14.,true,p.ink);ui.add_space(18.);
+            label(ui,"화면 모드",12.,false,p.ink);ui.add_space(12.);
+            if let Some(v)=segments(ui,&[("system","시스템 설정 따르기"),("light","라이트"),("dark","다크")],self.state.setting("appearance","system"),p){
+                self.preference("appearance","appearance",json!(v));}
+            divider(ui,p);let dock=self.state.flag("showTaskbarIcon","showDockIcon");
+            if toggle(ui,if MAC{"Dock에 앱 아이콘 표시"}else{"작업 표시줄에 앱 아이콘 표시"},dock,p.accent,p).clicked(){
+                self.preference(if MAC{"showDockIcon"}else{"showTaskbarIcon"},"dockIcon",json!(!dock));}
+            ui.add_space(6.);caption(ui,if MAC{"끄면 상단바에서 Dashboard와 설정을 열 수 있습니다."}else{"끄면 트레이에서 Dashboard와 설정을 열 수 있습니다."},p);
+            divider(ui,p);label(ui,if MAC{"상단바 표시 형식"}else{"트레이 표시"},12.,false,p.ink);ui.add_space(12.);
+            let (key,modes):(&str,&[(&str,&str)])=if MAC{("menuBarDisplayMode",&[("providerAndRemaining","이름 + 잔여량"),("remainingOnly","잔여량만"),("iconOnly","아이콘만")])}
+                else{("trayDisplayMode",&[("remaining","남은 비율 숫자"),("icon","로고만")])};
+            if let Some(v)=segments(ui,modes,self.state.setting(key,modes[0].0),p){self.preference(key,"menuBarMode",json!(v));}
+            ui.add_space(if MAC {12.} else {24.});self.preview(p,ui);ui.add_space(12.);
+            if MAC{caption(ui,"잔여량은 Codex · Claude · Gemini 순서로 표시하며, 등록한 계정만 포함합니다. 표시할 계정은 Dashboard에서 선택하세요.",p);}
+            else{caption(ui,"숫자는 표시 대상 계정·기간 중 가장 낮은 잔여 비율(%)입니다. 작은 아이콘에서는 % 기호를 생략합니다.",p);ui.add_space(6.);
+                caption(ui,"Dashboard에서 표시할 계정을 선택하세요. 마우스를 올리거나 클릭하면 계정별 내역을 확인할 수 있습니다.",p);}
+        });
+        ui.add_space(20.);
+        p.frame(20).show(ui,|ui|{ui.set_width(ui.available_width());label(ui,"모니터링",14.,true,p.ink);ui.add_space(18.);
+            let auto=self.state.flag("autoRefresh","autoRefresh");let seconds=self.state.raw["settings"]["refreshSeconds"].as_i64().unwrap_or(300);
+            ui.horizontal(|ui|{let w=(ui.available_width()-146.).max(120.);
+                if !MAC { ui.spacing_mut().item_spacing.x = 16.; }
+                let layout = if MAC { Layout::top_down(Align::Min) } else { Layout::left_to_right(Align::Center) };
+                ui.allocate_ui_with_layout(vec2(w,31.),layout,|ui|{
+                    if toggle(ui,"자동 새로고침",auto,p.accent,p).clicked(){self.preference("autoRefresh","autoRefresh",json!(!auto));}
+                });
+                ui.add_enabled_ui(auto, |ui| {
+                    let intervals = quotabar::schedule::INTERVALS;
+                    let labels = intervals.map(|n| format!("{}분", n / 60));
+                    let selected = intervals.iter().position(|&n| i64::from(n) == seconds).unwrap_or(0);
+                    if let Some(index) = choose(ui, "자동 새로고침 간격", 130., &labels, selected, 12.) {
+                        self.preference("refreshSeconds", "interval", json!(intervals[index]));
+                    }
+                });
+            });ui.add_space(10.);caption(ui,"창을 닫아도 선택한 주기로 조회합니다. 꺼도 앱 시작 시 조회와 수동 새로고침은 사용할 수 있습니다.",p);
+            divider(ui,p);let scan=self.state.flag("scanLocalLogs","scanLocalLogs");
+            if toggle(ui,"로컬 토큰 통계",scan,p.accent,p).clicked(){self.preference("scanLocalLogs","scanLogs",json!(!scan));}
+            ui.add_space(6.);caption(ui,"Dashboard가 열려 있을 때만 로그를 확인합니다. 대화 본문은 저장하지 않습니다.",p);
+        });
+        ui.add_space(20.);
+        self.app_settings(ui, p);
+        ui.add_space(20.);
+        p.frame(20).show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            label(ui, "데이터 저장", 14., true, p.ink);
+            ui.add_space(14.);
+            caption(
+                ui,
+                if MAC {
+                    "Codex · Gemini 로그인은 이 Mac의 사용자 전용 파일에 저장됩니다. 키체인 승인창을 사용하지 않으며, 별도 암호화 대신 파일 접근 권한으로 보호됩니다."
+                } else {
+                    "연결 정보는 현재 Windows 사용자만 열 수 있도록 보호됩니다."
+                },
+                p,
+            );
+            if let Some(dir) = self.state.raw["dataDirectory"].as_str() {
+                ui.add_space(6.);
+                caption(ui, format!("데이터 위치: {dir}"), p);
+            }
+            #[cfg(target_os = "macos")]
+            {
+                ui.add_space(12.);
+                caption(ui, "설정 위치", p);
+                ui.add(Label::new(RichText::new(crate::mac::data_path().to_string_lossy()).monospace().size(11.)).selectable(true));
+                ui.add_space(12.);
+            }
+            #[cfg(target_os = "macos")]
+            if ui
+                .add_enabled_ui(!self.state.demo, |ui| {
+                    action(ui, "데이터 폴더 열기", false, p)
+                })
+                .inner
+                .clicked()
+            {
+                crate::mac::open_data();
+            }
+        });
+        ui.add_space(20.);
+        p.frame(20).show(ui,|ui|{ui.set_width(ui.available_width());label(ui,"오픈소스 라이선스",14.,true,p.ink);ui.add_space(14.);
+            label(ui,"AIUsage · sylearn 및 기여자",12.,true,p.ink);ui.add_space(6.);caption(ui,"Apache License 2.0",p);ui.add_space(12.);
+            label(ui,"QuotaBar는 AIUsage의 사용량 조회 코드와 Claude 연결 기능 등을 재사용·수정한 독립 프로젝트입니다.",12.,false,p.ink);
+            ui.add_space(14.);ui.horizontal(|ui|{if action(ui,"라이선스 및 고지 보기",false,p).clicked(){self.dialog=Some(Dialog::licenses());}
+                ui.hyperlink_to("원본 프로젝트","https://github.com/sylearn/AIUsage");});
+        });
+    }
+    fn app_settings(&mut self, ui: &mut Ui, p: Palette) {
+        p.frame(20).show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.horizontal(|ui| {
+                mark(ui, 24., p);
+                label(ui, "QuotaBar", 14., true, p.ink);
+                let prefix = if MAC { "" } else { "Windows · " };
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    caption(ui, format!("{prefix}버전 {}", env!("QUOTABAR_VERSION")), p)
+                });
+            });
+            ui.add_space(18.);
+            let startup = text(&self.state.raw, "launchAtLogin", "disabled");
+            let enabled = matches!(startup, "enabled" | "requiresApproval");
+            if ui.add_enabled_ui(startup != "unavailable", |ui| {
+                toggle(ui, "로그인 시 자동 실행", enabled, p.accent, p)
+            }).inner.clicked() {
+                self.wire.action("startup", json!(!enabled));
+            }
+            ui.add_space(6.);
+            caption(ui, if MAC { "Mac 재시동 후 로그인하면 Dashboard를 열지 않고 상단바에서 시작합니다." }
+                        else { "Windows 재시작 후 로그인하면 Dashboard를 열지 않고 트레이에서 시작합니다." }, p);
+            if let Some(note) = match (MAC, startup) {
+                (true, "requiresApproval") => Some("macOS 로그인 항목 설정에서 QuotaBar의 실행을 허용해 주세요."),
+                (true, "unavailable") => Some("빌드된 QuotaBar.app에서 자동 실행을 설정할 수 있습니다."),
+                (true, _) => None,
+                (false, "unavailable") => Some("설치된 QuotaBar 앱에서 자동 실행을 설정하세요."),
+                (false, _) => Some("Windows의 시작 앱 설정에서도 QuotaBar를 허용해야 합니다. 앱을 옮겼다면 이 옵션을 다시 켜세요."),
+            } {
+                ui.add_space(6.);
+                caption(ui, note, p);
+            }
+            if !MAC || startup == "requiresApproval" {
+                let title = if MAC { "로그인 항목 설정 열기" } else { "Windows 시작 앱 설정 열기" };
+                if link(ui, title, p, p.card).clicked() { self.wire.action("startup-settings", Value::Null); }
+            }
+            divider(ui, p);
+            label(ui, "앱 업데이트", 14., true, p.ink);
+            ui.add_space(18.);
+            let automatic = self.state.flag("automaticUpdates", "automaticUpdates");
+            if toggle(ui, "자동 업데이트", automatic, p.accent, p).clicked() {
+                self.preference("automaticUpdates", "automaticUpdates", json!(!automatic));
+            }
+            ui.add_space(6.);
+            caption(ui, if MAC { "새 정식 버전을 자동으로 내려받고, Dashboard가 닫혀 있으면 설치 후 다시 시작합니다." }
+                        else { "새 버전을 자동으로 내려받고, Dashboard를 닫으면 설치 후 다시 시작합니다." }, p);
+            if MAC { ui.add_space(14.); } else { divider(ui, p); }
+            let update = &self.state.raw["appUpdate"];
+            let phase = text(update, "phase", "idle");
+            let version = text(update, "version", "");
+            let progress = count(update, "progress");
+            let busy = matches!(phase, "checking" | "downloading" | "installing");
+            let status = update["message"].as_str().filter(|s| !s.trim().is_empty()).map(str::to_owned)
+                .unwrap_or_else(|| match phase {
+                    "checking" if MAC => "새 버전을 확인하고 있습니다…".into(),
+                    "checking" => "새 버전 확인 중…".into(),
+                    "current" => "최신 버전입니다.".into(),
+                    "available" if MAC => format!("새 버전 {version}을 사용할 수 있습니다."),
+                    "available" => format!("버전 {version} 업데이트가 있습니다."),
+                    "downloading" if MAC => format!("{version} 다운로드 중 · {progress}%"),
+                    "downloading" => format!("버전 {version} 다운로드 중 · {progress}%"),
+                    "ready" if automatic => format!("Dashboard를 닫으면 {version}을 설치하고 다시 시작합니다."),
+                    "ready" if MAC => format!("{version} 설치 준비가 끝났습니다."),
+                    "ready" => format!("버전 {version} 설치 준비 완료"),
+                    "installing" if MAC => "업데이트 설치를 준비하고 있습니다…".into(),
+                    "installing" => "설치를 준비하고 있습니다…".into(),
+                    "failed" if MAC => "업데이트를 완료하지 못했습니다. 현재 앱을 유지합니다.".into(),
+                    "failed" => "업데이트를 완료하지 못했습니다.".into(),
+                    _ if automatic => "앱 시작 후와 하루에 한 번 새 정식 버전을 확인합니다.".into(),
+                    _ => "아래에서 새 버전을 직접 확인할 수 있습니다.".into(),
+                });
+            ui.horizontal(|ui| {
+                if MAC && busy { ui.spinner(); }
+                label(ui, status, 12., false, if phase == "failed" { p.warning } else { p.ink });
+            });
+            if phase == "downloading" {
+                ui.add_space(12.);
+                ui.add(ProgressBar::new(progress as f32 / 100.).desired_height(5.));
+            }
+            ui.add_space(16.);
+            ui.horizontal(|ui| {
+                if ui.add_enabled_ui(!busy && (MAC || !self.state.demo), |ui| {
+                    action(ui, "업데이트 확인", false, p)
+                }).inner.clicked() {
+                    self.wire.action("check-app-update", Value::Null);
+                }
+                if matches!(phase, "available" | "ready") {
+                    let enabled = !self.state.demo && self.state.raw["loggingIn"] != true;
+                    if ui.add_enabled_ui(enabled, |ui| action(ui, "설치 후 다시 시작", false, p)).inner.clicked() {
+                        self.wire.action("install-app-update", Value::Null);
+                    }
+                }
+            });
+            if MAC {
+                divider(ui, p);
+                ui.hyperlink_to("QuotaBar · GitHub", "https://github.com/zjxps2007/quotabar");
+            }
+        });
+    }
+}
+pub fn segments<'a>(
+    ui: &mut Ui,
+    items: &[(&'a str, &str)],
+    current: &str,
+    p: Palette,
+) -> Option<&'a str> {
+    let mut change = None;
+    #[cfg(target_os = "macos")]
+    let width = (ui.available_width().min(420.) - 6.) / items.len() as f32;
+    #[cfg(windows)]
+    let width = {
+        let max_label = items
+            .iter()
+            .map(|(_, title)| {
+                crate::windows_text::natural_size(ui, title, 12., false)
+                    .unwrap_or_else(|| {
+                        ui.painter()
+                            .layout_no_wrap((*title).to_owned(), FontId::proportional(12.), p.ink)
+                            .size()
+                    })
+                    .x
+            })
+            .fold(0.0_f32, f32::max);
+        max_label + if items.len() == 3 { 30. } else { 26. }
+    };
+    ui.horizontal(|ui| {
+        Frame::new()
+            .fill(p.track)
+            .inner_margin(3)
+            .corner_radius(9)
+            .show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 0.;
+                    for &(key, label) in items {
+                        if button_feedback(ui, p.track, p.ink, vec2(12., 5.), |ui| {
+                            ui.add(
+                                Button::new(rich(label, 12., false, p.ink))
+                                    .fill(if current == key { p.card } else { p.track })
+                                    .stroke(if current == key {
+                                        Stroke::new(1.0_f32, p.line)
+                                    } else {
+                                        Stroke::NONE
+                                    })
+                                    .min_size(vec2(width, 32.)),
+                            )
+                        })
+                        .clicked()
+                        {
+                            change = Some(key);
+                        }
+                    }
+                });
+            })
+    });
+    change
+}

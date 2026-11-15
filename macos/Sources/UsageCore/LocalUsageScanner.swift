@@ -10,13 +10,6 @@ public actor LocalUsageScanner {
 
     public func releaseCache() { qb_scanner_release_cache(handle) }
 
-    private final class Cancellation: @unchecked Sendable {
-        // Rust's atomic cancellation flag is shared with Swift's cancellation handler.
-        let handle = qb_cancel_new()!
-        func cancel() { qb_cancel_set(handle) }
-        deinit { qb_cancel_free(handle) }
-    }
-
     private struct Request: Encodable {
         var codexRoots: [String]
         var claudeRoots: [String]
@@ -28,7 +21,7 @@ public actor LocalUsageScanner {
 
     public func scan(codexRoots: [URL], claudeRoots: [URL], now: Date = Date(),
                      timeZone: TimeZone = .current, historyDays: Int = 90) async throws -> LocalUsageReport {
-        let cancellation = Cancellation()
+        let cancellation = NativeCancellation()
         return try await withTaskCancellationHandler {
             try Task.checkCancellation()
             let fixed = timeZone.identifier == "GMT" || timeZone.identifier.hasPrefix("GMT+") || timeZone.identifier.hasPrefix("GMT-")

@@ -12,31 +12,36 @@ use windows_sys::Win32::Graphics::GdiPlus::{
     GdipDeleteStringFormat, GdipDisposeImage, GdipFillPath, GdipGetImageGraphicsContext,
     GdipGetPathWorldBounds, GdipScaleWorldTransform, GdipSetSmoothingMode,
     GdipStringFormatGetGenericTypographic, GdipTranslateWorldTransform, GdiplusStartup,
-    GdiplusStartupInput, GpBitmap, GpSolidFill, MatrixOrderPrepend, RectF, SmoothingModeAntiAlias,
-    Status,
+    GdiplusStartupInput, GdiplusStartupInputEx, GpBitmap, GpSolidFill, MatrixOrderPrepend, RectF,
+    SmoothingModeAntiAlias, Status,
 };
 
-const ARGB_32: i32 = 0x26200a; // PixelFormat32bppARGB in GdiplusPixelFormats.h
+pub(crate) const ARGB_32: i32 = 0x26200a; // PixelFormat32bppARGB in GdiplusPixelFormats.h
 const LOGO: &str = include_str!("../shared/assets/AppMark.svg");
 static STARTUP: OnceLock<Result<usize, i32>> = OnceLock::new();
 static BARS: OnceLock<Vec<[f32; 5]>> = OnceLock::new();
 
-fn checked(status: Status) -> io::Result<()> {
+pub(crate) fn checked(status: Status) -> io::Result<()> {
     if status == 0 {
         Ok(())
     } else {
         Err(io::Error::other(format!("GDI+ status {status}")))
     }
 }
-fn start() -> io::Result<()> {
+pub(crate) fn start() -> io::Result<()> {
     // The token lives for the whole UI process, including overlapping paints.
     match STARTUP.get_or_init(|| {
         let mut token = 0;
-        let input = GdiplusStartupInput {
-            GdiplusVersion: 1,
-            ..Default::default()
+        // System.Drawing initializes version 2 on supported Windows systems. Use the
+        // same image sampling as the original tray, including translucent PNG edges.
+        let input = GdiplusStartupInputEx {
+            Base: GdiplusStartupInput {
+                GdiplusVersion: 2,
+                ..Default::default()
+            },
+            StartupParameters: 0,
         };
-        let status = unsafe { GdiplusStartup(&mut token, &input, null_mut()) };
+        let status = unsafe { GdiplusStartup(&mut token, &input.Base, null_mut()) };
         if status == 0 { Ok(token) } else { Err(status) }
     }) {
         Ok(_) => Ok(()),
@@ -44,12 +49,12 @@ fn start() -> io::Result<()> {
     }
 }
 
-struct Owned<T> {
-    raw: *mut T,
+pub(crate) struct Owned<T> {
+    pub(crate) raw: *mut T,
     release: unsafe fn(*mut T),
 }
 impl<T> Owned<T> {
-    fn new(
+    pub(crate) fn new(
         create: impl FnOnce(*mut *mut T) -> Status,
         release: unsafe fn(*mut T),
     ) -> io::Result<Self> {

@@ -1,54 +1,51 @@
-using System.Collections.Concurrent;
-
 namespace QuotaBar.Core;
-public sealed class CodexSessions(ICredentialStore store, Func<byte[], Task<byte[]>> refresh)
+
+public sealed class CodexSessions
 {
-    private readonly object sync = new();
-    private readonly ConcurrentDictionary<Guid, SemaphoreSlim> gates = new();
-    private readonly Dictionary<Guid, Guid> generations = [];
-    private readonly Dictionary<Guid, (byte[] Original, byte[] Replacement)> pending = [];
-    private readonly HashSet<Guid> revoked = [];
-    public void Invalidate(Guid id) { lock (sync) { generations[id] = Guid.NewGuid(); pending.Remove(id); revoked.Remove(id); } }
-    // The owner must stop and drain requests first. A failed save blocks automatic restart.
-    public void FlushPendingWrites()
+    private readonly NativeCodexSessions native;
+    private readonly Func<byte[], Task<byte[]>> refresh;
+
+    public CodexSessions(ICredentialStore store, Func<byte[], Task<byte[]>> refresh)
     {
-        lock (sync)
-        {
-            foreach (var (id, write) in pending.ToArray())
-            {
-                if (store.Load(id)?.SequenceEqual(write.Original) == true) store.Save(id, write.Replacement);
-                pending.Remove(id);
-            }
-        }
+        native = new(null, store);
+        this.refresh = refresh;
     }
+
+    // Production rotation reads and writes the existing DPAPI vault directly in Rust.
+    public CodexSessions(string credentialDirectory, Func<byte[], Task<byte[]>> refresh)
+    {
+        native = new(credentialDirectory, null);
+        this.refresh = refresh;
+    }
+
+    public void Invalidate(Guid id) => native.Notify(id.ToString("D"), 0, NativeCodexSessions.Event.Invalidate);
+    public void FlushPendingWrites() => native.Flush();
+
     public async Task<byte[]> Credential(Account account, byte[]? rejected = null)
     {
-        var gate = gates.GetOrAdd(account.Id, _ => new(1)); await gate.WaitAsync();
+        string id = account.Id.ToString("D");
+        await native.Enter(id);
+        ulong ticket = 0;
         try
         {
-            byte[] current; Guid generation;
-            lock (sync)
-            {
-                if (revoked.Contains(account.Id)) throw new UsageException("reauth_required", "앱에서 다시 로그인하세요.");
-                current = store.Load(account.Id) ?? throw new UsageException("missing_credentials", "로그인을 다시 연결하세요.");
-                if (pending.TryGetValue(account.Id, out var write))
-                { if (current.SequenceEqual(write.Original)) { store.Save(account.Id, write.Replacement); current = write.Replacement; } pending.Remove(account.Id); }
-                var creds = Credentials.Parse(current, Provider.Codex);
-                if (creds.Identity != account.Identity) throw new UsageException("account_mismatch", "저장된 계정이 다릅니다.");
-                if (!creds.NeedsRefresh(DateTimeOffset.UtcNow) && (rejected == null || !current.SequenceEqual(rejected))) return current;
-                if (!generations.TryGetValue(account.Id, out generation)) generations[account.Id] = generation = Guid.NewGuid();
-            }
+            var current = native.Begin(id, account.Identity, rejected, out ticket);
+            if (ticket == 0) return current;
             try
             {
                 var replacement = await refresh(current);
-                lock (sync)
-                {
-                    if (generations[account.Id] != generation || store.Load(account.Id)?.SequenceEqual(current) != true) throw new OperationCanceledException();
-                    pending[account.Id] = (current, replacement); store.Save(account.Id, replacement); pending.Remove(account.Id); return replacement;
-                }
+                native.Complete(id, ticket, replacement);
+                return replacement;
             }
-            catch (UsageException e) when (e.Code == "reauth_required") { lock (sync) if (generations[account.Id] == generation) revoked.Add(account.Id); throw; }
+            catch (UsageException error) when (error.Code == "reauth_required")
+            {
+                native.Notify(id, ticket, NativeCodexSessions.Event.Revoke);
+                throw;
+            }
         }
-        finally { gate.Release(); }
+        finally
+        {
+            if (ticket != 0) native.Notify(id, ticket, NativeCodexSessions.Event.End);
+            native.Leave(id);
+        }
     }
 }

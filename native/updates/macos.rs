@@ -1,20 +1,16 @@
 use super::{InstallResult, PUBLIC_KEY, Platform, Verified, verified_stage};
 use crate::files::{invalid, read_file, write_private};
+use crate::instance::acquire_lease;
 use objc2_foundation::{NSBundle, NSString, NSURL};
 use serde::Deserialize;
 use std::{
     ffi::{CStr, CString, OsStr, OsString},
-    fs::{self, File},
-    io,
-    os::unix::{
-        ffi::OsStrExt,
-        fs::{MetadataExt, OpenOptionsExt},
-        io::AsRawFd,
-    },
+    fs, io,
+    os::unix::{ffi::OsStrExt, fs::MetadataExt},
     path::{Path, PathBuf},
     process::{Command, Stdio},
     thread,
-    time::{Duration, Instant},
+    time::Duration,
 };
 use uuid::Uuid;
 
@@ -187,28 +183,6 @@ fn open_app(path: &Path, transaction: Option<&str>) -> io::Result<()> {
     run(&mut open)
 }
 
-fn lock(path: &Path, timeout: Duration) -> io::Result<File> {
-    let file = File::options()
-        .create(true)
-        .truncate(false)
-        .read(true)
-        .write(true)
-        .mode(0o600)
-        .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC)
-        .open(path)?;
-    let deadline = Instant::now() + timeout;
-    loop {
-        if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } == 0 {
-            return Ok(file);
-        }
-        let err = io::Error::last_os_error();
-        if err.kind() != io::ErrorKind::WouldBlock || Instant::now() >= deadline {
-            return Err(err);
-        }
-        thread::sleep(Duration::from_millis(200));
-    }
-}
-
 pub fn apply(job: &Path) -> io::Result<()> {
     let root = std::env::home_dir()
         .ok_or_else(|| invalid("Missing home directory"))?
@@ -249,7 +223,6 @@ pub fn apply(job: &Path) -> io::Result<()> {
             message: message.to_owned(),
         })?)
     };
-    let lock_path = root.join("instance.lock");
     let history = updates.join("last-result.json");
     let mut lease = None;
     let mut committed = false;
@@ -262,7 +235,7 @@ pub fn apply(job: &Path) -> io::Result<()> {
         verified_stage(update, platform, &plan.current_version, stage)?;
         validate_bundle(&paths.incoming, update)?;
         write_private(&stage.join("installer-ready.json"), &result(true, "ready")?)?;
-        lease = Some(lock(&lock_path, Duration::from_secs(120))?);
+        lease = Some(acquire_lease(&root, Duration::from_secs(120))?);
         if bundle_field(&paths.target, "CFBundleShortVersionString")? != plan.current_version {
             return Err(invalid("Installed version changed"));
         }
@@ -288,7 +261,7 @@ pub fn apply(job: &Path) -> io::Result<()> {
     if attempt.is_err() {
         let restored = !committed || {
             if lease.is_none() {
-                lease = lock(&lock_path, Duration::from_secs(1)).ok();
+                lease = acquire_lease(&root, Duration::from_secs(1)).ok();
             }
             lease.is_some() && paths.rollback().is_ok()
         };

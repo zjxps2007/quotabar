@@ -11,14 +11,13 @@ using System.Xml.Linq;
 using Microsoft.Win32;
 using QuotaBar.Core;
 using QuotaBar.Protocol;
-using Channel = QuotaBar.Protocol.Channel;
 using ShapePath = System.Windows.Shapes.Path;
 
 namespace QuotaBar.Dashboard;
 
 internal sealed partial class DashboardWindow : Window
 {
-    private readonly Channel channel;
+    private readonly DashboardEndpoint channel;
     private DisplayState? state;
     private string route = "dashboard", filter = "all", accountQuery = "";
     private bool dark, attentionOnly;
@@ -31,7 +30,7 @@ internal sealed partial class DashboardWindow : Window
     private TextBox? searchBox;
     private static readonly Dictionary<Provider, ImageSource> logos = [];
 
-    public DashboardWindow(Channel channel)
+    public DashboardWindow(DashboardEndpoint channel)
     {
         this.channel = channel;
         Title = "QuotaBar"; Width = 1120; Height = 810; MinWidth = 900; MinHeight = 660;

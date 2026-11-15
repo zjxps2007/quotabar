@@ -14,7 +14,21 @@ $process = [Diagnostics.Process]::Start($probe)
 if (-not $process.WaitForExit(30000)) { $process.Kill(); throw 'Packaged UI probe timed out.' }
 if ($process.ExitCode -ne 0) { throw 'Packaged app failed.' }
 $data = Get-Content -LiteralPath $result -Raw | ConvertFrom-Json
-if (-not $data.passed -or $data.dashboardRunning -or $data.wpfLoadedInMonitor) { throw "Packaged probe failed: $($data | ConvertTo-Json -Compress)" }
+if (-not $data.passed -or $data.monitorPid -ne $process.Id -or $data.dashboardRunning -or $data.wpfLoadedInMonitor -or $data.windowsFormsLoadedInMonitor -ne $false) { throw "Packaged probe failed: $($data | ConvertTo-Json -Compress)" }
+$runtime = Get-Content -LiteralPath (Join-Path $ApplicationDirectory 'QuotaBar.Monitor.runtimeconfig.json') -Raw | ConvertFrom-Json
+$frameworks = @($runtime.runtimeOptions.includedFrameworks | ForEach-Object name)
+if ($frameworks -notcontains 'Microsoft.NETCore.App' -or $frameworks -contains 'Microsoft.WindowsDesktop.App') { throw 'Unexpected desktop UI runtime in the monitor package.' }
+$updateResult = Join-Path $RepoRoot 'artifacts\windows\packaged-update-probe.json'
+$probe.Arguments = '--update-manager-probe "' + $updateResult + '"'
+$updateMonitor = [Diagnostics.Process]::Start($probe)
+try {
+    if (-not $updateMonitor.WaitForExit(15000)) { $updateMonitor.Kill(); throw 'Packaged update check timed out.' }
+    $update = Get-Content -LiteralPath $updateResult -Raw | ConvertFrom-Json
+    if ($updateMonitor.ExitCode -ne 0 -or -not $update.passed -or $update.monitorPid -ne $updateMonitor.Id -or -not $update.manualCheckWhileAutomaticUpdatesDisabled) {
+        throw "Packaged manual update check failed: $($update | ConvertTo-Json -Compress)"
+    }
+    $data | Add-Member -NotePropertyName manualCheckWhileAutomaticUpdatesDisabled -NotePropertyValue $true
+} finally { $updateMonitor.Dispose() }
 # The prototype owns no user data. Verify kernel cleanup after an abrupt monitor exit.
 $start = [Diagnostics.ProcessStartInfo]::new($exe)
 $start.UseShellExecute = $false
@@ -38,6 +52,7 @@ try {
     if (Get-Process -Id $childId -ErrorAction SilentlyContinue) { throw 'Dashboard survived its parent.' }
     $data | Add-Member -NotePropertyName parentCrashCleanup -NotePropertyValue $true
     $data | Add-Member -NotePropertyName selfContained -NotePropertyValue $true
+    $data | Add-Member -NotePropertyName includedFrameworks -NotePropertyValue $frameworks
     $data | ConvertTo-Json | Set-Content -LiteralPath $result -Encoding utf8
     $data | ConvertTo-Json
 } finally { if (-not $monitor.HasExited) { $monitor.Kill() }; $monitor.Dispose() }

@@ -1,6 +1,8 @@
 using System.Buffers.Binary;
 using System.Diagnostics;
+using System.IO.Pipes;
 using System.Net;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -125,6 +127,74 @@ public static class Extended
             int calls = 0; var sessions = new CodexSessions(store, _ => { calls++; throw new UsageException("reauth_required", "test"); });
             await Suite.ThrowsAsync<UsageException>(() => sessions.Credential(account)); await Suite.ThrowsAsync<UsageException>(() => sessions.Credential(account)); Suite.Check(calls == 1);
         });
+        await suite.Run("queued Windows callers retry a failed rotation using the latest DPAPI credential", async () =>
+        {
+            var vault = new SecretVault(suite.Paths);
+            var old = Expired();
+            var replacement = Fixtures.Auth(access: "rotation");
+            var account = new Account(Guid.NewGuid(), Provider.Codex, "test", Credentials.Parse(old, Provider.Codex).Identity, "");
+            vault.Save(account.Id, old);
+            var firstReply = new TaskCompletionSource<byte[]>(TaskCreationOptions.RunContinuationsAsynchronously);
+            int calls = 0;
+            var sessions = new CodexSessions(suite.Paths.Credentials, _ => ++calls == 1 ? firstReply.Task : Task.FromResult(replacement));
+            var first = sessions.Credential(account);
+            var retry = sessions.Credential(account, old);
+            var follow = sessions.Credential(account, old);
+            Suite.Check(!retry.IsCompleted && !follow.IsCompleted && calls == 1);
+            firstReply.SetException(new HttpRequestException("fixture offline"));
+            await Suite.ThrowsAsync<HttpRequestException>(() => first);
+            Suite.Check((await retry).SequenceEqual(replacement) && (await follow).SequenceEqual(replacement));
+            var reopened = new CodexSessions(suite.Paths.Credentials, _ => throw new Exception("Unexpected repeat rotation"));
+            Suite.Check((await reopened.Credential(account)).SequenceEqual(replacement) && calls == 2);
+            Suite.Check(vault.Load(account.Id)!.SequenceEqual(replacement));
+        });
+        await suite.Run("old Windows refresh cannot revoke a queued reconnected login", async () =>
+        {
+            var vault = new SecretVault(suite.Paths);
+            var old = Expired();
+            var account = new Account(Guid.NewGuid(), Provider.Codex, "test", Credentials.Parse(old, Provider.Codex).Identity, "");
+            var replacement = Fixtures.Auth(access: "login-after-reconnect");
+            vault.Save(account.Id, old);
+            var delayed = new TaskCompletionSource<byte[]>(TaskCreationOptions.RunContinuationsAsynchronously);
+            var sessions = new CodexSessions(suite.Paths.Credentials, _ => delayed.Task);
+            var first = sessions.Credential(account);
+            sessions.Invalidate(account.Id);
+            vault.Save(account.Id, replacement);
+            var second = sessions.Credential(account);
+            Suite.Check(!second.IsCompleted);
+            delayed.SetException(new UsageException("reauth_required", "old login"));
+            await Suite.ThrowsAsync<UsageException>(() => first);
+            Suite.Check((await second).SequenceEqual(replacement) && vault.Load(account.Id)!.SequenceEqual(replacement));
+        });
+        await suite.Run("monitor saves a rotated login before retrying the quota request after HTTP 401", async () =>
+        {
+            var paths = new AppPaths(Path.Combine(suite.Paths.Root, "managed-retry"));
+            var vault = new SecretVault(paths);
+            var original = Fixtures.Auth();
+            var account = new Account(Guid.NewGuid(), Provider.Codex, "fixture", Credentials.Parse(original, Provider.Codex).Identity, "", AppManagedLogin: true);
+            vault.Save(account.Id, original);
+            new SettingsStore(paths).Save(new Settings { Accounts = [account] });
+            var calls = new List<string>();
+            using var monitor = new MonitorService(paths, new ProviderClient(new Handler((request, _) =>
+            {
+                if (request.Method == HttpMethod.Post)
+                {
+                    calls.Add("rotate");
+                    Suite.Check(request.RequestUri!.AbsolutePath == "/oauth/token" && request.Headers.Authorization == null);
+                    return Task.FromResult(Reply(new { access_token = "retried", expires_in = 3600 }));
+                }
+                var token = request.Headers.Authorization!.Parameter!;
+                calls.Add(token);
+                if (token == "fixture-access") return Task.FromResult(new HttpResponseMessage(HttpStatusCode.Unauthorized));
+                Suite.Check(token == Credentials.Parse(vault.Load(account.Id)!, Provider.Codex).AccessToken);
+                return Task.FromResult(Reply(Fixture("codex-quota.json")));
+            })));
+            await monitor.Refresh(account.Id);
+            Suite.Check(calls.SequenceEqual(["fixture-access", "rotate", "retried"]));
+            Suite.Check(monitor.State().Snapshots[account.Id].Lowest == 47 && monitor.State().Errors.Count == 0);
+            await monitor.PrepareUpdateExit();
+            await monitor.Shutdown();
+        });
         await suite.Run("shared local usage contract duplicates forks cache and Claude streaming", () =>
         {
             var expected = Fixture("local-usage/expected.json"); var scanner = new LocalUsageScanner();
@@ -171,6 +241,16 @@ public static class Extended
                 service.Edit(id, "한글 계정", true, false); service.Preferences(900, "dark", false, false);
                 File.WriteAllBytes(source, Fixtures.Auth("different-workspace")); await service.Refresh();
                 Suite.Check(service.State().Errors[id].Contains("다른 계정") && service.State().Snapshots[id].Lowest == 47);
+                // A mismatched CLI login must not replace the last usable DPAPI copy.
+                File.Delete(source); await service.Refresh();
+                Suite.Check(!service.State().Errors.ContainsKey(id) && service.State().Snapshots[id].Lowest == 47);
+                var vault = new SecretVault(paths);
+                var saved = vault.Load(id)!;
+                vault.Save(id, Fixtures.Auth("other-vault-account")); await service.Refresh();
+                Suite.Check(service.State().Errors[id] == "인증 계정이 일치하지 않습니다.");
+                vault.Delete(id); await service.Refresh();
+                Suite.Check(service.State().Errors[id] == "로그인 파일을 다시 연결하세요.");
+                vault.Save(id, saved);
                 await service.Shutdown();
             }
             using (var service = new MonitorService(paths))
@@ -186,6 +266,53 @@ public static class Extended
             Suite.Check(first.IsOwner && !second.IsOwner); var activated = new TaskCompletionSource();
             var server = first.Listen(() => activated.TrySetResult()); await second.Activate(); await activated.Task.WaitAsync(TimeSpan.FromSeconds(3)); first.Dispose(); await server;
         });
+        await suite.Run("original and Rust monitors share the lease and activate each other", async () =>
+        {
+            var paths = new AppPaths(Path.Combine(suite.Paths.Root, "기존 ßıᾀµſ𐐨"));
+            string lockPath = Path.Combine(paths.Root, "monitor.lock");
+            var digest = SHA256.HashData(Encoding.UTF8.GetBytes(paths.Root.ToUpperInvariant() + PrivateFiles.User.Value));
+            string name = "QuotaBar-" + Convert.ToHexString(digest)[..24];
+            const PipeOptions options = PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly;
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            using (var owner = new SingleInstance(paths))
+            {
+                Suite.Check(owner.IsOwner);
+                Suite.Throws<IOException>(() => { using var duplicate = new FileStream(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None); });
+                int activations = 0;
+                var received = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+                var server = owner.Listen(() => { Interlocked.Increment(ref activations); received.TrySetResult(); });
+                try
+                {
+                    // A previous client can disappear without writing, or send a different byte.
+                    using var stalled = new NamedPipeClientStream(".", name, PipeDirection.Out, options);
+                    await stalled.ConnectAsync(timeout.Token);
+                    foreach (byte value in new byte[] { 7, 1 })
+                    {
+                        using var client = new NamedPipeClientStream(".", name, PipeDirection.Out, options);
+                        await client.ConnectAsync(timeout.Token);
+                        await client.WriteAsync(new byte[] { value }, timeout.Token);
+                    }
+                    await received.Task.WaitAsync(timeout.Token);
+                    Suite.Check(Volatile.Read(ref activations) == 1);
+                }
+                finally { owner.Dispose(); await server.WaitAsync(timeout.Token); }
+            }
+            using (var legacyLease = new FileStream(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None))
+            using (var server = new NamedPipeServerStream(name, PipeDirection.In, 1, PipeTransmissionMode.Byte, options))
+            using (var second = new SingleInstance(paths))
+            {
+                Suite.Check(!second.IsOwner);
+                async Task Receive()
+                {
+                    await server.WaitForConnectionAsync(timeout.Token);
+                    byte[] command = new byte[1];
+                    Suite.Check(await server.ReadAsync(command, timeout.Token) == 1 && command[0] == 1);
+                }
+                await Task.WhenAll(Receive(), second.Activate()).WaitAsync(timeout.Token);
+            }
+            using var restarted = new SingleInstance(paths);
+            Suite.Check(restarted.IsOwner);
+        });
         await suite.Run("IPC fragmented frames unicode version and truncated EOF", async () =>
         {
             using var output = new MemoryStream(); using (var channel = new QuotaBar.Protocol.Channel(Stream.Null, output))
@@ -200,7 +327,7 @@ public static class Extended
         });
         await suite.Run("Claude stale generation cannot write snapshots", async () =>
         {
-            var paths = new AppPaths(Path.Combine(suite.Paths.Root, "generation")); var service = new ClaudeConnection(paths);
+            var paths = new AppPaths(Path.Combine(suite.Paths.Root, "generation")); var service = new ClaudeConnection(paths, Fixtures.Helper);
             var dir = Path.Combine(suite.Paths.Root, "generation-claude"); Directory.CreateDirectory(dir); var first = service.Install(dir, Environment.ProcessPath!); var second = service.Install(dir, Environment.ProcessPath!);
             var bytes = Json.Bytes(new { session_id = Guid.NewGuid(), rate_limits = new { five_hour = new { used_percentage = 25, resets_at = DateTimeOffset.UtcNow.AddHours(1).ToUnixTimeSeconds() } } });
             using var output = new MemoryStream(); await service.RunAsync(first.Id, first.Generation, new MemoryStream(bytes), output, Stream.Null); Suite.Check(service.Latest(second) == null);

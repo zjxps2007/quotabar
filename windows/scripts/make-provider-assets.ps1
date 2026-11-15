@@ -1,5 +1,5 @@
 # Run with Windows PowerShell (powershell.exe -NoProfile -File ...).
-# Rasterize the shared SVG at build time so the resident WinForms monitor never loads WPF.
+# Rasterize the shared SVG for the native Windows tray renderer.
 $ErrorActionPreference = 'Stop'
 $repoRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..'))
 Add-Type -AssemblyName PresentationCore, WindowsBase

@@ -17,9 +17,14 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Native helper build failed.' }
     & $cargo @argsForBuild --package quotabar-native
     if ($LASTEXITCODE -ne 0) { throw 'Rust core library build failed.' }
+    & $cargo @argsForBuild --package quotabar-ui --bin quotabar-dashboard
+    if ($LASTEXITCODE -ne 0) { throw 'Rust dashboard build failed.' }
     New-Item -ItemType Directory -Force -Path $Destination | Out-Null
     $program = Join-Path $target ($Configuration.ToLowerInvariant() + '\quotabar-statusline.exe')
     Copy-Item -LiteralPath $program -Destination (Join-Path $Destination 'QuotaBar.StatusLine.exe') -Force
+    $dashboard = Join-Path (Split-Path -Parent $Destination) 'Dashboard'
+    New-Item -ItemType Directory -Force -Path $dashboard | Out-Null
+    Copy-Item -LiteralPath (Join-Path $target ($Configuration.ToLowerInvariant() + '\quotabar-dashboard.exe')) -Destination (Join-Path $dashboard 'QuotaBar.Dashboard.exe') -Force
 } finally {
     $env:PATH = $savedPath
     $env:CARGO_HOME = $savedCargo

@@ -1,4 +1,5 @@
 import Foundation
+import CQuotaBar
 
 /// Only display data crosses to the disposable UI process. Credentials remain in
 /// the monitor; a new browser login travels back once over its inherited pipe.
@@ -48,40 +49,45 @@ public enum DashboardEvent: Codable, Sendable {
 /// No listening port, shared credential file, or persisted IPC transcript.
 public struct PipeFrameDecoder {
     public static let maximumSize = 4 * 1024 * 1024
-    private var buffer = Data()
-    private var expected: Int?
+    private final class Storage {
+        let handle: OpaquePointer
+        init(copy: Storage? = nil) {
+            if let copy { handle = qb_frame_decoder_copy(copy.handle)! }
+            else { handle = qb_frame_decoder_new()! }
+        }
+        deinit { qb_frame_decoder_free(handle) }
+    }
+    private final class Frames { var values: [Data] = [] }
+    private var storage = Storage()
     public init() {}
 
     public mutating func append(_ data: Data) throws -> [Data] {
-        var messages: [Data] = []
-        var cursor = data.startIndex
-        while cursor < data.endIndex {
-            let count = min((expected ?? 4) - buffer.count, data.endIndex - cursor)
-            buffer.append(data[cursor..<(cursor + count)])
-            cursor += count
-            if expected == nil, buffer.count == 4 {
-                let length = buffer.reduce(0) { ($0 << 8) | Int($1) }
-                guard length > 0, length <= Self.maximumSize else { throw PipeError.invalidFrame }
-                expected = length; buffer.removeAll(keepingCapacity: true)
-            }
-            if let expected, buffer.count == expected {
-                messages.append(buffer); buffer = Data(); self.expected = nil
-            }
+        if !isKnownUniquelyReferenced(&storage) { storage = Storage(copy: storage) }
+        let frames = Frames()
+        let status = data.withUnsafeBytes { bytes in
+            qb_frame_append(storage.handle, bytes.bindMemory(to: UInt8.self).baseAddress, bytes.count,
+                            { context, body, length in
+                                guard let context, let body else { return }
+                                Unmanaged<Frames>.fromOpaque(context).takeUnretainedValue()
+                                    .values.append(Data(bytes: body, count: length))
+                            }, Unmanaged.passUnretained(frames).toOpaque())
         }
-        return messages
+        guard status == 0 else { throw PipeError.invalidFrame }
+        return frames.values
     }
 
     public func finish() throws {
-        guard buffer.isEmpty, expected == nil else { throw PipeError.truncatedFrame }
+        guard qb_frame_finish(storage.handle) == 0 else { throw PipeError.truncatedFrame }
     }
 
     public static func encode(_ data: Data) throws -> Data {
-        guard !data.isEmpty, data.count <= maximumSize else { throw PipeError.invalidFrame }
-        let length = UInt32(data.count)
-        var result = Data([UInt8((length >> 24) & 255), UInt8((length >> 16) & 255),
-                           UInt8((length >> 8) & 255), UInt8(length & 255)])
-        result.append(data)
-        return result
+        var output: UnsafeMutablePointer<UInt8>?, length = 0
+        let status = data.withUnsafeBytes {
+            qb_frame_encode($0.bindMemory(to: UInt8.self).baseAddress, $0.count, &output, &length)
+        }
+        guard status == 0, let output else { throw PipeError.invalidFrame }
+        defer { qb_secret_free(output, length) }
+        return Data(bytes: output, count: length)
     }
 }
 

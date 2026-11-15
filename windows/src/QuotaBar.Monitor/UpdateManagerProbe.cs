@@ -5,20 +5,18 @@ using QuotaBar.Windows;
 namespace QuotaBar.Monitor;
 
 // Isolated regression probe: no real settings, credentials, downloads or installations.
-internal sealed class UpdateManagerProbe : ApplicationContext
+internal static class UpdateManagerProbe
 {
-    private readonly Control dispatcher = new();
-    public UpdateManagerProbe(string resultPath)
+    public static void Start(MonitorLoop dispatcher, string resultPath)
     {
-        _ = dispatcher.Handle;
-        dispatcher.BeginInvoke(async () =>
+        dispatcher.TryPost(async () =>
         {
             string root = Path.Combine(Path.GetTempPath(), "QuotaBar.Update.Manager-" + Guid.NewGuid());
             try
             {
                 using var handler = new FixtureHandler();
                 AppUpdateManager? manager = null;
-                manager = new(new AppPaths(root), () => manager!.Configure(false, false, false),
+                manager = new(dispatcher, new AppPaths(root), () => manager!.Configure(false, false, false),
                     () => throw new InvalidOperationException("Must not install"), () => { },
                     () => throw new InvalidOperationException("Must not exit"), new ReleaseClient(handler));
                 using (manager)
@@ -33,13 +31,12 @@ internal sealed class UpdateManagerProbe : ApplicationContext
                     manager.Configure(false, false, false);
                     if (manager.State.Phase != UpdatePhase.Available) throw new InvalidOperationException("Display updates changed manual mode.");
                 }
-                File.WriteAllBytes(resultPath, Json.Bytes(new { passed = true, manualCheckWhileAutomaticUpdatesDisabled = true }));
+                File.WriteAllBytes(resultPath, Json.Bytes(new { passed = true, monitorPid = Environment.ProcessId, manualCheckWhileAutomaticUpdatesDisabled = true }));
             }
             catch (Exception error) { File.WriteAllBytes(resultPath, Json.Bytes(new { passed = false, error = error.ToString() })); }
-            finally { if (Directory.Exists(root)) Directory.Delete(root, true); ExitThread(); }
+            finally { if (Directory.Exists(root)) Directory.Delete(root, true); dispatcher.Exit(); }
         });
     }
-    protected override void ExitThreadCore() { dispatcher.Dispose(); base.ExitThreadCore(); }
     private sealed class FixtureHandler : HttpMessageHandler
     {
         public int Requests;

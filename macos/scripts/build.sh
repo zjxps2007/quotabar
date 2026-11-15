@@ -45,10 +45,8 @@ rm -f "$app/Contents/Resources/AppIcon.icns"
 if [[ "$configuration" == "release" ]]; then strip -x "$app/Contents/MacOS/QuotaBar"; fi
 helper="$app/Contents/Helpers/QuotaBar Dashboard.app"
 mkdir -p "$helper/Contents/MacOS" "$helper/Contents/Resources"
-cp "$app/Contents/MacOS/QuotaBar" "$helper/Contents/MacOS/QuotaBar"
-cp "$app/Contents/MacOS/quotabar-statusline" "$helper/Contents/MacOS/quotabar-statusline"
+cp "$PWD/../target/$configuration/quotabar-dashboard" "$helper/Contents/MacOS/QuotaBar"
 cp ../LICENSE ../NOTICE "$helper/Contents/Resources/"
-cp -R "$binary_dir/QuotaBar_QuotaBar.bundle" "$helper/Contents/Resources/"
 cp "$app/Contents/Resources/AppIcon-4.icns" "$helper/Contents/Resources/"
 cat > "$helper/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>

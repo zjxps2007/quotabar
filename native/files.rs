@@ -4,7 +4,7 @@ use std::path::Path;
 use uuid::Uuid;
 
 #[cfg(windows)]
-mod windows;
+pub(crate) mod windows;
 
 pub fn invalid(message: &'static str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, message)

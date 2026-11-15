@@ -1,14 +1,41 @@
 //! C entry points used by the platform application hosts.
+#[cfg(windows)]
+mod claude;
+mod codex_sessions;
 mod credentials;
+#[cfg(any(windows, target_os = "macos"))]
+mod dashboard;
+mod frames;
+#[cfg(windows)]
+mod instance;
 mod login_item;
+#[cfg(any(target_os = "macos", feature = "mac-settings-compat"))]
+mod mac_claude;
 #[cfg(target_os = "macos")]
 mod mac_login;
+#[cfg(target_os = "macos")]
+mod mac_menu;
+#[cfg(any(target_os = "macos", feature = "mac-settings-compat"))]
+mod mac_settings;
+#[cfg(any(target_os = "macos", feature = "mac-settings-compat"))]
+mod mac_snapshots;
+#[cfg(windows)]
+mod menu;
+#[cfg(windows)]
+mod monitor_loop;
 #[cfg(windows)]
 mod notification_icon;
-mod provider_requests;
+mod provider_query;
+mod releases;
+mod schedule;
+mod storage;
 mod vault;
 #[cfg(windows)]
 mod windows_login;
+#[cfg(windows)]
+mod windows_operation;
+#[cfg(windows)]
+mod windows_settings;
 #[cfg(windows)]
 #[unsafe(no_mangle)]
 /// Draws straight-alpha BGRA into the caller's square icon buffer.

@@ -124,6 +124,71 @@ pub struct MacSummary {
     empty_message: &'static str,
 }
 
+#[derive(Deserialize)]
+struct MacPopoverSource {
+    appearance: String,
+    mode: String,
+    demo: bool,
+    accounts: Vec<MacPopoverAccount>,
+}
+
+#[derive(Deserialize)]
+struct MacPopoverAccount {
+    provider: String,
+    name: String,
+    enabled: bool,
+    visible: bool,
+    loading: bool,
+    error: bool,
+    state: Option<String>,
+    windows: Vec<MacPeriod>,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct MacPeriod {
+    title: String,
+    remaining: f64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reset_at: Option<f64>,
+}
+
+/// Build the menu item and popover together from the same monitor snapshot.
+/// The item groups by provider. The popover retains the user's account order.
+pub fn mac_popover(bytes: &[u8]) -> serde_json::Result<serde_json::Value> {
+    use serde_json::json;
+    let source: MacPopoverSource = serde_json::from_slice(bytes)?;
+    let mut cards = Vec::new();
+    let mut accounts = Vec::with_capacity(source.accounts.len());
+    for entry in source.accounts {
+        if entry.enabled && entry.visible {
+            cards.push(json!({
+                "provider": entry.provider, "name": entry.name, "windows": entry.windows,
+                "loading": entry.loading, "error": entry.error,
+                "stale": entry.error || entry.state.as_deref() == Some("stale"),
+            }));
+        }
+        accounts.push(Account {
+            provider: entry.provider,
+            name: entry.name,
+            enabled: entry.enabled,
+            visible: entry.visible,
+            remaining: entry.windows.iter().map(|w| w.remaining).collect(),
+            error: entry.error,
+            state: entry.state,
+        });
+    }
+    let summary = mac(&State {
+        accounts,
+        demo: source.demo,
+        icon: false,
+    });
+    Ok(json!({
+        "appearance": source.appearance, "mode": source.mode, "demo": source.demo, "accounts": cards,
+        "title": summary.title, "remaining": summary.remaining, "help": summary.help, "empty": summary.empty_message,
+    }))
+}
+
 pub fn mac(state: &State) -> MacSummary {
     let empty_message = if state.accounts.is_empty() {
         "Dashboard에서 계정을 연결하세요."
@@ -215,6 +280,28 @@ pub fn mac(state: &State) -> MacSummary {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn mac_popover_keeps_card_order_and_summarizes_only_visible_enabled_accounts() {
+        use serde_json::json;
+        let source = json!({"mode":"remainingOnly","appearance":"system","demo":true,"accounts":[
+            {"provider":"Claude","name":"첫 계정","visible":true,"enabled":true,"loading":false,"error":true,
+             "windows":[{"title":"주간","remaining":54.5,"resetAt":815415000.125}]},
+            {"provider":"Codex","name":"새 계정","visible":true,"enabled":true,"loading":true,"error":false,"windows":[]},
+            {"provider":"Gemini","name":"숨김","visible":false,"enabled":true,"loading":false,"error":false,"windows":[]}
+        ]});
+        let display = mac_popover(&serde_json::to_vec(&source).unwrap()).unwrap();
+        assert_eq!(display["title"], "Codex — · Claude 55%*");
+        assert_eq!(display["remaining"], "— · 55%*");
+        assert_eq!(display["accounts"].as_array().unwrap().len(), 2);
+        assert_eq!(
+            display["accounts"][0]["windows"],
+            source["accounts"][0]["windows"]
+        );
+        assert_eq!(display["accounts"][0]["stale"], true);
+        assert_eq!(display["accounts"][1]["loading"], true);
+        assert!(!display["help"].as_str().unwrap().contains("숨김"));
+    }
+
     #[test]
     fn platform_specific_rounding_visibility_and_stale_states() {
         let request = serde_json::json!({"accounts":[

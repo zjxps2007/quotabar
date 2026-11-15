@@ -7,3 +7,4 @@ if [[ "$configuration" == "release" ]]; then options+=(--release); fi
 export MACOSX_DEPLOYMENT_TARGET=14.0
 cargo build "${options[@]}" --package quotabar-native
 cargo build "${options[@]}" --package quotabar --bin quotabar-statusline
+cargo build "${options[@]}" --package quotabar-ui --bin quotabar-dashboard

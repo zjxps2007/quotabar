@@ -4,10 +4,11 @@ use serde::Serialize;
 use std::{ptr, slice};
 use zeroize::Zeroizing;
 
-fn error_code(error: Error) -> i32 {
+pub(super) fn error_code(error: Error) -> i32 {
     match error {
         Error::TooLarge => -2,
         Error::InvalidJson => -3,
+        Error::FoundationJson => -14,
         Error::MissingToken => -4,
         Error::MissingIdentity => -5,
         Error::ClaudeDirectory => -6,
@@ -29,8 +30,11 @@ fn platform() -> Platform {
 }
 
 pub(super) fn publish(bytes: Vec<u8>, output: &mut *mut u8, length: &mut usize) {
-    let bytes = Zeroizing::new(bytes);
-    let result: Box<[u8]> = bytes.as_slice().into();
+    publish_secret(&Zeroizing::new(bytes), output, length);
+}
+
+pub(super) fn publish_secret(bytes: &[u8], output: &mut *mut u8, length: &mut usize) {
+    let result: Box<[u8]> = bytes.into();
     *length = result.len();
     *output = Box::into_raw(result).cast();
 }
@@ -65,7 +69,7 @@ pub unsafe extern "C" fn qb_credentials(
         2 => Provider::Gemini,
         _ => return -1,
     };
-    let platform = platform();
+    let platform = if mode == 0 { platform() } else { Platform::Mac };
     let encoded = std::panic::catch_unwind(|| -> Result<Vec<u8>, i32> {
         let input = if length == 0 {
             &[]
@@ -159,7 +163,7 @@ pub unsafe extern "C" fn qb_rotate_credentials(
             0
         }
         Ok(Err(RotationError::Credentials(e))) => error_code(e),
-        Ok(Err(RotationError::InvalidResponse)) => -8,
+        Ok(Err(RotationError::MalformedResponse | RotationError::InvalidResponse)) => -8,
         Ok(Err(RotationError::ReturnedAccountChanged)) => -9,
         Ok(Err(RotationError::StoredAccountChanged)) => -10,
         Err(_) => -1,

@@ -13,15 +13,15 @@ pub enum Format {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Request {
-    provider: String,
-    response: Value,
-    email: Option<String>,
-    account_id: Option<String>,
-    user_id: Option<String>,
-    jwt_plan: Option<String>,
-    tier: Option<String>,
-    project: Option<String>,
-    source: Option<Value>,
+    pub(crate) provider: String,
+    pub(crate) response: Value,
+    pub(crate) email: Option<String>,
+    pub(crate) account_id: Option<String>,
+    pub(crate) user_id: Option<String>,
+    pub(crate) jwt_plan: Option<String>,
+    pub(crate) tier: Option<String>,
+    pub(crate) project: Option<String>,
+    pub(crate) source: Option<Value>,
 }
 
 fn trimmed(value: &Value) -> Option<&str> {

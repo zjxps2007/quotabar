@@ -1,5 +1,4 @@
 using System.Diagnostics;
-using Microsoft.Win32;
 using QuotaBar.Core;
 using QuotaBar.Protocol;
 using QuotaBar.Windows;
@@ -10,47 +9,52 @@ internal static class Program
 {
     [STAThread] static void Main(string[] args)
     {
-        ApplicationConfiguration.Initialize();
-        if (Arguments.Value(args, "--update-manager-probe") is { } updateProbe)
-        { Application.Run(new UpdateManagerProbe(updateProbe)); return; }
-        try { Application.Run(new MonitorContext(args)); }
+        try
+        {
+            using var dispatcher = new MonitorLoop();
+            if (Arguments.Value(args, "--update-manager-probe") is { } updateProbe)
+            { UpdateManagerProbe.Start(dispatcher, updateProbe); dispatcher.Run(); return; }
+            string? probe = Arguments.Value(args, "--probe");
+            var paths = probe != null || args.Contains("--demo") ? null : new AppPaths(Arguments.Value(args, "--data-dir"));
+            using var instance = paths == null ? null : new SingleInstance(paths);
+            bool background = args.Contains("--background");
+            if (instance is { IsOwner: false })
+            {
+                try { if (!background) instance.Activate().GetAwaiter().GetResult(); }
+                catch { TrayMenu.ShowMessage("QuotaBar가 이미 실행 중입니다. 알림 영역에서 열어 주세요."); }
+                return;
+            }
+            using var monitor = new MonitorContext(dispatcher, paths, instance, probe, args, background);
+            dispatcher.Run();
+        }
         catch (Exception e)
         {
             if (Arguments.Value(args, "--probe") is { } path) File.WriteAllBytes(path, Json.Bytes(new { passed = false, error = e.GetType().Name + ": " + e.Message }));
-            else MessageBox.Show(MonitorService.Explain(e), "QuotaBar", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            else TrayMenu.ShowMessage(MonitorService.Explain(e), 1);
         }
     }
 }
-internal sealed class MonitorContext : ApplicationContext
+internal sealed class MonitorContext : IDisposable
 {
-    private readonly Control dispatcher = new();
+    private readonly MonitorLoop dispatcher;
     private readonly NotificationIcon tray;
     private readonly TrayMenu menu;
     private readonly DashboardHost dashboard;
     private readonly MonitorService? service;
     private readonly AppUpdateManager? updater;
-    private readonly SingleInstance? instance;
-    private readonly System.Windows.Forms.Timer timer = new();
     private readonly bool demo;
     private DisplayState sample;
     private bool visible, suspended, quitting;
     private DateTimeOffset lastRefresh = DateTimeOffset.UtcNow;
     private string route = "dashboard";
     private string? captured;
-    public MonitorContext(string[] args)
+    public MonitorContext(MonitorLoop dispatcher, AppPaths? paths, SingleInstance? instance, string? probe, string[] args, bool background)
     {
-        _ = dispatcher.Handle;
-        string? probe = Arguments.Value(args, "--probe"); demo = args.Contains("--demo") || probe != null;
-        sample = Demo.State() with { Activity = Demo.Activity() };
-        if (!demo)
+        this.dispatcher = dispatcher;
+        demo = paths == null;
+        sample = Demo.State(probe == null ? null : new DateTimeOffset(2099, 1, 15, 12, 0, 0, TimeSpan.Zero)) with { Activity = Demo.Activity() };
+        if (paths != null)
         {
-            var paths = new AppPaths(Arguments.Value(args, "--data-dir")); instance = new(paths);
-            if (!instance.IsOwner)
-            {
-                try { if (!args.Contains("--background")) instance.Activate().GetAwaiter().GetResult(); }
-                catch { MessageBox.Show("QuotaBar가 이미 실행 중입니다. 알림 영역에서 열어 주세요.", "QuotaBar"); }
-                instance.Dispose(); dispatcher.Dispose(); Environment.Exit(0);
-            }
             service = new(paths); service.Changed += Publish;
         }
         dashboard = new DashboardHost(dispatcher, State);
@@ -58,17 +62,14 @@ internal sealed class MonitorContext : ApplicationContext
         dashboard.Exited += () => { visible = false; service?.StopScan(); Schedule(); ConfigureUpdates(); };
         menu = new TrayMenu(State, Open, Quit);
         tray = new NotificationIcon(menu);
-        if (service != null) updater = new(service.Paths, Publish, service.PrepareUpdateExit,
+        if (service != null) updater = new(dispatcher, service.Paths, Publish, service.PrepareUpdateExit,
             () => { service.ResumeAfterUpdate(); Schedule(); }, Quit);
-        timer.Tick += async (_, _) => { timer.Stop(); await Refresh(automatic: true); };
-        SystemEvents.PowerModeChanged += Power;
-        SystemEvents.UserPreferenceChanged += PreferencesChanged;
-        SystemEvents.DisplaySettingsChanged += DisplayChanged;
+        dispatcher.Received += OnSystemEvent;
         Publish();
         if (instance != null) _ = instance.Listen(() => Post(() => Open("dashboard")));
-        if (probe != null) dispatcher.BeginInvoke(async () => await Probe(probe));
-        else dispatcher.BeginInvoke(async () => {
-            if (!args.Contains("--background")) Open("dashboard");
+        if (probe != null) Post(async () => await Probe(probe));
+        else Post(async () => {
+            if (!background) Open("dashboard");
             if (service != null) UpdateInstaller.Acknowledge(args, service.Paths);
             await Refresh();
         });
@@ -84,7 +85,7 @@ internal sealed class MonitorContext : ApplicationContext
     {
         route = target;
         try { visible = true; ConfigureUpdates(); dashboard.Show(target); }
-        catch (Exception e) { visible = dashboard.IsRunning; ConfigureUpdates(); MessageBox.Show(MonitorService.Explain(e), "QuotaBar"); }
+        catch (Exception e) { visible = dashboard.IsRunning; ConfigureUpdates(); TrayMenu.ShowMessage(MonitorService.Explain(e)); }
     }
     private async Task Command(Message m)
     {
@@ -150,19 +151,30 @@ internal sealed class MonitorContext : ApplicationContext
         if (suspended || quitting || (automatic && !State().Settings.AutoRefresh)) return;
         lastRefresh = DateTimeOffset.UtcNow; if (service != null) { await service.Refresh(); if (route == "dashboard") await Scan(); } Schedule();
     }
-    private void Power(object sender, PowerModeChangedEventArgs e) => Post(async () =>
+    private async void OnSystemEvent(MonitorLoop.Event value)
     {
-        suspended = e.Mode == PowerModes.Suspend;
+        switch (value)
+        {
+            case MonitorLoop.Event.Refresh: await Refresh(automatic: true); break;
+            case MonitorLoop.Event.Display: Post(Publish); break;
+            case MonitorLoop.Event.Suspend:
+            case MonitorLoop.Event.Resume:
+            case MonitorLoop.Event.PowerStatus: Post(async () => await Power(value)); break;
+        }
+    }
+    private async Task Power(MonitorLoop.Event value)
+    {
+        suspended = value == MonitorLoop.Event.Suspend;
         ConfigureUpdates();
-        if (suspended) { timer.Stop(); service?.Suspend(); }
-        else if (e.Mode == PowerModes.Resume) { await Task.Delay(2000); await Refresh(automatic: true); }
-    });
+        if (suspended) { dispatcher.Schedule(MonitorLoop.Timer.Refresh, 0); service?.Suspend(); }
+        else if (value == MonitorLoop.Event.Resume) { await Task.Delay(2000); await Refresh(automatic: true); }
+    }
     private void Schedule()
     {
-        timer.Stop(); if (quitting || demo) return;
+        if (quitting || demo) return;
         var settings = State().Settings;
         var next = RefreshSchedule.Next(suspended, settings.Accounts.Any(a => a.Enabled), visible, settings.RefreshSeconds, lastRefresh, settings.AutoRefresh);
-        if (next is { } due) { timer.Interval = (int)Math.Clamp((due - DateTimeOffset.UtcNow).TotalMilliseconds, 1000, int.MaxValue); timer.Start(); }
+        dispatcher.Schedule(MonitorLoop.Timer.Refresh, next is { } due ? (int)Math.Clamp((due - DateTimeOffset.UtcNow).TotalMilliseconds, 1000, int.MaxValue) : 0);
     }
     private void Publish()
     {
@@ -170,15 +182,13 @@ internal sealed class MonitorContext : ApplicationContext
         tray.Publish(TraySummary.From(State()));
         menu.RefreshIfVisible(); dashboard.Publish(); Schedule(); ConfigureUpdates();
     }
-    private void PreferencesChanged(object sender, UserPreferenceChangedEventArgs e) => Post(Publish);
-    private void DisplayChanged(object? sender, EventArgs e) => Post(Publish);
     private async Task Probe(string path)
     {
         try
         {
             var pids = new List<int>();
             var captures = new List<string>();
-            TrayIconRenderer.SaveSamples(Path.GetDirectoryName(path)!);
+            TrayMenuProbe.SaveSamples(Path.GetDirectoryName(path)!);
             var trayMenu = await TrayMenuProbe.Run(tray, menu, () => sample, value => sample = value,
                 () => dashboard.IsRunning, Path.GetDirectoryName(path)!);
             captures.AddRange(trayMenu.Captures);
@@ -220,23 +230,23 @@ internal sealed class MonitorContext : ApplicationContext
             File.WriteAllBytes(path, Json.Bytes(new { passed = true, captures, trayMenu, dashboardPids = pids, dashboardRunning = dashboard.IsRunning,
                 trayText = traySummary.Text, trayVisibleAfterDashboardClose = tray.Visible, trayPixelSize = tray.PixelSize,
                 monitorPid = current.Id, privateBytes = current.PrivateMemorySize64, workingSet = current.WorkingSet64,
-                wpfLoadedInMonitor = AppDomain.CurrentDomain.GetAssemblies().Any(a => a.GetName().Name == "PresentationFramework") }));
+                wpfLoadedInMonitor = AppDomain.CurrentDomain.GetAssemblies().Any(a => a.GetName().Name == "PresentationFramework"),
+                windowsFormsLoadedInMonitor = AppDomain.CurrentDomain.GetAssemblies().Any(a => a.GetName().Name == "System.Windows.Forms") }));
         }
         catch (Exception e) { File.WriteAllBytes(path, Json.Bytes(new { passed = false, error = e.GetType().Name + ": " + e.Message })); }
-        finally { ExitThread(); }
+        finally { dispatcher.Exit(); }
     }
     private static async Task Until(Func<bool> condition, int limit)
     { var deadline = Environment.TickCount64 + limit; while (!condition()) { if (Environment.TickCount64 > deadline) throw new TimeoutException(); await Task.Delay(50); } }
-    private void Post(Action action) { if (!dispatcher.IsDisposed) try { dispatcher.BeginInvoke(action); } catch (InvalidOperationException) { } }
+    private void Post(Action action) => dispatcher.TryPost(action);
     private async Task Quit()
     {
-        if (quitting) return; quitting = true; timer.Stop(); dashboard.Close();
-        try { if (service != null) await service.Shutdown(); } finally { ExitThread(); }
+        if (quitting) return; quitting = true; dispatcher.Schedule(MonitorLoop.Timer.Refresh, 0); dashboard.Close();
+        try { if (service != null) await service.Shutdown(); } finally { dispatcher.Exit(); }
     }
-    protected override void ExitThreadCore()
+    public void Dispose()
     {
-        quitting = true; SystemEvents.PowerModeChanged -= Power; SystemEvents.UserPreferenceChanged -= PreferencesChanged;
-        SystemEvents.DisplaySettingsChanged -= DisplayChanged; timer.Dispose(); updater?.Dispose(); service?.Dispose(); dashboard.Dispose();
-        tray.Dispose(); menu.Dispose(); instance?.Dispose(); dispatcher.Dispose(); base.ExitThreadCore();
+        quitting = true; dispatcher.Received -= OnSystemEvent;
+        updater?.Dispose(); service?.Dispose(); dashboard.Dispose(); tray.Dispose(); menu.Dispose();
     }
 }

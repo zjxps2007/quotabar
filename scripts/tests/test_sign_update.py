@@ -29,7 +29,8 @@ class SigningTests(unittest.TestCase):
         (self.repo / 'shared/version.json').write_text('{"version":"0.1.1","build":7}')
         self.call('git', 'init', '-q', str(self.repo))
         self.git('add', '.')
-        self.git('-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '-qm', 'fixture')
+        self.git('-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid',
+                 'commit', '--no-gpg-sign', '-qm', 'fixture')
         commit = self.git('rev-parse', 'HEAD').stdout.decode().strip()
         files = []
         for suffix in ('macOS-arm64.zip', 'Windows-x64.zip', 'Windows-x64-Setup.exe'):

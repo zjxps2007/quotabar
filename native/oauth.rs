@@ -1,6 +1,7 @@
 //! Validate each returned token before carrying forward any pinned identity fields.
 use crate::credentials::{
-    Error, Platform, Provider, Workspace, claims, document, mac_workspace, parse_object, trimmed,
+    Error, Platform, Provider, Workspace, claims, credential_document, document, mac_workspace,
+    parse_object, trimmed,
 };
 use chrono::{DateTime, SecondsFormat, Timelike, Utc};
 use serde_json::{Value, json};
@@ -8,6 +9,7 @@ use serde_json::{Value, json};
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum RotationError {
     Credentials(Error),
+    MalformedResponse,
     InvalidResponse,
     ReturnedAccountChanged,
     StoredAccountChanged,
@@ -17,7 +19,7 @@ pub fn managed(bytes: &[u8], platform: Platform) -> Result<crate::credentials::C
     if bytes.len() > crate::vault::MAX_SIZE {
         return Err(Error::TooLarge);
     }
-    let json = document(bytes, platform)?;
+    let json = credential_document(bytes, platform)?;
     managed_object(&json, platform)
 }
 
@@ -98,7 +100,7 @@ pub fn rotate(
     if current.len() > crate::vault::MAX_SIZE {
         return Err(Credentials(Error::TooLarge));
     }
-    let mut root = document(current, platform).map_err(Credentials)?;
+    let mut root = credential_document(current, platform).map_err(Credentials)?;
     let old = managed_object(&root, platform).map_err(Credentials)?;
     let limit = if platform == Platform::Mac {
         crate::vault::MAX_SIZE
@@ -108,7 +110,7 @@ pub fn rotate(
     if response.len() > limit {
         return Err(InvalidResponse);
     }
-    let result = document(response, platform).map_err(|_| InvalidResponse)?;
+    let result = document(response, platform).map_err(|_| MalformedResponse)?;
     let access = result["access_token"]
         .as_str()
         .filter(|v| trimmed(v).is_some())

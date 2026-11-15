@@ -19,7 +19,8 @@ pub enum Platform {
     Windows,
     Mac,
 }
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub enum Provider {
     Codex,
     Gemini,
@@ -30,6 +31,7 @@ pub enum Provider {
 pub enum Error {
     TooLarge,
     InvalidJson,
+    FoundationJson,
     MissingToken,
     MissingIdentity,
     ClaudeDirectory,
@@ -284,54 +286,47 @@ pub fn parse(bytes: &[u8], provider: Provider, platform: Platform) -> Result<Cre
     if bytes.len() > crate::vault::MAX_SIZE {
         return Err(Error::TooLarge);
     }
-    let root = document(bytes, platform)?;
+    let root = credential_document(bytes, platform)?;
     parse_object(&root, provider, platform)
+}
+
+// JSONSerialization.jsonObject(with:) rejects malformed input and top-level fragments
+// before the Swift credential importer can check whether the root is a dictionary.
+pub(crate) fn credential_document(bytes: &[u8], platform: Platform) -> Result<Value, Error> {
+    let result = document(bytes, platform);
+    if platform == Platform::Windows {
+        return result;
+    }
+    match result {
+        Ok(value @ (Value::Object(_) | Value::Array(_))) => Ok(value),
+        _ => Err(Error::FoundationJson),
+    }
 }
 
 pub(crate) fn document(bytes: &[u8], platform: Platform) -> Result<Value, Error> {
     if platform == Platform::Windows {
+        if !crate::json_depth::allows(bytes, 64) {
+            return Err(Error::InvalidJson);
+        }
         return serde_json::from_slice(bytes).map_err(|_| Error::InvalidJson);
     }
-    // JSONSerialization also accepts UTF-16/32 login files exported by shell tools.
-    let bytes = bytes.strip_prefix(&[0xef, 0xbb, 0xbf]).unwrap_or(bytes);
-    let (width, little, skip) = match bytes {
-        [0xff, 0xfe, 0, 0, ..] => (4, true, 4),
-        [0, 0, 0xfe, 0xff, ..] => (4, false, 4),
-        [0xff, 0xfe, ..] => (2, true, 2),
-        [0xfe, 0xff, ..] => (2, false, 2),
-        [0, 0, 0, _, ..] => (4, false, 0),
-        [_, 0, 0, 0, ..] => (4, true, 0),
-        [0, _, 0, _, ..] => (2, false, 0),
-        [_, 0, _, 0, ..] => (2, true, 0),
-        _ => return serde_json::from_slice(bytes).map_err(|_| Error::InvalidJson),
+    let utf8 = crate::foundation_json::utf8(bytes).ok_or(Error::InvalidJson)?;
+    let normalized = crate::foundation_json::trailing_commas(utf8.as_ref());
+    let parse = |bytes: &[u8]| -> Result<Value, Error> {
+        use serde::Deserialize;
+        if !crate::json_depth::allows(bytes, 512) {
+            return Err(Error::InvalidJson);
+        }
+        let mut parser = serde_json::Deserializer::from_slice(bytes);
+        parser.disable_recursion_limit();
+        let value = Value::deserialize(&mut parser).map_err(|_| Error::InvalidJson)?;
+        parser.end().map_err(|_| Error::InvalidJson)?;
+        Ok(value)
     };
-    let bytes = &bytes[skip..];
-    if !bytes.len().is_multiple_of(width) {
-        return Err(Error::InvalidJson);
+    match normalized {
+        std::borrow::Cow::Borrowed(bytes) => parse(bytes),
+        std::borrow::Cow::Owned(bytes) => parse(&Zeroizing::new(bytes)),
     }
-    let mut decoded = Zeroizing::new(String::new());
-    if width == 2 {
-        let units = bytes.as_chunks::<2>().0.iter().map(|s| {
-            if little {
-                u16::from_le_bytes(*s)
-            } else {
-                u16::from_be_bytes(*s)
-            }
-        });
-        for c in char::decode_utf16(units) {
-            decoded.push(c.map_err(|_| Error::InvalidJson)?);
-        }
-    } else {
-        for &unit in bytes.as_chunks::<4>().0 {
-            let value = if little {
-                u32::from_le_bytes(unit)
-            } else {
-                u32::from_be_bytes(unit)
-            };
-            decoded.push(char::from_u32(value).ok_or(Error::InvalidJson)?);
-        }
-    }
-    serde_json::from_str(&decoded).map_err(|_| Error::InvalidJson)
 }
 
 pub(crate) fn parse_object(

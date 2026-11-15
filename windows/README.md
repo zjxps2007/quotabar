@@ -10,7 +10,7 @@ Windows 10/11 x64용 네이티브 트레이 앱입니다. macOS 앱과 별도 �
 
 [포터블 ZIP](https://github.com/zjxps2007/quotabar/releases/download/v0.1.4/QuotaBar-0.1.4-Windows-x64.zip)도 제공합니다. ZIP 전체를 고정된 폴더에 풀고 `QuotaBar.Monitor.exe`를 실행합니다. 파일 하나만 옮기지 마세요.
 
-`Dashboard/`와 `StatusLine/`에는 각 프로세스의 런타임이 있습니다. WPF와 기본 .NET 런타임의 동명 파일이 충돌하므로 폴더 내용을 합치지 마세요.
+`Dashboard/`에는 Rust 대시보드가, `StatusLine/`에는 Claude 콜백이 들어 있습니다. 업데이트가 각 구성 요소의 버전을 확인할 수 있도록 폴더 구조를 유지하세요.
 
 - 트레이 아이콘 **우클릭**: 계정별 사용량 보기와 **Dashboard 열기 · 종료**만 표시합니다. **좌클릭과 좌측 더블클릭은 동작하지 않습니다.** 새로고침·계정 관리·활동·설정은 Dashboard에서 이용합니다.
 - Dashboard 창을 닫으면 화면 프로세스가 종료되고 모니터가 남습니다. 트레이의 **종료**로 앱 전체를 종료합니다.
@@ -80,4 +80,4 @@ macOS와 같은 흑백 테마, 앱·서비스 로고, 서비스별 색상, 둥�
 
 보호 저장소 테스트는 현재 사용자의 일반 프로세스에서 실행해야 합니다. 제한 토큰 샌드박스에서 사용자 전용 ACL 접근이 거부되는 것은 정상이며 ACL을 완화하지 않습니다. 테스트는 합성 인증·가짜 CLI·가짜 HTTP 응답을 사용합니다. 실계정 서버 검증은 별도입니다.
 
-프로젝트: `QuotaBar.Core`(모델·조회·집계), `QuotaBar.Windows`(Windows 인증·저장소·연결), `QuotaBar.Protocol`(IPC), `QuotaBar.Monitor`(상주 트레이), `QuotaBar.Dashboard`(일회성 WPF), `QuotaBar.StatusLine`(Claude 콜백). 모니터는 WPF를 로드하지 않습니다.
+`QuotaBar.Monitor`가 계정 조회와 예약 작업을 관리하고 Rust Win32 트레이 메뉴에 상태를 전달합니다. 대시보드는 `native/ui`에서 빌드한 별도 Rust 프로세스이며 창을 닫으면 종료됩니다. `QuotaBar.Protocol`은 모니터와 대시보드 사이의 비공개 파이프를 연결합니다.

@@ -10,16 +10,16 @@ Push-Location (Join-Path $RepoRoot 'windows')
 try {
     & "$PSScriptRoot\build-native.ps1" -Destination (Join-Path $bundle 'StatusLine')
     & "$PSScriptRoot\write-update-version.ps1" -Path (Join-Path $bundle 'StatusLine\QuotaBar.StatusLine.dll') -Version $version
-    foreach ($project in @('Monitor','Dashboard')) {
-        $output = Join-Path $stage $project
-        Invoke-Dotnet @('publish',"src/QuotaBar.$project/QuotaBar.$project.csproj",'-c','Release','-r',$Runtime,'--self-contained','true','-p:PublishSingleFile=false','-p:PublishTrimmed=false',"-p:Version=$version",'-m:1','-nodeReuse:false','-p:UseSharedCompilation=false','-o',$output,'--nologo')
-        # WPF and Core carry different WindowsBase.dll files. Never merge these runtimes.
-        $component = if ($project -eq 'Monitor') { $bundle } else { Join-Path $bundle $project }
-        New-Item -ItemType Directory -Force -Path $component | Out-Null
-        Copy-Item -Path (Join-Path $output '*') -Destination $component -Recurse -Force
-    }
+    & "$PSScriptRoot\write-update-version.ps1" -Path (Join-Path $bundle 'Dashboard\QuotaBar.Dashboard.dll') -Version $version
+    $output = Join-Path $stage 'Monitor'
+    Invoke-Dotnet @('publish','src/QuotaBar.Monitor/QuotaBar.Monitor.csproj','-c','Release','-r',$Runtime,'--self-contained','true','-p:PublishSingleFile=false','-p:PublishTrimmed=false',"-p:Version=$version",'-m:1','-nodeReuse:false','-p:UseSharedCompilation=false','-o',$output,'--nologo')
+    Copy-Item -Path (Join-Path $output '*') -Destination $bundle -Recurse -Force
     Copy-Item -LiteralPath (Join-Path $RepoRoot 'LICENSE'), (Join-Path $RepoRoot 'NOTICE'), (Join-Path $RepoRoot 'windows\README.md') -Destination $bundle -Force
-    $frameworks = (Get-Content -LiteralPath (Join-Path $bundle 'Dashboard\QuotaBar.Dashboard.runtimeconfig.json') -Raw | ConvertFrom-Json).runtimeOptions.includedFrameworks
+    $proxyLicenses = New-Item -ItemType Directory -Force -Path (Join-Path $bundle 'licenses\libcurl')
+    Copy-Item -LiteralPath (Join-Path $RepoRoot 'windows\assets\Proxy-LICENSE') -Destination (Join-Path $proxyLicenses.FullName 'LICENSE')
+    $arrowLicense = New-Item -ItemType Directory -Force -Path (Join-Path $bundle 'licenses\Windows Forms')
+    Copy-Item -LiteralPath (Join-Path $RepoRoot 'windows\assets\WinForms-LICENSE') -Destination (Join-Path $arrowLicense.FullName 'LICENSE')
+    $frameworks = (Get-Content -LiteralPath (Join-Path $bundle 'QuotaBar.Monitor.runtimeconfig.json') -Raw | ConvertFrom-Json).runtimeOptions.includedFrameworks
     foreach ($framework in $frameworks) {
         $packageName = ($framework.name + '.runtime.' + $Runtime).ToLowerInvariant()
         $packageRoot = Join-Path $env:NUGET_PACKAGES ($packageName + '\' + $framework.version)
