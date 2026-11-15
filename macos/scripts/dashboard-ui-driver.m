@@ -139,8 +139,10 @@ static id control(NSWindow *window, NSString *name, NSMutableArray *available) {
 // A SwiftUI hosting view can expose only its AppKit-backed controls without an
 // active system accessibility client. Click the visible control in that window.
 // Points are in the original reference layout, relative to its content edges.
-static BOOL clickReference(NSWindow *window, NSString *label) {
-    if (!getenv("QUOTABAR_TEST_REFERENCE_INPUT")) return NO;
+static BOOL clickControl(NSWindow *window, NSString *label) {
+    // The Dock switch occupies the same part of both windows. Give both helpers
+    // one down/up pair so an accessibility action cannot introduce a duplicate.
+    if (!getenv("QUOTABAR_TEST_REFERENCE_INPUT") && ![label isEqual:@"Dock에 앱 아이콘 표시"]) return NO;
     NSView *view = window.contentView;
     CGFloat w = NSWidth(view.bounds), h = NSHeight(view.bounds), x, y;
     if ([label isEqual:@"계정 연결"]) { x = w - 76; y = 85; }
@@ -148,7 +150,8 @@ static BOOL clickReference(NSWindow *window, NSString *label) {
     else if ([label isEqual:@"라이트"]) { x = 469; y = 230; }
     else if ([label isEqual:@"아이콘만"]) { x = 609; y = 387; }
     else if ([label isEqual:@"이름 + 잔여량"]) { x = 329; y = 387; }
-    else if ([label isEqual:@"Dock에 앱 아이콘 표시"]) { x = w - 83; y = 294; }
+    else if ([label isEqual:@"Dock에 앱 아이콘 표시"]) { x = w - 83; y = 292; }
+    else if ([label hasSuffix:@" 계정 메뉴"]) { x = w - 68; y = 209; }
     else if ([label hasSuffix:@") 모니터링"]) { x = w - 60; y = 251; }
     else if ([label isEqual:@"Claude"]) { x = w * 0.55; y = 116; }
     else if ([label isEqual:@"Gemini"]) { x = w * 0.81; y = 116; }
@@ -180,7 +183,29 @@ static NSDictionary *perform(NSDictionary *request) {
         NSString *match = [window.effectiveAppearance bestMatchFromAppearancesWithNames:@[NSAppearanceNameAqua, NSAppearanceNameDarkAqua]];
         return @{@"appearance": [match isEqual:NSAppearanceNameDarkAqua] ? @"dark" : @"light"};
     }
-    if ([op isEqual:@"menu"]) {
+    if ([op isEqual:@"accountRefresh"]) {
+        // Let the application's real menu open, then choose its enabled refresh item.
+        // Tracking runs a nested AppKit event loop, so use its mode to deliver the choice.
+        __block id token;
+        NSNotificationCenter *center = NSNotificationCenter.defaultCenter;
+        token = [center addObserverForName:NSMenuDidBeginTrackingNotification object:nil queue:nil usingBlock:^(NSNotification *notice) {
+            NSMenu *menu = notice.object;
+            NSMenuItem *refresh = [menu itemWithTitle:@"새로고침"];
+            if (!refresh || ![menu itemWithTitle:@"계정 삭제…"]) return;
+            [center removeObserver:token];
+            token = nil;
+            CFRunLoopPerformBlock(CFRunLoopGetMain(), (__bridge CFStringRef)NSEventTrackingRunLoopMode, ^{
+                [menu update];
+                if (refresh.enabled) [menu performActionForItemAtIndex:[menu indexOfItem:refresh]];
+                [menu cancelTracking];
+            });
+            CFRunLoopWakeUp(CFRunLoopGetMain());
+        }];
+        NSDictionary *opened = perform(@{@"op": @"press", @"label": label});
+        if (!opened[@"pressed"] && token) { [center removeObserver:token]; token = nil; }
+        return opened;
+    }
+    if ([op isEqual:@"menu"] || [op isEqual:@"shortcut"]) {
         for (NSMenuItem *entry in NSApp.mainMenu.itemArray) {
             NSMenu *menu = entry.submenu;
             NSMenuItem *item = [menu itemWithTitle:label];
@@ -189,7 +214,17 @@ static NSDictionary *perform(NSDictionary *request) {
             if (!item.enabled) return @{@"error": @"disabled menu item", @"label": label};
             NSString *key = item.keyEquivalent;
             NSUInteger modifiers = item.keyEquivalentModifierMask & NSEventModifierFlagDeviceIndependentFlagsMask;
-            [menu performActionForItemAtIndex:[menu indexOfItem:item]];
+            if ([op isEqual:@"shortcut"]) {
+                NSDictionary *codes = @{@"r": @15, @",": @43};
+                NSNumber *code = codes[key];
+                if (!code) return @{@"error": @"unexpected shortcut", @"key": key};
+                NSEvent *event = [NSEvent keyEventWithType:NSEventTypeKeyDown location:NSZeroPoint
+                    modifierFlags:modifiers timestamp:NSProcessInfo.processInfo.systemUptime windowNumber:window.windowNumber
+                    context:nil characters:key charactersIgnoringModifiers:key isARepeat:NO keyCode:code.unsignedShortValue];
+                if (![NSApp.mainMenu performKeyEquivalent:event]) return @{@"error": @"shortcut was not handled", @"key": key};
+            } else {
+                [menu performActionForItemAtIndex:[menu indexOfItem:item]];
+            }
             return @{@"label": label, @"key": key, @"modifiers": @(modifiers)};
         }
         return @{@"pending": @"menu item", @"label": label};
@@ -198,10 +233,10 @@ static NSDictionary *perform(NSDictionary *request) {
     NSWindow *target = window.attachedSheet ?: window;
     // SwiftUI's segmented picker can expose its enclosing AppKit control for
     // multiple choices. A real mouse click selects the requested segment.
-    if ([op isEqual:@"press"] && [@[@"라이트", @"다크", @"아이콘만", @"이름 + 잔여량"] containsObject:label] &&
-        clickReference(target, label)) return @{@"pressed": label};
+    if ([op isEqual:@"press"] && [@[@"라이트", @"다크", @"아이콘만", @"이름 + 잔여량", @"Dock에 앱 아이콘 표시"] containsObject:label] &&
+        clickControl(target, label)) return @{@"pressed": label};
     id element = control(target, label, available);
-    if (!element && ([op isEqual:@"press"] || [op isEqual:@"attempt"]) && clickReference(target, label))
+    if (!element && ([op isEqual:@"press"] || [op isEqual:@"attempt"]) && clickControl(target, label))
         return @{@"pressed": label};
     if (!element) return @{@"pending": @"control", @"label": label, @"available": available};
     BOOL enabled = ![element respondsToSelector:@selector(isAccessibilityEnabled)] || [element isAccessibilityEnabled];

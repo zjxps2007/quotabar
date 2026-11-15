@@ -375,7 +375,7 @@ impl Dashboard {
                         }
                     }
                 });
-            capture.and_then(|c| c.dialog_image(ctx, frame, title))
+            capture.and_then(|c| c.dialog_image(ctx, frame))
         };
         {
             let id = crate::accessibility::viewport();
@@ -397,6 +397,16 @@ impl Dashboard {
             }
             let pixels = ctx.show_viewport_immediate(id, builder, |dialog_ctx, _| {
                 content(dialog_ctx, capture.as_mut())
+            });
+            #[cfg(windows)]
+            let pixels = pixels.or_else(|| {
+                let state = frame.wgpu_render_state().filter(|_| self.capture_dialog)?;
+                crate::windows_dialog_capture::DialogFrame::read(ctx, state).unwrap_or_else(
+                    |error| {
+                        super::record_probe_error(&error.to_string());
+                        None
+                    },
+                )
             });
             self.dialog_access.publish();
             if self.capture_dialog {
@@ -774,7 +784,6 @@ impl Connect {
         Frame::new().inner_margin(15).corner_radius(10)
             .fill(p.card.lerp_to_gamma(p.ink, 0.035))
             .show(ui, |ui| {
-                ui.set_width(ui.available_width());
                 ui.spacing_mut().item_spacing.y = 10.;
                 let note = |ui: &mut Ui, text: &str, color: Color32| {
                     if crate::mac_text::paragraph(ui, text, 12., 3., color).is_none() {

@@ -18,9 +18,9 @@ mod style;
 #[cfg(windows)]
 mod windows_border;
 #[cfg(windows)]
-mod windows_capture;
-#[cfg(windows)]
 mod windows_choice;
+#[cfg(windows)]
+mod windows_dialog_capture;
 #[cfg(windows)]
 mod windows_scroll;
 #[cfg(windows)]
@@ -44,35 +44,15 @@ impl Capture {
         &mut self,
         ctx: &egui::Context,
         _frame: &eframe::Frame,
-        _title: &str,
     ) -> Option<std::sync::Arc<egui::ColorImage>> {
         if let Some(image) = self.painted.lock().unwrap().take() {
             return Some(image);
         }
         #[cfg(windows)]
         if _frame.gl().is_none() {
-            if !self.requested
-                && Instant::now() >= self.after
-                && let Some(hwnd) = platform::dialog_hwnd(_frame, _title)
-            {
-                // Immediate viewports don't receive WGPU's screenshot event.
-                // Capture the presented, owned client while its UI thread keeps painting.
+            if !self.requested && Instant::now() >= self.after {
                 self.requested = true;
-                let handle = hwnd as usize;
-                let result = self.painted.clone();
-                let wake = ctx.clone();
-                std::thread::spawn(move || {
-                    match windows_capture::client_pixels(handle) {
-                        Ok(image) => {
-                            let size = [image.width() as usize, image.height() as usize];
-                            *result.lock().unwrap() = Some(std::sync::Arc::new(
-                                egui::ColorImage::from_rgb(size, &image),
-                            ));
-                        }
-                        Err(error) => record_probe_error(&error.to_string()),
-                    }
-                    wake.request_repaint();
-                });
+                windows_dialog_capture::DialogFrame::request(ctx);
             }
             ctx.request_repaint_after_for(Duration::from_millis(25), egui::ViewportId::ROOT);
             return None;
@@ -510,6 +490,14 @@ fn main() -> eframe::Result {
         {
             settings.instance_descriptor.backends = wgpu::Backends::DX12;
         }
+        // A packaged UI probe can exercise the fallback even on a machine with modern OpenGL.
+        let options = if std::env::var_os("QUOTABAR_PROBE_UI_ERROR").is_some()
+            && wgpu::Backends::from_env() == Some(wgpu::Backends::DX12)
+        {
+            directx.clone()
+        } else {
+            options
+        };
         // OpenGL may initialize with only Microsoft's legacy 1.1 driver.
         // Its painter rejects that driver before consuming the application or IPC state.
         let mut pending = Some(create);

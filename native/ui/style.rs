@@ -80,6 +80,7 @@ pub struct Palette {
     pub dark: bool,
     pub ink: Color32,
     pub muted: Color32,
+    pub tertiary: Color32,
     pub card: Color32,
     pub bg: Color32,
     pub rail: Color32,
@@ -97,10 +98,40 @@ impl Palette {
             _ => ctx.system_theme() == Some(Theme::Dark),
         };
         let gray = |d, l| Color32::from_gray(if dark { d } else { l });
+        #[cfg(target_os = "macos")]
+        let (ink, muted, tertiary) = {
+            use block2::StackBlock;
+            use objc2::MainThreadMarker;
+            use objc2_app_kit::{NSApplication, NSColor};
+            use std::cell::Cell;
+
+            let app = NSApplication::sharedApplication(
+                MainThreadMarker::new().expect("dashboard UI thread"),
+            );
+            let appearance = app.effectiveAppearance();
+            let key = Id::new(("AppKit label colors", appearance.name().to_string()));
+            ctx.data(|data| data.get_temp(key)).unwrap_or_else(|| {
+                let colors = Cell::new((gray(220, 39), gray(151, 128), gray(84, 189)));
+                appearance.performAsCurrentDrawingAppearance(&StackBlock::new(|| {
+                    let (primary, secondary, tertiary) = colors.get();
+                    colors.set((
+                        mac_color(&NSColor::labelColor(), primary),
+                        mac_color(&NSColor::secondaryLabelColor(), secondary),
+                        mac_color(&NSColor::tertiaryLabelColor(), tertiary),
+                    ));
+                }));
+                let colors = colors.get();
+                ctx.data_mut(|data| data.insert_temp(key, colors));
+                colors
+            })
+        };
+        #[cfg(windows)]
+        let (ink, muted, tertiary) = (gray(242, 23), gray(163, 117), gray(163, 117));
         Self {
             dark,
-            ink: gray(242, 23),
-            muted: gray(163, 117),
+            ink,
+            muted,
+            tertiary,
             card: gray(28, 255),
             bg: gray(14, 245),
             rail: gray(19, 255),
@@ -191,6 +222,21 @@ impl Palette {
     }
 }
 #[cfg(target_os = "macos")]
+fn mac_color(value: &objc2_app_kit::NSColor, fallback: Color32) -> Color32 {
+    let Some(color) = value.colorUsingColorSpace(&objc2_app_kit::NSColorSpace::sRGBColorSpace())
+    else {
+        return fallback;
+    };
+    let byte = |n: f64| (n.clamp(0., 1.) * 255.).round() as u8;
+    Color32::from_rgba_unmultiplied(
+        byte(color.redComponent()),
+        byte(color.greenComponent()),
+        byte(color.blueComponent()),
+        byte(color.alphaComponent()),
+    )
+}
+
+#[cfg(target_os = "macos")]
 pub fn mac_field(
     ui: &mut Ui,
     text: &mut String,
@@ -199,20 +245,8 @@ pub fn mac_field(
     width: f32,
     p: Palette,
 ) -> Response {
-    use objc2_app_kit::{NSColor, NSColorSpace};
-    let system_color = |value: &NSColor, fallback: Color32| {
-        let Some(c) = value.colorUsingColorSpace(&NSColorSpace::sRGBColorSpace()) else {
-            return fallback;
-        };
-        let byte = |n: f64| (n.clamp(0., 1.) * 255.).round() as u8;
-        Color32::from_rgba_unmultiplied(
-            byte(c.redComponent()),
-            byte(c.greenComponent()),
-            byte(c.blueComponent()),
-            byte(c.alphaComponent()),
-        )
-    };
-    let placeholder = system_color(&NSColor::placeholderTextColor(), p.muted);
+    use objc2_app_kit::NSColor;
+    let placeholder = mac_color(&NSColor::placeholderTextColor(), p.muted);
     let background = ui.painter().add(Shape::Noop);
     let field = ui.add(
         TextEdit::singleline(text)
@@ -236,7 +270,7 @@ pub fn mac_field(
         ),
     );
     if field.has_focus() {
-        let ring = system_color(&NSColor::keyboardFocusIndicatorColor(), p.ink);
+        let ring = mac_color(&NSColor::keyboardFocusIndicatorColor(), p.ink);
         ui.painter().rect_stroke(
             field.rect.expand(1.),
             6.,

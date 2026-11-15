@@ -65,12 +65,12 @@ def exercise(dashboard, executable, folder, library, fixture, observed):
                 raise ValueError(f"Unexpected route {value!r}, expected {name!r}")
             observed.append({"route": value})
 
-        def menu(title, event, destination=None):
-            item = controls.request("menu", title)
+        def menu(title, event, destination=None, via="menu"):
+            item = controls.request(via, title)
             payload = command(event)
             if destination and payload != {"_0": destination}:
                 raise ValueError(f"{title}: {payload}")
-            observed.append({"menu": item, "event": {event: payload}})
+            observed.append({via: item, "event": {event: payload}})
 
         def preference(label, event, key, value):
             controls.request("press", label)
@@ -96,9 +96,9 @@ def exercise(dashboard, executable, folder, library, fixture, observed):
             send({"state": {"_0": fixture}})
             send({"show": {"route": "accounts"}})
             route("accounts")
-            menu("새로고침", "refreshAll")
+            menu("새로고침", "refreshAll", via="shortcut")
             menu("상단바 사용량 보기", "showPopover")
-            menu("설정…", "route", "settings")
+            menu("설정…", "route", "settings", via="shortcut")
             time.sleep(0.4)
             preference("다크", "appearance", "appearance", "dark")
             preference("라이트", "appearance", "appearance", "light")
@@ -160,6 +160,10 @@ def exercise(dashboard, executable, folder, library, fixture, observed):
             send({"reply": {"id": next_id}})
             controls.request("sheet", expected={"sheet": False})
             observed.append({"successfulConnectionDismissesSheet": True})
+            controls.request("accountRefresh", f"{account['name']} 계정 메뉴")
+            if UUID(command("refresh")["_0"]) != UUID(account["id"]):
+                raise ValueError("The account menu refreshed a different account")
+            observed.append({"accountMenuRefresh": True})
             menu("QuotaBar 종료", "quit")
             send({"close": {}})
             if app.wait(timeout=8) != 0:
@@ -286,5 +290,11 @@ def compare(dashboard, work, original, fixture, library):
             record["error"] = str(error)
         print(f"{side}: {len(record['observed'])} dashboard actions; {record.get('error', 'complete')}", flush=True)
     results["identical"] = (results["original"] == results["rust"] and "error" not in results["original"])
+    # Keep the full traffic above, including duplicate switch notifications.
+    # A user action completes only after its expected command and resulting state are verified.
+    def outcomes(side):
+        return [action for action in results[side]["observed"] if "repeatedPreference" not in action]
+    results["userActionsIdentical"] = (all("error" not in results[side] for side in ("original", "rust"))
+                                       and outcomes("original") == outcomes("rust"))
     (dashboard.REPORT / "actions.json").write_text(json.dumps(results, ensure_ascii=False, indent=2))
     return results["identical"]

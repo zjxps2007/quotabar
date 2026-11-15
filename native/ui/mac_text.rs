@@ -18,27 +18,51 @@ use objc2::rc::Retained;
 use objc2_app_kit::{NSFont, NSFontWeightBold, NSFontWeightRegular, NSFontWeightSemibold};
 use std::collections::HashMap;
 
+#[derive(Clone, Copy, Hash, Eq, PartialEq)]
+enum Face {
+    Regular,
+    Emphasized,
+    RoundedDigits,
+}
+
+impl Face {
+    fn label(heavy: bool) -> Self {
+        if heavy {
+            Self::Emphasized
+        } else {
+            Self::Regular
+        }
+    }
+}
+
 #[derive(Hash, Eq, PartialEq)]
 struct Key {
     text: String,
     size: u32,
     scale: u32,
-    heavy: bool,
+    face: Face,
 }
 
-fn attributed(value: &str, size: f64, heavy: bool) -> CFMutableAttributedString {
+fn attributed(value: &str, size: f64, face: Face) -> CFMutableAttributedString {
     // NSFont and CTFont are toll-free bridged. Use the AppKit font at its
     // logical point size so Retina drawing preserves its optical size.
     let weight = unsafe {
-        if !heavy {
-            NSFontWeightRegular
-        } else if size >= 17. {
-            NSFontWeightBold
-        } else {
-            NSFontWeightSemibold
+        match face {
+            Face::Regular => NSFontWeightRegular,
+            Face::Emphasized if size >= 17. => NSFontWeightBold,
+            Face::Emphasized | Face::RoundedDigits => NSFontWeightSemibold,
         }
     };
-    let nsfont = NSFont::systemFontOfSize_weight(size, weight);
+    let nsfont = if face == Face::RoundedDigits {
+        let digits = NSFont::monospacedDigitSystemFontOfSize_weight(size, weight);
+        digits
+            .fontDescriptor()
+            .fontDescriptorWithDesign(unsafe { objc2_app_kit::NSFontDescriptorSystemDesignRounded })
+            .and_then(|descriptor| NSFont::fontWithDescriptor_size(&descriptor, size))
+            .unwrap_or(digits)
+    } else {
+        NSFont::systemFontOfSize_weight(size, weight)
+    };
     let font = unsafe { CTFont::wrap_under_get_rule(Retained::as_ptr(&nsfont) as CTFontRef) };
     let mut text = CFMutableAttributedString::new();
     text.replace_str(&CFString::new(value), CFRange::init(0, 0));
@@ -55,7 +79,7 @@ fn attributed(value: &str, size: f64, heavy: bool) -> CFMutableAttributedString 
 fn raster(key: &Key, limit: usize) -> Option<(ColorImage, Vec2)> {
     let size = f64::from(f32::from_bits(key.size));
     let scale = f64::from(f32::from_bits(key.scale));
-    let text = attributed(&key.text, size, key.heavy);
+    let text = attributed(&key.text, size, key.face);
     let line = CTLine::new_with_attributed_string(text.as_concrete_TypeRef());
     let bounds = line.get_typographic_bounds();
     let ascent = (bounds.ascent * scale).ceil();
@@ -111,12 +135,12 @@ pub struct Renderer {
 }
 
 impl Renderer {
-    fn run(&mut self, ctx: &Context, text: &str, size: f32, heavy: bool) -> Option<&Run> {
+    fn run(&mut self, ctx: &Context, text: &str, size: f32, face: Face) -> Option<&Run> {
         let key = Key {
             text: text.to_owned(),
             size: size.to_bits(),
             scale: ctx.pixels_per_point().to_bits(),
-            heavy,
+            face,
         };
         let cached = match self.runs.entry(key) {
             std::collections::hash_map::Entry::Occupied(slot) => slot.into_mut(),
@@ -138,9 +162,9 @@ impl Renderer {
             return None;
         };
         let format = &section.format;
-        let heavy = match &format.font_id.family {
-            FontFamily::Proportional => false,
-            FontFamily::Name(name) if name.as_ref() == "system-semibold" => true,
+        let face = match &format.font_id.family {
+            FontFamily::Proportional => Face::Regular,
+            FontFamily::Name(name) if name.as_ref() == "system-semibold" => Face::Emphasized,
             _ => return None,
         };
         if text.angle != 0.
@@ -166,7 +190,7 @@ impl Renderer {
                 continue;
             }
             let string: String = row.glyphs.iter().map(|g| g.chr).collect();
-            let run = self.run(ctx, &string, format.font_id.size, heavy)?;
+            let run = self.run(ctx, &string, format.font_id.size, face)?;
             let origin = text.pos + row.pos.to_vec2() + vec2(0., (row.size.y - run.size.y) * 0.5);
             shapes.push(run.shape(origin, ctx.pixels_per_point(), color));
         }
@@ -191,16 +215,33 @@ impl Run {
 
 pub fn natural_size(ui: &Ui, text: &str, size: f32, heavy: bool) -> Option<Vec2> {
     let handle = ui.ctx().plugin_opt::<Renderer>()?;
-    Some(handle.lock().run(ui.ctx(), text, size, heavy)?.size)
+    Some(
+        handle
+            .lock()
+            .run(ui.ctx(), text, size, Face::label(heavy))?
+            .size,
+    )
 }
 
 pub fn label(ui: &mut Ui, text: &str, size: f32, heavy: bool, color: Color32) -> Option<Response> {
+    draw_label(ui, text, size, Face::label(heavy), color)
+}
+
+pub fn stat_value(ui: &mut Ui, text: &str, color: Color32) -> Option<Response> {
+    draw_label(ui, text, 28., Face::RoundedDigits, color)
+}
+
+fn draw_label(ui: &mut Ui, text: &str, size: f32, face: Face, color: Color32) -> Option<Response> {
     if text.is_empty() || text.contains('\n') {
         return None;
     }
     let handle = ui.ctx().plugin_opt::<Renderer>()?;
     let mut renderer = handle.lock();
-    let run = renderer.run(ui.ctx(), text, size, heavy)?;
+    let mut run = renderer.run(ui.ctx(), text, size, face)?;
+    if face == Face::RoundedDigits && run.size.x > ui.available_width() {
+        let reduced = size * (ui.available_width() / run.size.x).clamp(0.7, 1.);
+        run = renderer.run(ui.ctx(), text, reduced, face)?;
+    }
     if run.size.x > ui.available_width() {
         return None;
     }
@@ -224,10 +265,19 @@ pub fn paragraph(
     };
     use std::sync::Arc;
     let width = ui.available_width().max(1.);
-    let id = Id::new(("mac-text-wrap", text, size.to_bits(), width.to_bits()));
-    let cached = ui.ctx().data(|data| data.get_temp::<Arc<Vec<String>>>(id));
+    let scale = ui.ctx().pixels_per_point();
+    let id = Id::new((
+        "mac-text-wrap",
+        text,
+        size.to_bits(),
+        width.to_bits(),
+        scale.to_bits(),
+    ));
+    let cached = ui
+        .ctx()
+        .data(|data| data.get_temp::<Arc<Vec<(String, f32)>>>(id));
     let lines = cached.unwrap_or_else(|| {
-        let styled = attributed(text, f64::from(size), false);
+        let styled = attributed(text, f64::from(size), Face::Regular);
         let frame = CTFramesetter::new_with_attributed_string(styled.as_concrete_TypeRef())
             .create_frame(
                 CFRange::init(0, 0),
@@ -240,17 +290,21 @@ pub fn paragraph(
                 ),
             );
         let utf16: Vec<_> = text.encode_utf16().collect();
-        let lines: Arc<Vec<String>> = Arc::new(
+        let lines: Arc<Vec<(String, f32)>> = Arc::new(
             frame
                 .get_lines()
                 .iter()
                 .map(|line| {
                     let range = line.get_string_range();
-                    String::from_utf16_lossy(
+                    let content = String::from_utf16_lossy(
                         &utf16[range.location as usize..(range.location + range.length) as usize],
                     )
                     .trim_end()
-                    .to_owned()
+                    .to_owned();
+                    let metrics = line.get_typographic_bounds();
+                    let height =
+                        (metrics.ascent + metrics.descent + metrics.leading) * f64::from(scale);
+                    (content, height.ceil() as f32 / scale)
                 })
                 .collect(),
         );
@@ -261,14 +315,19 @@ pub fn paragraph(
     let handle = ui.ctx().plugin_opt::<Renderer>()?;
     let mut renderer = handle.lock();
     let mut y = 0.;
+    let mut ink_width = 0.0_f32;
     let mut shapes = Vec::with_capacity(lines.len());
     let origin = ui.next_widget_position();
-    for line in lines.iter() {
-        let run = renderer.run(ui.ctx(), line, size, false)?;
-        shapes.push(run.shape(origin + vec2(0., y), ui.ctx().pixels_per_point(), color));
-        y += run.size.y + spacing;
+    for (line, height) in lines.iter() {
+        let run = renderer.run(ui.ctx(), line, size, Face::Regular)?;
+        shapes.push(run.shape(origin + vec2(0., y), scale, color));
+        ink_width = ink_width.max(run.size.x);
+        y += height + spacing;
     }
-    let (_, response) = ui.allocate_exact_size(vec2(width, (y - spacing).max(0.)), Sense::hover());
+    let (_, response) = ui.allocate_exact_size(
+        vec2(ink_width.ceil().min(width), (y - spacing).max(0.)),
+        Sense::hover(),
+    );
     ui.painter().extend(shapes);
     response.widget_info(|| WidgetInfo::labeled(WidgetType::Label, ui.is_enabled(), text));
     Some(response)
@@ -327,7 +386,7 @@ mod tests {
                     text: text.to_owned(),
                     size: 15.0_f32.to_bits(),
                     scale: scale.to_bits(),
-                    heavy,
+                    face: Face::label(heavy),
                 };
                 let (image, bounds) = raster(&key, 4096).unwrap();
                 assert!(bounds.x > 0. && bounds.y > 0.);

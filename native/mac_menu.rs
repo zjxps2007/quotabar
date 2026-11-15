@@ -137,6 +137,65 @@ pub fn apply_appearance(mode: &str) {
     }
 }
 
+#[derive(Clone, Copy)]
+pub enum AccountMenuAction {
+    Refresh,
+    Remove,
+}
+
+/// Track the account card's menu in AppKit, including keyboard navigation and dismissal.
+/// The anchor is in points from the upper-left corner of the dashboard content.
+pub fn account_menu(x: f64, y: f64, enabled: bool) -> Option<AccountMenuAction> {
+    let m = MainThreadMarker::new()?;
+    let view = NSApplication::sharedApplication(m)
+        .keyWindow()?
+        .contentView()?;
+    let mut selection = None;
+    extern "C" fn selected(context: *mut c_void, tag: i32) {
+        // The menu's synchronous tracking loop ends before this stack slot is released.
+        unsafe {
+            *context.cast::<Option<AccountMenuAction>>() = match tag {
+                1 => Some(AccountMenuAction::Refresh),
+                2 => Some(AccountMenuAction::Remove),
+                _ => None,
+            }
+        };
+    }
+    let target = Target::new(m, (&raw mut selection).cast(), selected);
+    let menu = NSMenu::new(m);
+    menu.setAutoenablesItems(false);
+    for (tag, title) in [(1, "새로고침"), (2, "계정 삭제…")] {
+        if tag == 2 {
+            menu.addItem(&NSMenuItem::separatorItem(m));
+        }
+        let item = unsafe {
+            let item = NSMenuItem::initWithTitle_action_keyEquivalent(
+                NSMenuItem::alloc(m),
+                &s(title),
+                Some(sel!(chosen:)),
+                &s(""),
+            );
+            item.setTarget(Some(&target));
+            item
+        };
+        item.setTag(tag);
+        item.setEnabled(tag != 1 || enabled);
+        menu.addItem(&item);
+    }
+    let bounds = view.bounds();
+    let point = NSPoint::new(
+        bounds.origin.x + x,
+        bounds.origin.y
+            + if view.isFlipped() {
+                y
+            } else {
+                bounds.size.height - y
+            },
+    );
+    menu.popUpMenuPositioningItem_atLocation_inView(None, point, Some(&view));
+    selection
+}
+
 pub fn dock_visible(visible: bool) -> bool {
     let Some(m) = MainThreadMarker::new() else {
         return false;

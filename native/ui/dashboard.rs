@@ -51,7 +51,7 @@ impl Dashboard {
                     ui.spacing_mut().interact_size.y = 0.;
                     ui.horizontal(|ui| {
                         ui.add_space(12.);
-                        let workspace = rich("WORKSPACE", 9., true, p.muted);
+                        let workspace = rich("WORKSPACE", 9., true, p.tertiary);
                         ui.label(if MAC {
                             workspace.extra_letter_spacing(1.5)
                         } else {
@@ -319,9 +319,14 @@ impl Dashboard {
                             });
                         });
                         ui.add_space(12.);
+                        #[cfg(target_os = "macos")]
+                        if crate::mac_text::stat_value(ui, &value, p.ink).is_none() {
+                            label(ui, value, 28., true, p.ink);
+                        }
+                        #[cfg(windows)]
                         label(ui, value, 28., true, p.ink);
                         ui.add_space(12.);
-                        ui.add(Label::new(rich(sub, 10., false, p.muted)).truncate());
+                        ui.add(Label::new(rich(sub, 10., false, p.tertiary)).truncate());
                     })
                 });
             }
@@ -391,7 +396,7 @@ impl Dashboard {
                 }
             });
         });
-        ui.add_space(16.);
+        ui.add_space(if MAC { 24. } else { 16. });
         let columns = columns(ui.available_width(), 290., 14.);
         let accounts = self.state.accounts.clone();
         for chunk in accounts.chunks(columns) {
@@ -513,7 +518,7 @@ impl Dashboard {
                 };
                 if let Some(reset) = reset {
                     ui.add_space(6.);
-                    label(ui, reset, 9., false, p.muted);
+                    label(ui, reset, 9., false, p.tertiary);
                 }
             }
         }
@@ -562,10 +567,10 @@ impl Dashboard {
                     || "스냅샷 대기 중".into(),
                     |date| format!("마지막 데이터 {}", crate::platform::quota_time(date, false)),
                 );
-                label(ui, observed, 10., false, p.muted);
+                label(ui, observed, 10., false, p.tertiary);
                 if a.error.is_some() {
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        label(ui, "이전 값", 10., false, p.muted)
+                        label(ui, "이전 값", 10., false, p.tertiary)
                     });
                 }
             });

@@ -200,25 +200,50 @@ impl Dashboard {
                 }
             });
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                if MAC {
-                    let menu = ui.menu_button("•••", |ui| {
-                        if ui.add_enabled(a.enabled, Button::new("새로고침")).clicked() {
-                            self.wire.action("refresh-account", json!(a.id));
-                            ui.close();
-                        }
-                        ui.separator();
-                        if ui.button("계정 삭제…").clicked() {
-                            self.dialog = Some(Dialog::remove(a.clone()));
-                            ui.close();
-                        }
-                    });
-                    menu.response.widget_info(|| {
+                #[cfg(target_os = "macos")]
+                {
+                    let (bounds, button) = ui.allocate_exact_size(vec2(32., 20.), Sense::click());
+                    button.widget_info(|| {
                         WidgetInfo::labeled(
                             WidgetType::Button,
-                            true,
+                            ui.is_enabled(),
                             format!("{} 계정 메뉴", a.name),
                         )
                     });
+                    let icon = |x, width| {
+                        Rect::from_center_size(
+                            pos2(bounds.left() + x, bounds.center().y),
+                            vec2(width, 16.),
+                        )
+                    };
+                    crate::mac::symbol(ui.painter(), icon(11., 14.), "ellipsis", 13., true, tint);
+                    crate::mac::symbol(ui.painter(), icon(24., 9.), "chevron.down", 9., true, tint);
+                    if button.has_focus() {
+                        ui.painter().rect_stroke(
+                            bounds.expand(1.),
+                            4.,
+                            Stroke::new(2.0_f32, tint),
+                            StrokeKind::Outside,
+                        );
+                    }
+                    if button.clicked() {
+                        use quotabar::mac_menu::{AccountMenuAction, account_menu};
+                        let zoom = f64::from(ui.ctx().zoom_factor());
+                        match account_menu(
+                            f64::from(bounds.left()) * zoom,
+                            f64::from(bounds.bottom()) * zoom,
+                            a.enabled,
+                        ) {
+                            Some(AccountMenuAction::Refresh) => {
+                                self.wire.action("refresh-account", json!(a.id));
+                            }
+                            Some(AccountMenuAction::Remove) => {
+                                self.dialog = Some(Dialog::remove(a.clone()))
+                            }
+                            None => {}
+                        }
+                    }
+                    ui.spacing_mut().item_spacing.x = 6.;
                     label(ui, status, 11., false, color);
                     if a.loading {
                         ui.add(Spinner::new().size(10.));
@@ -226,7 +251,9 @@ impl Dashboard {
                         let (dot, _) = ui.allocate_exact_size(Vec2::splat(6.), Sense::hover());
                         ui.painter().circle_filled(dot.center(), 3., color);
                     }
-                } else {
+                }
+                #[cfg(windows)]
+                {
                     label(ui, format!("●  {status}"), 11., false, color);
                 }
             });
