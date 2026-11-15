@@ -9,6 +9,8 @@ mod dialogs;
 mod mac;
 #[cfg(target_os = "macos")]
 mod mac_fonts;
+#[cfg(target_os = "macos")]
+mod mac_text;
 mod management;
 mod model;
 mod platform;
@@ -407,6 +409,7 @@ fn main() -> eframe::Result {
             {
                 platform::restore_window(cc);
                 quotabar::mac_menu::apply_appearance(state.setting("appearance", "system"));
+                cc.egui_ctx.add_plugin(mac_text::Renderer::default());
             }
             style::fonts(&cc.egui_ctx);
             #[cfg(windows)]

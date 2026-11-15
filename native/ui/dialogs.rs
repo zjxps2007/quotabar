@@ -44,6 +44,8 @@ pub struct Connect {
     pub login: Option<quotabar::mac_login::Attempt>,
     #[cfg(target_os = "macos")]
     pub login_url: Option<String>,
+    #[cfg(target_os = "macos")]
+    focus_alias: bool,
     content_height: Option<f32>,
 }
 pub enum Dialog {
@@ -135,6 +137,8 @@ impl Dashboard {
             #[cfg(target_os = "macos")]
             login_url: None,
             content_height: None,
+            #[cfg(target_os = "macos")]
+            focus_alias: true,
         })));
     }
     pub fn finish_request(&mut self, id: &str, error: Option<String>) {
@@ -302,7 +306,9 @@ impl Dashboard {
                                 ("notice", docs[0].0.as_str()),
                                 ("license", docs[1].0.as_str()),
                             ];
-                            if let Some(key) = segments(ui, &items, items[*selected].0, p) {
+                            if let Some(key) =
+                                segments(ui, &items, items[*selected].0, p, f32::INFINITY)
+                            {
                                 *selected = usize::from(key == "license");
                             }
                         }
@@ -488,6 +494,7 @@ impl Dashboard {
                             ],
                             c.provider,
                             p,
+                            f32::INFINITY,
                         )
                     })
                     .inner
@@ -526,6 +533,7 @@ impl Dashboard {
                             &[("browser", "브라우저 로그인"), ("file", "파일 가져오기")],
                             if c.browser { "browser" } else { "file" },
                             p,
+                            f32::INFINITY,
                         )
                     })
                     .inner
@@ -545,6 +553,10 @@ impl Dashboard {
                     .desired_width(f32::INFINITY)
                     .hint_text("예: 개인 계정, 연구실"),
             );
+            #[cfg(target_os = "macos")]
+            if std::mem::take(&mut c.focus_alias) {
+                field.request_focus();
+            }
             crate::accessibility::text_value(ui, field, &mut c.alias, "계정 이름");
             ui.add_space(20.);
         }

@@ -157,7 +157,11 @@ impl Palette {
                 .insert(TextStyle::Button, FontId::proportional(12.));
             style.spacing.item_spacing = vec2(8., 0.);
             style.spacing.button_padding = vec2(12., 7.);
-            style.spacing.interact_size = vec2(32., 28.);
+            style.spacing.interact_size = if cfg!(target_os = "macos") {
+                vec2(0., 15.)
+            } else {
+                vec2(32., 28.)
+            };
             style.spacing.scroll = egui::style::ScrollStyle::solid();
             if cfg!(windows) {
                 style.spacing.scroll.bar_width = 13.;
@@ -200,6 +204,10 @@ pub fn rich(s: impl Into<String>, size: f32, heavy: bool, c: Color32) -> RichTex
 }
 pub fn label(ui: &mut Ui, s: impl Into<String>, size: f32, heavy: bool, c: Color32) -> Response {
     let s = s.into();
+    #[cfg(target_os = "macos")]
+    if let Some(response) = crate::mac_text::label(ui, &s, size, heavy, c) {
+        return response;
+    }
     #[cfg(windows)]
     if let Some(response) = crate::windows_text::draw_label(ui, &s, size, heavy, c, false) {
         return response;
@@ -372,6 +380,82 @@ pub fn button_feedback(
     ui.set_opacity(saved);
     response.on_hover_cursor(CursorIcon::PointingHand)
 }
+#[cfg(target_os = "macos")]
+pub fn action_on(ui: &mut Ui, s: &str, primary: bool, p: Palette, backdrop: Color32) -> Response {
+    let (text, symbol) = if let Some(title) = s.strip_prefix("+  ") {
+        (title, Some("plus"))
+    } else if let Some(title) = s.strip_prefix("↻  ") {
+        (title, Some("arrow.clockwise"))
+    } else {
+        (s, None)
+    };
+    let size = crate::mac_text::natural_size(ui, text, 13., false).unwrap_or_else(|| {
+        ui.painter()
+            .layout_no_wrap(text.to_owned(), FontId::proportional(13.), p.ink)
+            .size()
+    });
+    let icon_width = if symbol.is_some() { 20. } else { 0. };
+    let padding = if primary { vec2(12., 6.) } else { vec2(8., 3.) };
+    let (rect, response) = ui.allocate_exact_size(
+        size.ceil() + 2. * padding + vec2(icon_width, 0.),
+        Sense::click(),
+    );
+    let enabled = ui.is_enabled();
+    let fill = match (primary, enabled) {
+        (true, true) => p.accent,
+        (true, false) => p.track,
+        _ => p.card,
+    };
+    let ink = if !enabled {
+        p.muted
+    } else if primary {
+        p.on
+    } else {
+        p.ink
+    };
+    let stroke = if primary {
+        Stroke::NONE
+    } else {
+        Stroke::new(1.0_f32, p.line)
+    };
+    let corner = if primary { 8 } else { 6 };
+    let opacity = ui.opacity();
+    if !enabled {
+        ui.set_opacity(1.);
+    }
+    let painter = ui.painter();
+    painter.rect(rect, corner, fill, stroke, StrokeKind::Inside);
+    if let Some(name) = symbol {
+        let icon = Rect::from_center_size(
+            pos2(rect.left() + padding.x + 6.5, rect.center().y),
+            Vec2::splat(14.),
+        );
+        crate::mac::symbol(painter, icon, name, 13., false, ink);
+    }
+    painter.text(
+        pos2(rect.left() + padding.x + icon_width, rect.center().y),
+        Align2::LEFT_CENTER,
+        text,
+        FontId::proportional(13.),
+        ink,
+    );
+    if response.is_pointer_button_down_on() {
+        painter.rect_filled(rect, corner, backdrop.gamma_multiply(0.30));
+    }
+    if response.has_focus() {
+        painter.rect_stroke(
+            rect.expand(2.),
+            corner,
+            Stroke::new(2.0_f32, p.muted),
+            StrokeKind::Outside,
+        );
+    }
+    ui.set_opacity(opacity);
+    response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, enabled, text));
+    response
+}
+
+#[cfg(not(target_os = "macos"))]
 pub fn action_on(ui: &mut Ui, s: &str, primary: bool, p: Palette, backdrop: Color32) -> Response {
     let ink = if primary { p.on } else { p.ink };
     button_feedback(ui, backdrop, ink, vec2(10., 5.), |ui| {

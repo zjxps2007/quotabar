@@ -15,8 +15,12 @@ static NSWindow *dashboardWindow(void) {
 // process can supply windows, and the ID must match the selected AppKit window.
 static void captureWindow(NSWindow *window, NSURL *output, void (^done)(NSDictionary *)) {
     if (!window) { done(@{@"pending": @"window"}); return; }
-    CGWindowID number = (CGWindowID)window.windowNumber;
-    CGFloat scale = window.backingScaleFactor;
+    NSWindow *root = window.sheetParent ?: window;
+    CGWindowID number = (CGWindowID)root.windowNumber;
+    CGFloat scale = root.backingScaleFactor;
+    NSRect frame = root.frame, target = window.frame;
+    CGRect crop = CGRectMake(round((NSMinX(target)-NSMinX(frame))*scale), round((NSMaxY(frame)-NSMaxY(target))*scale),
+                             round(NSWidth(target)*scale), round(NSHeight(target)*scale));
     [SCShareableContent getCurrentProcessShareableContentWithCompletionHandler:^(SCShareableContent *content, NSError *error) {
         if (error) { done(@{@"error": error.localizedDescription}); return; }
         for (SCWindow *item in content.windows) {
@@ -27,13 +31,21 @@ static void captureWindow(NSWindow *window, NSURL *output, void (^done)(NSDictio
             config.height = lround(item.frame.size.height * scale);
             config.showsCursor = NO;
             config.ignoreShadowsSingleWindow = YES;
+            config.includeChildWindows = YES;
             config.colorSpaceName = kCGColorSpaceSRGB;
             [SCScreenshotManager captureImageWithFilter:filter configuration:config completionHandler:^(CGImageRef frame, NSError *failed) {
                 if (!frame) { done(@{@"error": failed.localizedDescription ?: @"no window frame"}); return; }
-                NSBitmapImageRep *rep = [[NSBitmapImageRep alloc] initWithCGImage:frame];
+                // WindowServer composites a sheet with its parent. Capture the full
+                // owner at native scale, then extract the sheet at its AppKit bounds.
+                CGRect extent = CGRectMake(0, 0, CGImageGetWidth(frame), CGImageGetHeight(frame));
+                if (!CGRectContainsRect(extent, crop)) { done(@{@"error": @"sheet outside captured owner"}); return; }
+                CGImageRef visible = CGImageCreateWithImageInRect(frame, crop);
+                if (!visible) { done(@{@"error": @"could not extract window region"}); return; }
+                NSBitmapImageRep *rep = [[NSBitmapImageRep alloc] initWithCGImage:visible];
+                CGImageRelease(visible);
                 NSData *png = [rep representationUsingType:NSBitmapImageFileTypePNG properties:@{}];
                 if (![png writeToURL:output atomically:YES]) { done(@{@"error": @"could not save PNG"}); return; }
-                done(@{@"width": @(CGImageGetWidth(frame)), @"height": @(CGImageGetHeight(frame))});
+                done(@{@"width": @(rep.pixelsWide), @"height": @(rep.pixelsHigh)});
             }];
             return;
         }

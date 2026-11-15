@@ -65,10 +65,24 @@ impl Dashboard {
                     ("accounts", "Providers & Accounts"),
                     ("settings", "설정"),
                 ] {
-                    let (r, mut res) =
-                        ui.allocate_exact_size(vec2(ui.available_width(), 38.), Sense::click());
-                    let pressed = button_pressed(ui, &mut res);
                     let selected = self.route == key;
+                    #[cfg(target_os = "macos")]
+                    let (display, height) = {
+                        let width = ui.available_width() - 68.;
+                        let wrap = key == "accounts"
+                            && crate::mac_text::natural_size(ui, title, 12., selected)
+                                .is_some_and(|size| size.x > width);
+                        if wrap {
+                            ("Providers\n& Accounts", 52.)
+                        } else {
+                            (title, 37.)
+                        }
+                    };
+                    #[cfg(windows)]
+                    let (display, height) = (title, 38.);
+                    let (r, mut res) =
+                        ui.allocate_exact_size(vec2(ui.available_width(), height), Sense::click());
+                    let pressed = button_pressed(ui, &mut res);
                     res.widget_info(|| WidgetInfo::labeled(WidgetType::Button, true, title));
                     let opacity = if !MAC && pressed {
                         0.6
@@ -93,7 +107,7 @@ impl Dashboard {
                     ui.painter().text(
                         r.left_center() + vec2(38., 0.),
                         Align2::LEFT_CENTER,
-                        title,
+                        display,
                         FontId::new(
                             12.,
                             if selected {
@@ -160,7 +174,8 @@ impl Dashboard {
                 });
             });
             if self.state.demo {
-                Frame::new().fill(p.track).inner_margin(Margin::symmetric(28, 9)).show(ui, |ui| {
+                let banner = if MAC { p.bg.lerp_to_gamma(p.ink, 0.06) } else { p.track };
+                Frame::new().fill(banner).inner_margin(Margin::symmetric(28, 9)).show(ui, |ui| {
                     ui.set_width(ui.available_width());
                     let note = "미리보기 · 샘플 데이터입니다. 실제 계정이나 로그인 파일에 접근하지 않습니다.";
                     #[cfg(target_os = "macos")]
@@ -574,16 +589,21 @@ impl Dashboard {
         } else {
             "트레이에 표시"
         };
-        if named_toggle(
-            ui,
-            tray_label,
-            &a.control_label(tray_label),
-            a.tray,
-            p.tint(a.provider),
-            p,
-        )
-        .clicked()
-        {
+        let name = a.control_label(tray_label);
+        #[cfg(target_os = "macos")]
+        let switch = {
+            let label_width = crate::mac_text::natural_size(ui, tray_label, 11., false)
+                .map_or(54., |size| size.x.ceil());
+            ui.allocate_ui_with_layout(
+                vec2(label_width + 36., 16.),
+                Layout::left_to_right(Align::Center),
+                |ui| named_toggle(ui, tray_label, &name, a.tray, p.tint(a.provider), p),
+            )
+            .inner
+        };
+        #[cfg(windows)]
+        let switch = named_toggle(ui, tray_label, &name, a.tray, p.tint(a.provider), p);
+        if switch.clicked() {
             self.edit_account(a, &a.name, a.enabled, !a.tray);
         }
     }

@@ -36,6 +36,7 @@ windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Globali
 [target.'cfg(target_os = "macos")'.dependencies]
 accesskit_macos = "0.22.2"
 core-foundation = "0.9"
+core-graphics = "0.23"
 core-text = "20.1"
 ttf-parser = "0.25"
 block2 = "0.6"

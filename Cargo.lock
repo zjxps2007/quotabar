@@ -2754,6 +2754,7 @@ dependencies = [
  "block2 0.6.2",
  "chrono",
  "core-foundation",
+ "core-graphics",
  "core-text",
  "eframe",
  "font-kit",

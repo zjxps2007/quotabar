@@ -414,9 +414,9 @@ impl Dashboard {
             });
     }
     pub fn settings(&mut self, ui: &mut Ui, p: Palette) {
-        p.frame(20).show(ui,|ui|{ui.set_width(ui.available_width());label(ui,"화면 및 표시",14.,true,p.ink);ui.add_space(18.);
+        p.frame(20).show(ui,|ui|{ui.set_width(ui.available_width());settings_title(ui,"화면 및 표시","menubar.dock.rectangle",p);ui.add_space(18.);
             label(ui,"화면 모드",12.,false,p.ink);ui.add_space(12.);
-            if let Some(v)=segments(ui,&[("system","시스템 설정 따르기"),("light","라이트"),("dark","다크")],self.state.setting("appearance","system"),p){
+            if let Some(v)=segments(ui,&[("system","시스템 설정 따르기"),("light","라이트"),("dark","다크")],self.state.setting("appearance","system"),p,420.){
                 self.preference("appearance","appearance",json!(v));}
             divider(ui,p);let dock=self.state.flag("showTaskbarIcon","showDockIcon");
             if toggle(ui,if MAC{"Dock에 앱 아이콘 표시"}else{"작업 표시줄에 앱 아이콘 표시"},dock,p.accent,p).clicked(){
@@ -425,14 +425,14 @@ impl Dashboard {
             divider(ui,p);label(ui,if MAC{"상단바 표시 형식"}else{"트레이 표시"},12.,false,p.ink);ui.add_space(12.);
             let (key,modes):(&str,&[(&str,&str)])=if MAC{("menuBarDisplayMode",&[("providerAndRemaining","이름 + 잔여량"),("remainingOnly","잔여량만"),("iconOnly","아이콘만")])}
                 else{("trayDisplayMode",&[("remaining","남은 비율 숫자"),("icon","로고만")])};
-            if let Some(v)=segments(ui,modes,self.state.setting(key,modes[0].0),p){self.preference(key,"menuBarMode",json!(v));}
+            if let Some(v)=segments(ui,modes,self.state.setting(key,modes[0].0),p,420.){self.preference(key,"menuBarMode",json!(v));}
             ui.add_space(if MAC {12.} else {24.});self.preview(p,ui);ui.add_space(12.);
             if MAC{caption(ui,"잔여량은 Codex · Claude · Gemini 순서로 표시하며, 등록한 계정만 포함합니다. 표시할 계정은 Dashboard에서 선택하세요.",p);}
             else{caption(ui,"숫자는 표시 대상 계정·기간 중 가장 낮은 잔여 비율(%)입니다. 작은 아이콘에서는 % 기호를 생략합니다.",p);ui.add_space(6.);
                 caption(ui,"Dashboard에서 표시할 계정을 선택하세요. 마우스를 올리거나 클릭하면 계정별 내역을 확인할 수 있습니다.",p);}
         });
         ui.add_space(20.);
-        p.frame(20).show(ui,|ui|{ui.set_width(ui.available_width());label(ui,"모니터링",14.,true,p.ink);ui.add_space(18.);
+        p.frame(20).show(ui,|ui|{ui.set_width(ui.available_width());settings_title(ui,"모니터링","arrow.triangle.2.circlepath",p);ui.add_space(18.);
             let auto=self.state.flag("autoRefresh","autoRefresh");let seconds=self.state.raw["settings"]["refreshSeconds"].as_i64().unwrap_or(300);
             ui.horizontal(|ui|{let w=(ui.available_width()-146.).max(120.);
                 if !MAC { ui.spacing_mut().item_spacing.x = 16.; }
@@ -458,7 +458,7 @@ impl Dashboard {
         ui.add_space(20.);
         p.frame(20).show(ui, |ui| {
             ui.set_width(ui.available_width());
-            label(ui, "데이터 저장", 14., true, p.ink);
+            settings_title(ui, "데이터 저장", "lock.shield", p);
             ui.add_space(14.);
             caption(
                 ui,
@@ -492,7 +492,7 @@ impl Dashboard {
             }
         });
         ui.add_space(20.);
-        p.frame(20).show(ui,|ui|{ui.set_width(ui.available_width());label(ui,"오픈소스 라이선스",14.,true,p.ink);ui.add_space(14.);
+        p.frame(20).show(ui,|ui|{ui.set_width(ui.available_width());settings_title(ui,"오픈소스 라이선스","doc.text",p);ui.add_space(14.);
             label(ui,"AIUsage · sylearn 및 기여자",12.,true,p.ink);ui.add_space(6.);caption(ui,"Apache License 2.0",p);ui.add_space(12.);
             label(ui,"QuotaBar는 AIUsage의 사용량 조회 코드와 Claude 연결 기능 등을 재사용·수정한 독립 프로젝트입니다.",12.,false,p.ink);
             ui.add_space(14.);ui.horizontal(|ui|{if action(ui,"라이선스 및 고지 보기",false,p).clicked(){self.dialog=Some(Dialog::licenses());}
@@ -536,7 +536,7 @@ impl Dashboard {
                 if link(ui, title, p, p.card).clicked() { self.wire.action("startup-settings", Value::Null); }
             }
             divider(ui, p);
-            label(ui, "앱 업데이트", 14., true, p.ink);
+            settings_title(ui, "앱 업데이트", "arrow.triangle.2.circlepath", p);
             ui.add_space(18.);
             let automatic = self.state.flag("automaticUpdates", "automaticUpdates");
             if toggle(ui, "자동 업데이트", automatic, p.accent, p).clicked() {
@@ -599,15 +599,30 @@ impl Dashboard {
         });
     }
 }
+fn settings_title(ui: &mut Ui, text: &str, _symbol: &str, p: Palette) {
+    #[cfg(target_os = "macos")]
+    ui.horizontal(|ui| {
+        let (icon, _) = ui.allocate_exact_size(Vec2::splat(18.), Sense::hover());
+        crate::mac::symbol(ui.painter(), icon, _symbol, 14., true, p.ink);
+        label(ui, text, 13., true, p.ink);
+    });
+    #[cfg(windows)]
+    label(ui, text, 14., true, p.ink);
+}
+
 #[cfg(target_os = "macos")]
 pub fn segments<'a>(
     ui: &mut Ui,
     items: &[(&'a str, &str)],
     current: &str,
     p: Palette,
+    maximum_width: f32,
 ) -> Option<&'a str> {
     let mut change = None;
-    let (bounds, _) = ui.allocate_exact_size(vec2(ui.available_width(), 22.), Sense::hover());
+    let (bounds, _) = ui.allocate_exact_size(
+        vec2(ui.available_width().min(maximum_width), 22.),
+        Sense::hover(),
+    );
     let field = if p.dark {
         Color32::from_gray(52)
     } else {
@@ -669,6 +684,7 @@ pub fn segments<'a>(
     items: &[(&'a str, &str)],
     current: &str,
     p: Palette,
+    _maximum_width: f32,
 ) -> Option<&'a str> {
     let mut change = None;
     let width = {
