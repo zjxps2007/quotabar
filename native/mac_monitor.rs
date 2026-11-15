@@ -1,4 +1,5 @@
 //! AppKit's process lifetime, legacy helper entry points and application delegate.
+pub mod fetch;
 mod presentation;
 use crate::instance::Instance;
 use objc2::{

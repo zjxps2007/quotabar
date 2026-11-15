@@ -65,7 +65,7 @@ fn window(w: Option<&QuotaWindow>, now: f64) -> Option<Value> {
         json!({"usedPercent":0,"remainingPercent":100,"resetDescription":"Starts with next message"})
     })
 }
-pub(super) fn fetch(root: &Path, directory: &str, now: f64) -> Result<Value> {
+pub(crate) fn fetch(root: &Path, directory: &str, now: f64) -> Result<Value> {
     let id = digest(&canonical(directory));
     let folder = profile_folder(root, &id)?;
     let profile = Profile::load(&folder, &id)?;

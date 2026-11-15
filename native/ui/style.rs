@@ -858,39 +858,41 @@ pub fn mac_setting_toggle(
         );
     }
     let track = Rect::from_center_size(row.right_center() - vec2(19., 0.), vec2(38., 22.));
-    let track_color = if value {
-        // The system switch blends a monochrome accent into its control
-        // surface. A pure white accent would hide the thumb in Dark Aqua.
-        p.card.lerp_to_gamma(tint, if p.dark { 0.29 } else { 0.92 })
-    } else {
-        p.card.lerp_to_gamma(p.ink, 0.12)
-    };
-    let thumb = if p.dark {
-        Color32::from_gray(198)
-    } else {
-        Color32::WHITE
-    };
-    painter.rect(
-        track,
-        11.,
-        track_color,
-        Stroke::new(1.0_f32, p.line),
-        StrokeKind::Inside,
-    );
-    let knob = pos2(
-        if value {
-            track.right() - 11.
+    if !crate::mac::draw_switch(ui, track, value, response.is_pointer_button_down_on()) {
+        let track_color = if value {
+            // The system switch blends a monochrome accent into its control
+            // surface. A pure white accent would hide the thumb in Dark Aqua.
+            p.card.lerp_to_gamma(tint, if p.dark { 0.29 } else { 0.92 })
         } else {
-            track.left() + 11.
-        },
-        track.center().y,
-    );
-    painter.circle(
-        knob,
-        10.,
-        thumb,
-        Stroke::new(1.0_f32, track_color.lerp_to_gamma(p.ink, 0.12)),
-    );
+            p.card.lerp_to_gamma(p.ink, 0.12)
+        };
+        let thumb = if p.dark {
+            Color32::from_gray(198)
+        } else {
+            Color32::WHITE
+        };
+        painter.rect(
+            track,
+            11.,
+            track_color,
+            Stroke::new(1.0_f32, p.line),
+            StrokeKind::Inside,
+        );
+        let knob = pos2(
+            if value {
+                track.right() - 11.
+            } else {
+                track.left() + 11.
+            },
+            track.center().y,
+        );
+        painter.circle(
+            knob,
+            10.,
+            thumb,
+            Stroke::new(1.0_f32, track_color.lerp_to_gamma(p.ink, 0.12)),
+        );
+    }
     if response.has_focus() {
         painter.rect_stroke(
             track.expand(2.),

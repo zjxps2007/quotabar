@@ -150,6 +150,15 @@ QBManagedAccounts *qb_managed_accounts_new(const char *directory);
 void qb_managed_accounts_free(QBManagedAccounts *);
 void qb_managed_accounts_invalidate(const QBManagedAccounts *, const char *uuid);
 int32_t qb_managed_accounts_flush(const QBManagedAccounts *);
+typedef struct {
+    uint8_t *state;
+    size_t stateLength;
+    uint8_t *credential;
+    size_t credentialLength;
+} QBMacRefreshResult;
+/* The worker returns UI state and an optional pending CLI login in distinct owned buffers. */
+int32_t qb_mac_fetch_account(const QBManagedAccounts *, const char *root, const uint8_t *account,
+                             size_t length, const QBCancel *, QBMacRefreshResult *);
 /* Output contains a quota snapshot or provider error. A null transport uses the system HTTP client. */
 int32_t qb_managed_accounts_fetch(const QBManagedAccounts *, const char *uuid, const uint8_t *identity, size_t identityLength,
                                   const QBCancel *, void *context, QBManagedHTTP transport, int32_t *osError,

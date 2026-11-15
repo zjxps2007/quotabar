@@ -7,6 +7,8 @@ mod request;
 mod tests;
 mod usage;
 pub use request::run;
+#[cfg(target_os = "macos")]
+pub(crate) use usage::fetch;
 
 use crate::{
     files::{ensure_private_directory, write_private},

@@ -3,64 +3,6 @@ import CQuotaBar
 import UsageCore
 import Darwin
 
-struct FetchOutcome: Sendable {
-    let snapshot: AccountSnapshot?
-    let error: String?
-    let note: String?
-    var updatedCredential: Data? = nil
-}
-
-actor MonitorService {
-    let vault = SecretVault()
-    let profiles: ClaudeSubscriptionStore
-    let codexSessions: ManagedCodexAccounts
-    init(root: URL, codexSessions: ManagedCodexAccounts) {
-        profiles = ClaudeSubscriptionStore(root: root.appendingPathComponent("ClaudeProfiles"))
-        self.codexSessions = codexSessions
-    }
-    func fetch(_ account: MonitoredAccount) async -> FetchOutcome {
-        do {
-            let usage: ProviderUsage
-            var note: String?
-            var updatedCredential: Data?
-            if account.usesAppLogin {
-                usage = try await codexSessions.fetch(id: account.id, identity: account.identity)
-            } else if account.provider == .claude {
-                usage = try await ClaudeSubscriptionProvider(store: profiles).fetchUsage(with:
-                    AccountCredential(providerId: "claude-subscription", authMethod: .auto,
-                        credential: account.sourcePath, metadata: ["sourceKind": "claude-cli-profile"]))
-            } else {
-                let selected = try vault.imported(account)
-                let data = selected.data
-                note = selected.note
-                if selected.updated { updatedCredential = data }
-                switch account.provider {
-                case .codex: usage = try await CodexProvider().fetch(authData: data)
-                case .gemini: usage = try await GeminiProvider().fetch(authData: data)
-                case .claude: fatalError("Handled above")
-                }
-            }
-            try Task.checkCancellation()
-            return FetchOutcome(snapshot: AccountSnapshot(usage: usage, provider: account.provider), error: nil, note: note, updatedCredential: updatedCredential)
-        } catch is CancellationError { return FetchOutcome(snapshot: nil, error: nil, note: nil) }
-        catch {
-            let message: String
-            if let e = error as? ProviderError {
-                switch e.code {
-                case "unauthorized", "not_logged_in":
-                    message = account.usesAppLogin ? "계정 접근이 거부되었습니다. 앱에서 다시 로그인하세요."
-                        : "로그인이 만료되었거나 접근이 거부되었습니다. Codex는 앱에서 다시 로그인하거나, 해당 CLI의 로그인 파일을 갱신하세요."
-                case "gemini_individual_discontinued": message = "이 계정의 Gemini CLI 접근이 지원되지 않습니다. Code Assist Standard 또는 Enterprise가 필요합니다."
-                default: message = e.message
-                }
-            } else if let e = error as? URLError {
-                message = e.code == .timedOut ? "조회 시간이 초과되었습니다. 잠시 후 다시 시도하세요." : "네트워크 연결을 확인하세요. 마지막 성공 결과를 유지합니다."
-            } else { message = "조회에 실패했습니다. 연결한 파일과 앱의 접근 권한을 확인하세요." }
-            return FetchOutcome(snapshot: nil, error: message, note: nil)
-        }
-    }
-}
-
 @MainActor
 final class MonitorStore {
     var onChange: (() -> Void)?
@@ -80,7 +22,6 @@ final class MonitorStore {
     let demo: Bool
     let root: URL
     private let settingsFile: SettingsFile
-    private let service: MonitorService
     private let loginItem = LaunchAtLoginManager()
     private let vault = SecretVault()
     private let codexSessions = ManagedCodexAccounts()
@@ -111,7 +52,6 @@ final class MonitorStore {
         // The display name changed to QuotaBar; keep the existing accounts and login storage.
         root = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/AIUsage Lite")
         settingsFile = SettingsFile(url: root.appendingPathComponent("settings.json"))
-        service = MonitorService(root: root, codexSessions: codexSessions)
         if demo {
             let args = ProcessInfo.processInfo.arguments
             if let index = args.firstIndex(of: "--demo-appearance"), args.indices.contains(index + 1) {
@@ -251,8 +191,8 @@ final class MonitorStore {
                 _ = refreshQueue.finish(job)
                 continue
             }
-            workers[id] = Task { [weak self, service] in
-                let result = await service.fetch(account)
+            workers[id] = Task { [weak self, codexSessions, root] in
+                let result = await codexSessions.refresh(account, root: root)
                 guard let self, self.refreshQueue.finish(job) else { return }
                 self.workers.removeValue(forKey: id)
                 defer { self.drain() }

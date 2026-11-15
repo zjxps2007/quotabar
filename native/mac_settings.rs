@@ -52,7 +52,7 @@ impl From<serde_json::Error> for Error {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(try_from = "String", into = "String")]
-struct AccountId(Uuid);
+pub(crate) struct AccountId(pub(crate) Uuid);
 impl TryFrom<String> for AccountId {
     type Error = &'static str;
     fn try_from(value: String) -> Result<Self, Self::Error> {
@@ -72,15 +72,15 @@ impl From<AccountId> for String {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct Account {
-    id: AccountId,
+pub struct Account {
+    pub(crate) id: AccountId,
     #[serde(deserialize_with = "codec::provider")]
-    provider: Provider,
+    pub(crate) provider: Provider,
     name: String,
-    identity: String,
-    source_path: String,
+    pub(crate) identity: String,
+    pub(crate) source_path: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    app_managed_login: Option<bool>,
+    pub(crate) app_managed_login: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     show_in_menu_bar: Option<bool>,
     enabled: bool,

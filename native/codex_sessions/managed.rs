@@ -75,6 +75,11 @@ impl Drop for Admission<'_> {
 }
 
 impl ManagedAccounts {
+    #[cfg(target_os = "macos")]
+    pub(crate) fn vault_directory(&self) -> &std::path::Path {
+        &self.directory
+    }
+
     pub fn new(directory: PathBuf, platform: Platform) -> Self {
         Self {
             directory,

@@ -46,7 +46,7 @@ base64 = "0.22"
 libc = "0.2"
 objc2 = "0.6"
 objc2-foundation = { version = "0.3", default-features = false, features = ["std","NSString","NSCharacterSet","NSFileManager","NSGeometry","NSDate","NSDateFormatter","NSFormatter","NSNumberFormatter","NSURL","NSValue"] }
-objc2-app-kit = { version = "0.3", default-features = false, features = ["std","block2","NSAlert","NSApplication","NSAttributedString","NSBitmapImageRep","NSButton","NSColor","NSColorSpace","NSControl","NSFont","NSGraphics","NSGraphicsContext","NSImage","NSImageRep","NSLayoutConstraint","NSLayoutManager","NSOpenPanel","NSPanel","NSParagraphStyle","NSPopUpButton","NSSavePanel","NSScrollView","NSSegmentedControl","NSTextContainer","NSTextStorage","NSTextView","NSUserInterfaceLayout","NSWindow","NSView","NSMenu","NSMenuItem","NSResponder","NSRunningApplication","NSWorkspace"] }
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std","block2","NSAlert","NSApplication","NSAttributedString","NSBitmapImageRep","NSButton","NSColor","NSColorSpace","NSControl","NSFont","NSGraphics","NSGraphicsContext","NSImage","NSImageRep","NSLayoutConstraint","NSLayoutManager","NSOpenPanel","NSPanel","NSParagraphStyle","NSPopUpButton","NSSavePanel","NSScrollView","NSSegmentedControl","NSSwitch","NSTextContainer","NSTextStorage","NSTextView","NSUserInterfaceLayout","NSWindow","NSView","NSMenu","NSMenuItem","NSResponder","NSRunningApplication","NSWorkspace"] }
 
 [target.'cfg(windows)'.build-dependencies]
 winresource = "0.1"

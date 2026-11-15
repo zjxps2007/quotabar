@@ -5,7 +5,7 @@ use objc2::{MainThreadMarker, MainThreadOnly, rc::Retained};
 use objc2_app_kit::{
     NSAppearanceCustomization, NSApplication, NSButton, NSCellImagePosition, NSControl,
     NSControlSize, NSFont, NSImage, NSPopUpButton, NSSegmentDistribution, NSSegmentSwitchTracking,
-    NSSegmentedControl, NSUserInterfaceLayoutDirection,
+    NSSegmentedControl, NSSwitch, NSUserInterfaceLayoutDirection,
 };
 use objc2_foundation::{NSArray, NSPoint, NSRect, NSSize, NSString};
 
@@ -72,17 +72,17 @@ fn control_image(
         control.cacheDisplayInRect_toBitmapImageRep(control.bounds(), &rep);
     }));
     let mut rgba = bitmap_pixels(&rep)?;
-    if enabled && control.downcast_ref::<NSPopUpButton>().is_some() {
-        // AppKit paints the pop-up indicator with the system accent even when
-        // the button has a custom bezel color. Preserve its gradient, chevrons
-        // and alpha while applying the dashboard's monochrome accent.
+    let switch = control.downcast_ref::<NSSwitch>().is_some();
+    if enabled && (switch || control.downcast_ref::<NSPopUpButton>().is_some()) {
+        // AppKit uses the system accent for the switch track and the pop-up
+        // indicator. Keep the native shading and apply the dashboard's tint.
         let rtl =
             control.userInterfaceLayoutDirection() == NSUserInterfaceLayoutDirection::RightToLeft;
         let (width, height) = rgba.dimensions();
         let charcoal: u16 = if ui.visuals().dark_mode { 92 } else { 0 };
         for (x, _, pixel) in rgba.enumerate_pixels_mut() {
             let trailing = if rtl { x } else { width - 1 - x };
-            if trailing < height {
+            if switch || trailing < height {
                 let [r, g, b, a] = pixel.0;
                 let low = r.min(g).min(b);
                 let range = u16::from(r.max(g).max(b) - low);
@@ -192,6 +192,27 @@ pub fn draw_segments(
             let selected = pressed.or_else(|| items.iter().position(|(key, _)| *key == current));
             control.setSelectedSegment(selected.map_or(-1, |i| i as isize));
             control.setHighlighted(pressed.is_some());
+            control.into_super()
+        },
+    );
+    if let Some(image) = image {
+        image.paint(ui, bounds);
+        true
+    } else {
+        false
+    }
+}
+
+pub fn draw_switch(ui: &Ui, bounds: Rect, checked: bool, pressed: bool) -> bool {
+    let image = control_image(
+        ui,
+        "AppKit switch",
+        Id::new((checked, pressed)),
+        bounds.size(),
+        |main| {
+            let control = NSSwitch::new(main);
+            control.setState(isize::from(checked));
+            control.setHighlighted(pressed);
             control.into_super()
         },
     );

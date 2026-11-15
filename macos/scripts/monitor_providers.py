@@ -54,6 +54,7 @@ def exercise(wire, incoming, outgoing, directory, results):
                 break
             if "state" in event:
                 last = event["state"]["_0"]
+                assert "fixture-replacement-" not in json.dumps(last), "CLI login leaked into dashboard state"
                 if match := predicate(last):
                     return match
         summary = None if last is None else {k: last.get(k) for k in ("loading", "errors", "notes", "snapshots", "message")}
@@ -94,11 +95,22 @@ def exercise(wire, incoming, outgoing, directory, results):
         command("message", alias)
 
         account_id, previous = check(provider, alias, "connected", remaining)
+        vault = directory / "Library/Application Support/AIUsage Lite/Credentials" / (account_id + ".json")
+        saved = vault.read_bytes()
+        token = "fixture-replacement-" + provider
+        if provider == "codex":
+            replacement = {**login, "tokens": {**login["tokens"], "access_token": token}}
+        else:
+            replacement = {**login, "access_token": token}
+            responses[ASSIST]["token"] = token
+        source.write_text(json.dumps(replacement))
+        responses[url]["token"] = token
         response(url, 401 if provider == "codex" else 403,
                  {} if provider == "codex" else {"error": {"reason": "UNSUPPORTED_CLIENT"}})
         command("refresh", account_id)
         _, cached = check(provider, alias, "access denied, last successful quota retained", remaining, failure)
         assert cached == previous, provider
+        assert vault.read_bytes() == saved, "A failed fetch replaced the stored CLI login"
         revised = remaining.copy()
         if provider == "codex":
             quota[provider]["rate_limit"]["primary_window"]["used_percent"] = 7
@@ -109,6 +121,8 @@ def exercise(wire, incoming, outgoing, directory, results):
         response(url, 200, quota[provider])
         command("refresh", account_id)
         check(provider, alias, "retry recovered", revised)
+        assert json.loads(vault.read_bytes()) == replacement, "Successful quota did not commit the new CLI login"
+        results.append({"step": "updated CLI login committed only after successful quota", "provider": provider})
         if provider == "codex":
             switched = {**login, "tokens": {"access_token": "another-fixture", "account_id": "other-workspace"}}
             source.write_text(json.dumps(switched))
@@ -119,7 +133,6 @@ def exercise(wire, incoming, outgoing, directory, results):
         until(lambda state: state.get("message") == "removed " + alias
               and not any(a["id"] == account_id for a in state["settings"]["accounts"])
               and account_id not in pairs(state, "snapshots"))
-        vault = directory / "Library/Application Support/AIUsage Lite/Credentials" / (account_id + ".json")
         assert not vault.exists() and source.is_file(), provider
         results.append({"step": "removed, source preserved", "provider": provider})
     alias, provider = "Managed Codex fixture", "codex-managed"

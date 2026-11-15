@@ -26,7 +26,7 @@ use std::{
 };
 
 mod buttons;
-pub use buttons::{draw_checkbox, draw_segments, popup_choice, standard_button};
+pub use buttons::{draw_checkbox, draw_segments, draw_switch, popup_choice, standard_button};
 mod document;
 pub use document::DocumentReader;
 mod scroller;
