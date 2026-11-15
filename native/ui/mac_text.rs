@@ -5,7 +5,10 @@ use core_foundation::{
     string::CFString,
 };
 use core_graphics::{
-    base::kCGImageAlphaPremultipliedLast, color_space::CGColorSpace, context::CGContext,
+    base::kCGImageAlphaNoneSkipLast,
+    color_space::CGColorSpace,
+    context::CGContext,
+    geometry::{CGPoint, CGRect, CGSize},
 };
 use core_text::{
     font::{CTFont, CTFontRef},
@@ -41,6 +44,7 @@ struct Key {
     size: u32,
     scale: u32,
     face: Face,
+    light_ink: bool,
 }
 
 fn attributed(value: &str, size: f64, face: Face) -> CFMutableAttributedString {
@@ -95,21 +99,31 @@ fn raster(key: &Key, limit: usize) -> Option<(ColorImage, Vec2)> {
         8,
         width * 4,
         &CGColorSpace::create_device_rgb(),
-        kCGImageAlphaPremultipliedLast,
+        kCGImageAlphaNoneSkipLast,
     );
+    // Quartz smooths light ink on a dark surface differently from dark ink on
+    // a light surface. A transparent alpha-only mask loses that distinction.
+    let ink = if key.light_ink { 1. } else { 0. };
+    let paper = 1. - ink;
+    canvas.set_rgb_fill_color(paper, paper, paper, 1.);
+    canvas.fill_rect(CGRect::new(
+        &CGPoint::new(0., 0.),
+        &CGSize::new(width as f64, height as f64),
+    ));
     canvas.scale(scale, scale);
-    // Coverage on a transparent surface is independent of the gamma of a
-    // black or white background. This mask is tinted during compositing.
-    canvas.set_rgb_fill_color(1., 1., 1., 1.);
+    canvas.set_rgb_fill_color(ink, ink, ink, 1.);
     canvas.set_should_antialias(true);
-    canvas.set_allows_font_smoothing(false);
-    canvas.set_should_smooth_fonts(false);
+    canvas.set_allows_font_smoothing(true);
+    canvas.set_should_smooth_fonts(true);
     canvas.set_text_position(0., (height as f64 - ascent) / scale);
     line.draw(&canvas);
     let pixels = canvas
         .data()
         .chunks_exact(4)
-        .map(|rgba| Color32::from_white_alpha(rgba[3]))
+        .map(|rgb| {
+            let shade = ((u16::from(rgb[0]) + u16::from(rgb[1]) + u16::from(rgb[2]) + 1) / 3) as u8;
+            Color32::from_white_alpha(if key.light_ink { shade } else { 255 - shade })
+        })
         .collect();
     Some((
         ColorImage::new([width, height], pixels),
@@ -135,12 +149,22 @@ pub struct Renderer {
 }
 
 impl Renderer {
-    fn run(&mut self, ctx: &Context, text: &str, size: f32, face: Face) -> Option<&Run> {
+    fn run(
+        &mut self,
+        ctx: &Context,
+        text: &str,
+        size: f32,
+        face: Face,
+        color: Color32,
+    ) -> Option<&Run> {
+        let [r, g, b, _] = color.to_srgba_unmultiplied();
+        let ink = Color32::from_rgb(r, g, b).intensity();
         let key = Key {
             text: text.to_owned(),
             size: size.to_bits(),
             scale: ctx.pixels_per_point().to_bits(),
             face,
+            light_ink: ink > ctx.style().visuals.panel_fill.intensity(),
         };
         let cached = match self.runs.entry(key) {
             std::collections::hash_map::Entry::Occupied(slot) => slot.into_mut(),
@@ -190,7 +214,7 @@ impl Renderer {
                 continue;
             }
             let string: String = row.glyphs.iter().map(|g| g.chr).collect();
-            let run = self.run(ctx, &string, format.font_id.size, face)?;
+            let run = self.run(ctx, &string, format.font_id.size, face, color)?;
             let origin = text.pos + row.pos.to_vec2() + vec2(0., (row.size.y - run.size.y) * 0.5);
             shapes.push(run.shape(origin, ctx.pixels_per_point(), color));
         }
@@ -218,7 +242,13 @@ pub fn natural_size(ui: &Ui, text: &str, size: f32, heavy: bool) -> Option<Vec2>
     Some(
         handle
             .lock()
-            .run(ui.ctx(), text, size, Face::label(heavy))?
+            .run(
+                ui.ctx(),
+                text,
+                size,
+                Face::label(heavy),
+                ui.visuals().text_color(),
+            )?
             .size,
     )
 }
@@ -245,10 +275,10 @@ fn draw_label(ui: &mut Ui, text: &str, size: f32, face: Face, color: Color32) ->
     }
     let handle = ui.ctx().plugin_opt::<Renderer>()?;
     let mut renderer = handle.lock();
-    let mut run = renderer.run(ui.ctx(), text, size, face)?;
+    let mut run = renderer.run(ui.ctx(), text, size, face, color)?;
     if face == Face::RoundedDigits && run.size.x > ui.available_width() {
         let reduced = size * (ui.available_width() / run.size.x).clamp(0.7, 1.);
-        run = renderer.run(ui.ctx(), text, reduced, face)?;
+        run = renderer.run(ui.ctx(), text, reduced, face, color)?;
     }
     if run.size.x > ui.available_width() {
         return None;
@@ -267,10 +297,7 @@ pub fn paragraph(
     spacing: f32,
     color: Color32,
 ) -> Option<Response> {
-    use core_graphics::{
-        geometry::{CGPoint, CGRect, CGSize},
-        path::CGPath,
-    };
+    use core_graphics::path::CGPath;
     use std::sync::Arc;
     let width = ui.available_width().max(1.);
     let scale = ui.ctx().pixels_per_point();
@@ -327,7 +354,7 @@ pub fn paragraph(
     let mut shapes = Vec::with_capacity(lines.len());
     let origin = ui.next_widget_position();
     for (line, height) in lines.iter() {
-        let run = renderer.run(ui.ctx(), line, size, Face::Regular)?;
+        let run = renderer.run(ui.ctx(), line, size, Face::Regular, color)?;
         shapes.push(run.shape(origin + vec2(0., y), scale, color));
         ink_width = ink_width.max(run.size.x);
         y += height + spacing;
@@ -389,20 +416,27 @@ mod tests {
     #[test]
     fn korean_labels_have_distinct_ink_at_both_backing_scales() {
         for scale in [1.0_f32, 2.] {
-            let sample = |text: &str, heavy| {
+            let sample = |text: &str, heavy, light_ink| {
                 let key = Key {
                     text: text.to_owned(),
                     size: 15.0_f32.to_bits(),
                     scale: scale.to_bits(),
                     face: Face::label(heavy),
+                    light_ink,
                 };
                 let (image, bounds) = raster(&key, 4096).unwrap();
                 assert!(bounds.x > 0. && bounds.y > 0.);
                 assert!(image.pixels.iter().any(|pixel| pixel.a() > 128));
+                assert!(image.pixels.iter().any(|pixel| pixel.a() == 0));
                 image
             };
-            assert_ne!(sample("한", false), sample("글", false));
-            assert_ne!(sample("계정 연결", true), sample("계정 연결", false));
+            for ink in [false, true] {
+                assert_ne!(sample("한", false, ink), sample("글", false, ink));
+                assert_ne!(
+                    sample("계정 연결", true, ink),
+                    sample("계정 연결", false, ink)
+                );
+            }
         }
     }
 }
