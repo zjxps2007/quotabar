@@ -2,18 +2,12 @@ import CQuotaBar
 import Darwin
 
 let status = MainActor.assumeIsolated {
-    let service = MonitorApplication()
+    let service = MonitorDataSource()
     return withExtendedLifetime(service) {
-        qb_mac_monitor_run(Unmanaged.passUnretained(service).toOpaque()) { context, event in
-            guard let context else { return }
-            MainActor.assumeIsolated {
-                let service = Unmanaged<MonitorApplication>.fromOpaque(context).takeUnretainedValue()
-                switch event {
-                case 0: service.launch()
-                case 1: service.reopen()
-                case 2: service.terminate()
-                default: break
-                }
+        qb_mac_monitor_run(Unmanaged.passUnretained(service).toOpaque()) { context, handle, event, value, bytes, length in
+            guard let context, let handle else { return -1 }
+            return MainActor.assumeIsolated {
+                Unmanaged<MonitorDataSource>.fromOpaque(context).takeUnretainedValue().event(handle, event, value, bytes, length)
             }
         }
     }

@@ -78,6 +78,24 @@ def dashboard_probe():
     def command(name, *values):
         wire["send"](outgoing, {name: {f"_{i}": v for i, v in enumerate(values)}})
 
+    def toggle_popover(opening):
+        command("showPopover")
+        name = "popover-opened" if opening else "popover-closed"
+        log = output.parent / "diagnostics.jsonl"
+        deadline = time.monotonic() + 6
+        while time.monotonic() < deadline:
+            if log.exists():
+                for line in log.read_bytes().splitlines(keepends=True):
+                    if not line.endswith(b"\n"):
+                        continue
+                    row = json.loads(line)
+                    if row["event"] == name:
+                        observed = {key: row[key] for key in ("event", "dashboardRetained", "popoverRetained", "popoverVisible")}
+                        assert observed == dict(event=name, dashboardRetained=True, popoverRetained=opening, popoverVisible=opening), observed
+                        return observed
+            time.sleep(0.05)
+        raise TimeoutError(name)
+
     def set_usage(used):
         saved = json.loads(sample.read_bytes())
         post_statusline(os.environ["QUOTABAR_TEST_STATUSLINE"], sample, saved["generation"], used, os.environ)
@@ -137,9 +155,11 @@ def dashboard_probe():
     try:
         command("ready")
         expect("startup", 63, IDS[:5], IDS[1:5])
+        opened = toggle_popover(True)
         set_usage(75)
         command("refresh", IDS[0])
         expect("manual refresh", 25, IDS[:5], IDS[1:5])
+        closed = toggle_popover(False)
         command("toggle", IDS[0])
         expect("disable", 25, IDS[1:5], IDS[1:5])
         set_usage(12)
@@ -168,7 +188,7 @@ def dashboard_probe():
         assert requests == [str(s["http"]) for s in updates], requests
         traffic = monitor_providers.exercise(wire, incoming, outgoing, output.parent, providers)
         monitor_update_download.exercise(wire, incoming, command, output.parent, transfers)
-        write_json(output, {"checkpoints": checkpoints, "updates": updates, "providers": providers,
+        write_json(output, {"checkpoints": checkpoints, "updates": updates, "providers": providers, "popover": [opened, closed],
                             "providerRequests": traffic, "updateDownloads": transfers})
     except Exception:
         write_json(output, {"checkpoints": checkpoints, "updates": updates, "providers": providers,

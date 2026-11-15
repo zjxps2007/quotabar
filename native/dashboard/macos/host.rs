@@ -36,7 +36,6 @@ struct Session {
     child: Arc<DashboardChild>,
     requested_route: RefCell<String>,
     ready: Cell<bool>,
-    pending: Cell<bool>,
     closing: Cell<bool>,
 }
 
@@ -157,7 +156,6 @@ impl Host {
             child,
             requested_route: RefCell::new(route.to_owned()),
             ready: Cell::new(false),
-            pending: Cell::new(false),
             closing: Cell::new(false),
         })));
         self.notify(Event::Started, pid, &[]);
@@ -184,20 +182,11 @@ impl Host {
         self.notify(Event::Exited, u32::from(session.child.timed_out()), &[]);
     }
 
-    pub fn changed(&self) {
-        let Some(session) = self.current() else {
-            return;
-        };
-        if session.ready.get() && !session.closing.get() && !session.pending.replace(true) {
-            // The store announces changes before mutation. Deliver its finished
-            // snapshot on the next main turn and coalesce a burst of changes.
-            post(&self.owner, session.id, |host, session| {
-                session.pending.set(false);
-                if !session.closing.get() {
-                    host.notify(Event::PublishState, 0, &[]);
-                }
-            });
-        }
+    pub fn ready(&self) -> bool {
+        self.session
+            .borrow()
+            .as_ref()
+            .is_some_and(|session| session.ready.get() && !session.closing.get())
     }
 
     pub fn send(&self, frame: &[u8]) {

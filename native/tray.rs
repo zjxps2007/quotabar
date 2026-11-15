@@ -1,4 +1,6 @@
 use serde::{Deserialize, Serialize};
+mod dashboard_state;
+pub use dashboard_state::mac_dashboard_popover;
 
 #[derive(Deserialize)]
 pub struct Account {
@@ -156,8 +158,11 @@ struct MacPeriod {
 /// Build the menu item and popover together from the same monitor snapshot.
 /// The item groups by provider. The popover retains the user's account order.
 pub fn mac_popover(bytes: &[u8]) -> serde_json::Result<serde_json::Value> {
+    Ok(mac_popover_view(serde_json::from_slice(bytes)?))
+}
+
+fn mac_popover_view(source: MacPopoverSource) -> serde_json::Value {
     use serde_json::json;
-    let source: MacPopoverSource = serde_json::from_slice(bytes)?;
     let mut cards = Vec::new();
     let mut accounts = Vec::with_capacity(source.accounts.len());
     for entry in source.accounts {
@@ -183,10 +188,10 @@ pub fn mac_popover(bytes: &[u8]) -> serde_json::Result<serde_json::Value> {
         demo: source.demo,
         icon: false,
     });
-    Ok(json!({
+    json!({
         "appearance": source.appearance, "mode": source.mode, "demo": source.demo, "accounts": cards,
         "title": summary.title, "remaining": summary.remaining, "help": summary.help, "empty": summary.empty_message,
-    }))
+    })
 }
 
 pub fn mac(state: &State) -> MacSummary {

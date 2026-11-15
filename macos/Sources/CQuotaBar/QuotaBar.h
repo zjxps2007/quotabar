@@ -34,7 +34,20 @@ typedef struct QBScanner QBScanner;
 typedef struct QBCancel QBCancel;
 typedef struct QBLogin QBLogin;
 typedef struct QBFrameDecoder QBFrameDecoder;
-int32_t qb_mac_monitor_run(void *context, void (*event)(void *, int32_t));
+/* Presentation belongs to the resident Rust AppKit delegate on the main thread.
+   The store may use its borrowed handle from launch until termination. */
+typedef struct QBMacPresentation QBMacPresentation;
+typedef enum : int32_t {
+    QBStoreLaunch, QBStoreApplyDock, QBStoreTerminate, QBStoreRefresh, QBStoreReclaim, QBStoreDiagnostic,
+    QBStoreDashboardStarted, QBStoreDashboardExited, QBStoreMissingHelper, QBStoreLaunchFailed,
+    QBStoreSnapshot, QBStoreCommand
+} QBMacStoreEvent;
+typedef enum : uint32_t { QBMenuSnapshot = 1, QBDashboardSnapshot = 2 } QBMacSnapshotTarget;
+typedef enum : uint32_t { QBDashboardRetained = 1, QBPopoverVisible = 2 } QBMacDiagnosticFlag;
+typedef int32_t (*QBMacStoreCallback)(void *, const QBMacPresentation *, QBMacStoreEvent, uint32_t, const uint8_t *, size_t);
+int32_t qb_mac_monitor_run(void *context, QBMacStoreCallback);
+void qb_mac_presentation_changed(const QBMacPresentation *);
+void qb_mac_presentation_send(const QBMacPresentation *, uint32_t targets, const uint8_t *, size_t);
 typedef struct QBMacInstaller QBMacInstaller;
 typedef struct QBUpdatePolicy QBUpdatePolicy;
 typedef enum { QBUpdateSchedule, QBUpdateCancel, QBUpdateInstall } QBUpdateOnConfigure;
@@ -65,19 +78,6 @@ void qb_frame_decoder_free(QBFrameDecoder *);
 int32_t qb_frame_append(QBFrameDecoder *, const uint8_t *, size_t, void (*deliver)(void *, const uint8_t *, size_t), void *);
 int32_t qb_frame_finish(const QBFrameDecoder *);
 int32_t qb_frame_encode(const uint8_t *, size_t, uint8_t **output, size_t *outputLength);
-typedef struct QBMacDashboardHost QBMacDashboardHost;
-typedef enum : int32_t {
-    QBHostStarted, QBHostExited, QBHostMissingHelper, QBHostLaunchFailed, QBHostPublishState, QBHostCommand
-} QBMacHostEvent;
-typedef int32_t (*QBMacHostCallback)(void *, QBMacHostEvent, uint32_t, const uint8_t *, size_t);
-const QBMacDashboardHost *qb_mac_dashboard_host_new(void *, QBMacHostCallback, int32_t demo);
-void qb_mac_dashboard_host_show(const QBMacDashboardHost *, const char *route);
-void qb_mac_dashboard_host_send(const QBMacDashboardHost *, const uint8_t *, size_t);
-void qb_mac_dashboard_host_changed(const QBMacDashboardHost *);
-void qb_mac_dashboard_host_close(const QBMacDashboardHost *);
-int32_t qb_mac_dashboard_host_running(const QBMacDashboardHost *);
-void qb_mac_dashboard_host_free(const QBMacDashboardHost *);
-
 QBScanner *qb_scanner_new(void);
 void qb_scanner_free(QBScanner *);
 void qb_scanner_release_cache(const QBScanner *);

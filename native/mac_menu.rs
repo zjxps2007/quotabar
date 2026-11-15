@@ -27,7 +27,7 @@ pub const SETTINGS: i32 = 3;
 pub const QUIT: i32 = 4;
 pub const CLOSED: i32 = 5;
 pub const POPOVER: i32 = 6;
-const OPENED: i32 = 7;
+pub const OPENED: i32 = 7;
 
 struct Actions {
     context: *mut c_void,

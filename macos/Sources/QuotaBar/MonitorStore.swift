@@ -1,5 +1,4 @@
 import AppKit
-import Combine
 import CQuotaBar
 import UsageCore
 import Darwin
@@ -68,21 +67,21 @@ actor MonitorService {
 }
 
 @MainActor
-final class MonitorStore: ObservableObject {
-    @Published private(set) var settings = LiteSettings()
-    @Published private(set) var snapshots: [UUID: AccountSnapshot] = [:]
-    @Published private(set) var errors: [UUID: String] = [:]
-    @Published private(set) var notes: [UUID: String] = [:]
-    @Published private(set) var loading: Set<UUID> = []
-    @Published private(set) var local = LocalUsageReport()
-    @Published private(set) var windowVisible = false
-    @Published private(set) var launchAtLogin: LaunchAtLoginState = .disabled
-    @Published private(set) var appUpdate = AppUpdateState()
+final class MonitorStore {
+    var onChange: (() -> Void)?
+    private(set) var settings = LiteSettings() { didSet { onChange?() } }
+    private(set) var snapshots: [UUID: AccountSnapshot] = [:] { didSet { onChange?() } }
+    private(set) var errors: [UUID: String] = [:] { didSet { onChange?() } }
+    private(set) var notes: [UUID: String] = [:] { didSet { onChange?() } }
+    private(set) var loading: Set<UUID> = [] { didSet { onChange?() } }
+    private(set) var local = LocalUsageReport() { didSet { onChange?() } }
+    private(set) var windowVisible = false { didSet { onChange?() } }
+    private(set) var launchAtLogin: LaunchAtLoginState = .disabled { didSet { onChange?() } }
+    private(set) var appUpdate = AppUpdateState() { didSet { onChange?() } }
     private var appUpdater: AppUpdateManager?
     private var installingUpdate: Bool { refreshQueue.status.installing != 0 }
     private var dashboardRunning = false
-    @Published var message: String?
-    @Published var route = "dashboard"
+    var message: String? { didSet { onChange?() } }
     let demo: Bool
     let root: URL
     private let settingsFile: SettingsFile
