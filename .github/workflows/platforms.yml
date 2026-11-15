@@ -140,6 +140,8 @@ jobs:
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
           & $test --compare-settings $app
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          & $test --compare-updates $app
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
           & $test --compare-providers $app
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
           $old = Join-Path $app 'Dashboard/QuotaBar.Dashboard.exe'

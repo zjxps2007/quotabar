@@ -50,7 +50,7 @@ pub(super) fn transfer_message(error: download::Error) -> &'static str {
     match error {
         Development => "배포 앱에서 업데이트를 확인하세요.",
         RateLimited => "업데이트 확인 요청이 제한되었습니다. 잠시 후 다시 시도하세요.",
-        InvalidFeed => "업데이트 정보를 확인할 수 없습니다. 잠시 후 다시 확인하세요.",
+        Feed(_) => "업데이트 정보를 확인할 수 없습니다. 잠시 후 다시 확인하세요.",
         Download => "서명된 업데이트 파일을 내려받지 못했습니다. 현재 버전을 유지합니다.",
         Signature => "업데이트 파일의 서명을 확인하지 못했습니다. 현재 버전을 유지합니다.",
         _ => "자동 업데이트를 완료하지 못했습니다. 현재 앱을 유지합니다.",

@@ -1,5 +1,3 @@
-using System.Net;
-
 namespace QuotaBar.Core;
 
 public readonly record struct ReleaseVersion(int Major, int Minor, int Patch) : IComparable<ReleaseVersion>
@@ -46,38 +44,13 @@ public static class UpdateSignature
 }
 
 /// Public release checks use their own HTTP client without provider credentials.
-public sealed class ReleaseClient : IDisposable
+public sealed class ReleaseClient(HttpMessageHandler? handler = null) : IDisposable
 {
-    private readonly HttpClient http;
-    public ReleaseClient(HttpMessageHandler? handler = null)
-    {
-        http = new(handler ?? new HttpClientHandler { AllowAutoRedirect = false, UseCookies = false })
-        { Timeout = TimeSpan.FromSeconds(30) };
-    }
-    public async Task<AppRelease?> Latest(ReleasePlatform platform, string currentVersion, CancellationToken token = default)
-    {
-        if (ReleaseVersion.Parse(currentVersion) == null) throw new UsageException("development_build", "배포 앱에서 업데이트를 확인하세요.");
-        using var request = new HttpRequestMessage(HttpMethod.Get, ReleaseFeed.Endpoint);
-        request.Headers.Accept.ParseAdd("application/vnd.github+json");
-        request.Headers.UserAgent.ParseAdd("QuotaBar/" + currentVersion);
-        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(token);
-        timeout.CancelAfter(TimeSpan.FromSeconds(30));
-        using var response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, timeout.Token);
-        if (response.StatusCode == HttpStatusCode.NotFound) return null;
-        if (response.StatusCode is HttpStatusCode.Forbidden or HttpStatusCode.TooManyRequests)
-            throw new UsageException("update_rate_limit", "업데이트 확인 요청이 제한되었습니다. 잠시 후 다시 시도하세요.");
-        if (response.StatusCode != HttpStatusCode.OK || response.Content.Headers.ContentLength > ReleaseFeed.MaximumResponseBytes)
-            throw new HttpRequestException("Update feed unavailable.");
-        using var input = await response.Content.ReadAsStreamAsync(timeout.Token);
-        using var output = new MemoryStream(); byte[] buffer = new byte[16 * 1024];
-        int count;
-        while ((count = await input.ReadAsync(buffer, timeout.Token)) != 0)
-        {
-            if (output.Length + count > ReleaseFeed.MaximumResponseBytes) throw new HttpRequestException("Update feed too large.");
-            output.Write(buffer, 0, count);
-        }
-        token.ThrowIfCancellationRequested();
-        return ReleaseFeed.Parse(output.ToArray(), platform);
-    }
-    public void Dispose() => http.Dispose();
+    private readonly ReleaseTransfer transfer = new(handler);
+    public Task<AppRelease?> Latest(ReleasePlatform platform, string currentVersion, CancellationToken token = default) =>
+        transfer.Latest(platform, currentVersion, token);
+    public Task<VerifiedUpdate> Download(AppRelease release, string currentVersion, string publicKeyPem, string directory,
+        Action<int> progress, CancellationToken token) =>
+        transfer.Stage(release, currentVersion, publicKeyPem, directory, progress, token);
+    public void Dispose() => transfer.Dispose();
 }

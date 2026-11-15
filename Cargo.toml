@@ -32,6 +32,7 @@ base64 = "0.22"
 chrono = { version = "0.4", default-features = false, features = ["clock", "serde", "std"] }
 p256 = { version = "0.13", default-features = false, features = ["ecdsa", "pem", "std"] }
 memchr = "2"
+url = "2"
 indexmap = { version = "2", features = ["serde"] }
 serde = { version = "1", features = ["derive", "rc"] }
 serde_json = { version = "1", features = ["float_roundtrip", "raw_value", "unbounded_depth"] }
@@ -48,7 +49,6 @@ deflate64 = "0.1"
 curl = { version = "0.4.51", features = ["static-curl", "ntlm", "poll_7_68_0"] }
 curl-sys = "0.4.91"
 percent-encoding = "2"
-url = "2"
 image = { version = "0.25", default-features = false, features = ["png"] }
 windows = { version = "0.61", default-features = false, features = ["Foundation", "Storage_Streams", "Web_Http_Filters", "Web_Http_Headers", "Win32_System_WinRT"] }
 windows-future = "0.2"

@@ -19,19 +19,24 @@ mod tests;
 
 const NETWORK: TransportError = TransportError::Network(0x80004005u32 as i32);
 
-pub(super) struct Environment {
+pub(crate) struct Environment {
     http: Option<Proxy>,
     https: Option<Proxy>,
     bypass: Vec<String>,
 }
 
-pub(super) enum Route<'a> {
+pub(crate) enum Route<'a> {
     System,
     Direct,
     Explicit(&'a Proxy),
 }
 
 impl Environment {
+    pub(crate) fn process() -> &'static Self {
+        static PROXIES: std::sync::OnceLock<Environment> = std::sync::OnceLock::new();
+        PROXIES.get_or_init(Self::from_process)
+    }
+
     pub(super) fn from_process() -> Self {
         Self::read(|name| std::env::var(name).ok())
     }
@@ -62,7 +67,7 @@ impl Environment {
         }
     }
 
-    pub(super) fn route(&self, target: &str) -> Result<Route<'_>, TransportError> {
+    pub(crate) fn route(&self, target: &str) -> Result<Route<'_>, TransportError> {
         if self.http.is_none() && self.https.is_none() {
             return Ok(Route::System);
         }
@@ -88,7 +93,7 @@ impl Environment {
 }
 
 #[derive(Clone)]
-pub(super) struct Proxy {
+pub(crate) struct Proxy {
     endpoint: String,
     socks: bool,
     credentials: Option<Credentials>,
@@ -104,7 +109,7 @@ enum Credentials {
 }
 
 impl Proxy {
-    fn parse(value: &str) -> Option<Self> {
+    pub(crate) fn parse(value: &str) -> Option<Self> {
         if value.is_empty() {
             return None;
         }
@@ -164,6 +169,49 @@ impl Proxy {
         })
     }
 
+    /// Configure CONNECT authentication and SOCKS routing identically for provider and release requests.
+    pub(crate) fn configure<H: Handler>(
+        &self,
+        easy: &mut Easy2<H>,
+        duration: Duration,
+    ) -> Result<(), TransportError> {
+        easy.proxy(&self.endpoint)?;
+        easy.noproxy("")?;
+        easy.follow_location(false)?;
+        easy.http_version(HttpVersion::V11)?;
+        easy.connect_timeout(duration)?;
+        // The safe wrapper does not expose these two long-valued curl options.
+        // Suppress CONNECT response headers so the origin header deadline
+        // still applies after a proxy has accepted the tunnel.
+        const SUPPRESS_CONNECT_HEADERS: curl_sys::CURLoption = 265;
+        const SOCKS5_AUTH: curl_sys::CURLoption = 267;
+        set_long(easy, SUPPRESS_CONNECT_HEADERS, 1)?;
+        if self.socks {
+            // Windows HttpClient offers SOCKS no-auth and username/password.
+            set_long(easy, SOCKS5_AUTH, curl_sys::CURLAUTH_BASIC as c_long)?;
+        }
+        if let Some(credentials) = &self.credentials {
+            let mut auth = Auth::new();
+            auth.ntlm(true).gssnegotiate(true);
+            let (user, pass) = match credentials {
+                Credentials::WindowsLogon => ("", ""),
+                Credentials::Password { user, password } => {
+                    auth.basic(true).digest(true);
+                    (user.as_str(), password.as_str())
+                }
+            };
+            easy.proxy_username(user)?;
+            easy.proxy_password(pass)?;
+            if !self.socks {
+                easy.proxy_auth(&auth)?;
+            }
+        }
+        let mut proxy_headers = List::new();
+        proxy_headers.append("Proxy-Connection:")?;
+        easy.proxy_headers(proxy_headers)?;
+        Ok(())
+    }
+
     pub(super) fn send(
         &self,
         request: &Request,
@@ -185,37 +233,7 @@ impl Proxy {
             ..Response::default()
         });
         easy.url(&request.url)?;
-        easy.proxy(&self.endpoint)?;
-        easy.noproxy("")?;
-        easy.follow_location(false)?;
-        easy.http_version(HttpVersion::V11)?;
-        easy.connect_timeout(duration)?;
-        // The safe wrapper does not expose these two long-valued curl options.
-        // Suppress CONNECT response headers so the origin header deadline
-        // still applies after a proxy has accepted the tunnel.
-        const SUPPRESS_CONNECT_HEADERS: curl_sys::CURLoption = 265;
-        const SOCKS5_AUTH: curl_sys::CURLoption = 267;
-        set_long(&mut easy, SUPPRESS_CONNECT_HEADERS, 1)?;
-        if self.socks {
-            // Windows HttpClient offers SOCKS no-auth and username/password.
-            set_long(&mut easy, SOCKS5_AUTH, curl_sys::CURLAUTH_BASIC as c_long)?;
-        }
-        if let Some(credentials) = &self.credentials {
-            let mut auth = Auth::new();
-            auth.ntlm(true).gssnegotiate(true);
-            let (user, pass) = match credentials {
-                Credentials::WindowsLogon => ("", ""),
-                Credentials::Password { user, password } => {
-                    auth.basic(true).digest(true);
-                    (user.as_str(), password.as_str())
-                }
-            };
-            easy.proxy_username(user)?;
-            easy.proxy_password(pass)?;
-            if !self.socks {
-                easy.proxy_auth(&auth)?;
-            }
-        }
+        self.configure(&mut easy, duration)?;
         let mut headers = List::new();
         for (name, value) in &request.headers {
             if value.contains(['\r', '\n', '\0']) {
@@ -227,9 +245,6 @@ impl Proxy {
             headers.append("Accept:")?;
         }
         easy.http_headers(headers)?;
-        let mut proxy_headers = List::new();
-        proxy_headers.append("Proxy-Connection:")?;
-        easy.proxy_headers(proxy_headers)?;
         if let Some(body) = &request.body {
             let bytes = Zeroizing::new(serde_json::to_vec(body).map_err(|_| NETWORK)?);
             easy.post_fields_copy(&bytes)?;
@@ -271,8 +286,8 @@ impl Proxy {
     }
 }
 
-fn set_long(
-    handle: &mut Easy2<Response>,
+fn set_long<H: Handler>(
+    handle: &mut Easy2<H>,
     option: curl_sys::CURLoption,
     value: c_long,
 ) -> Result<(), TransportError> {

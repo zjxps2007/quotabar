@@ -1,8 +1,6 @@
-//! Unauthenticated release discovery and bounded, signed update staging.
-use crate::updates::{
-    MAX_FEED, MAX_MANIFEST, Platform, REPOSITORY, Release, Verified, Version, parse_feed,
-    verify_file_while, verify_manifest,
-};
+//! Foundation transport for public release assets.
+pub use crate::updates::download::{Error, latest, stage};
+use crate::updates::download::{Resource, check_cancel};
 use block2::DynBlock;
 use objc2::{
     AnyThread, DefinedClass, define_class, msg_send,
@@ -16,43 +14,14 @@ use objc2_foundation::{
     NSURLSessionResponseDisposition as Disposition, NSURLSessionTask, NSURLSessionTaskDelegate,
 };
 use std::{
-    fs::{self, DirBuilder, File},
-    io::{self, Write},
-    os::unix::fs::{DirBuilderExt, OpenOptionsExt},
-    path::Path,
+    io::Write,
     ptr,
     sync::{
-        atomic::{AtomicBool, Ordering},
+        atomic::AtomicBool,
         mpsc::{self, SyncSender},
     },
     time::Duration,
 };
-
-const LATEST: &str = "https://api.github.com/repos/zjxps2007/quotabar/releases/latest";
-
-#[derive(Debug)]
-pub enum Error {
-    Development,
-    RateLimited,
-    InvalidFeed,
-    Download,
-    Signature,
-    Cancelled,
-    Network(i32),
-    File(io::Error),
-}
-
-impl From<io::Error> for Error {
-    fn from(error: io::Error) -> Self {
-        Self::File(error)
-    }
-}
-
-#[derive(Copy, Clone)]
-enum Resource {
-    Feed,
-    Asset,
-}
 
 enum Event {
     Headers {
@@ -157,18 +126,10 @@ impl Drop for Session {
     }
 }
 
-fn check_cancel(cancel: &AtomicBool) -> Result<(), Error> {
-    if cancel.load(Ordering::Acquire) {
-        Err(Error::Cancelled)
-    } else {
-        Ok(())
-    }
-}
-
 impl Resource {
     /// Returns false for a missing public release. Other HTTP failures are delivered
     /// immediately, even if the server never finishes sending its error page.
-    fn fetch(
+    pub(crate) fn fetch(
         self,
         url: &str,
         agent: &str,
@@ -267,101 +228,4 @@ impl Resource {
             }
         })
     }
-}
-
-pub fn latest(
-    platform: Platform,
-    current: &str,
-    cancel: &AtomicBool,
-) -> Result<Option<Release>, Error> {
-    current.parse::<Version>().map_err(|_| Error::Development)?;
-    let mut data = Vec::new();
-    if !Resource::Feed.fetch(
-        LATEST,
-        &format!("QuotaBar/{current}"),
-        MAX_FEED as u64,
-        cancel,
-        &mut data,
-        |_| {},
-    )? {
-        return Ok(None);
-    }
-    check_cancel(cancel)?;
-    parse_feed(&data, platform).map_err(|_| Error::InvalidFeed)
-}
-
-pub fn stage(
-    release: &Release,
-    current: &str,
-    key: &str,
-    directory: &Path,
-    cancel: &AtomicBool,
-    progress: impl FnMut(i32),
-) -> Result<Verified, Error> {
-    check_cancel(cancel)?;
-    let platform = Platform::for_asset(release).map_err(|_| Error::Signature)?;
-    release
-        .validate_asset(platform)
-        .map_err(|_| Error::Signature)?;
-    let parent = directory
-        .parent()
-        .ok_or_else(|| io::Error::other("Missing staging parent"))?;
-    DirBuilder::new()
-        .recursive(true)
-        .mode(0o700)
-        .create(parent)?;
-    // Only the caller which created this directory may remove it on failure.
-    DirBuilder::new().mode(0o700).create(directory)?;
-    let attempt = (|| {
-        let base = format!("{REPOSITORY}/releases/download/{}/", release.tag);
-        let fetch = |name: &str, limit| -> Result<Vec<u8>, Error> {
-            let mut bytes = Vec::new();
-            Resource::Asset.fetch(
-                &format!("{base}{name}"),
-                "QuotaBar-Updater",
-                limit,
-                cancel,
-                &mut bytes,
-                |_| {},
-            )?;
-            crate::files::write_private(&directory.join(name), &bytes)?;
-            Ok(bytes)
-        };
-        let manifest = fetch("update-manifest.json", MAX_MANIFEST as u64)?;
-        let signature = fetch("update-manifest.sig", 128)?;
-        let verified = verify_manifest(release, platform, current, &manifest, &signature, key)
-            .map_err(|_| Error::Signature)?;
-        let asset = &verified.asset;
-        let archive = directory.join(&asset.name);
-        let mut payload = File::options()
-            .write(true)
-            .create_new(true)
-            .mode(0o600)
-            .open(&archive)?;
-        Resource::Asset.fetch(
-            &asset.url,
-            "QuotaBar-Updater",
-            asset.bytes,
-            cancel,
-            &mut payload,
-            progress,
-        )?;
-        payload.sync_all()?;
-        drop(payload);
-        verify_file_while(&archive, asset, || cancel.load(Ordering::Acquire)).map_err(|error| {
-            if error.kind() == io::ErrorKind::Interrupted {
-                Error::Cancelled
-            } else if error.raw_os_error().is_some() {
-                Error::File(error)
-            } else {
-                Error::Signature
-            }
-        })?;
-        check_cancel(cancel)?;
-        Ok(verified)
-    })();
-    if attempt.is_err() {
-        let _ = fs::remove_dir_all(directory);
-    }
-    attempt
 }

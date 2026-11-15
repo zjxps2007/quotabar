@@ -29,6 +29,7 @@ use windows_sys::Win32::{
 const UNINSTALL: &str = r"Software\Microsoft\Windows\CurrentVersion\Uninstall\QuotaBar.Windows_is1";
 const RETRY: Duration = Duration::from_millis(200);
 
+pub mod download;
 mod installer;
 mod package;
 pub use installer::{Installer, PreparationError, acknowledge, clean_completed, discard, prepare};

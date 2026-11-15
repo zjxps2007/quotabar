@@ -47,7 +47,7 @@ pub(super) fn request(endpoint: Endpoint, url: String) -> Request {
     request
 }
 
-pub(super) fn server(
+pub(crate) fn server(
     requests: usize,
     mut answer: impl FnMut(TcpStream, String, Vec<u8>) + Send + 'static,
 ) -> (String, thread::JoinHandle<()>) {

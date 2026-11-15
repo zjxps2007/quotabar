@@ -331,6 +331,15 @@ fn open_credential(path: &Path, created_by_cli: bool) -> io::Result<File> {
 }
 
 pub fn ensure_private_directory(path: &Path) -> io::Result<()> {
+    private_directory(path, false)
+}
+
+/// Claim a new staging directory. A concurrent caller must never adopt or delete it.
+pub(crate) fn create_private_directory_new(path: &Path) -> io::Result<()> {
+    private_directory(path, true)
+}
+
+fn private_directory(path: &Path, exclusive: bool) -> io::Result<()> {
     reject_links(path)?;
     if let Some(parent) = path.parent()
         && !parent.as_os_str().is_empty()
@@ -348,7 +357,7 @@ pub fn ensure_private_directory(path: &Path) -> io::Result<()> {
             return Ok(());
         }
         let err = io::Error::last_os_error();
-        if err.raw_os_error() != Some(ERROR_ALREADY_EXISTS as i32) {
+        if exclusive || err.raw_os_error() != Some(ERROR_ALREADY_EXISTS as i32) {
             return Err(err);
         }
         let raw = CreateFileW(
@@ -397,7 +406,7 @@ pub fn ensure_private_directory(path: &Path) -> io::Result<()> {
     }
 }
 
-pub(super) fn create_private(path: &Path) -> io::Result<File> {
+pub(crate) fn create_private(path: &Path) -> io::Result<File> {
     let name = wide_file_path(path)?;
     let sd = TokenSid::user()?.descriptor(false)?;
     unsafe {

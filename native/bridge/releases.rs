@@ -9,6 +9,8 @@ use std::{
     sync::atomic::Ordering,
 };
 
+mod windows_download;
+
 fn release_platform(index: i32) -> Option<Platform> {
     [
         Platform::MacArm64,
@@ -44,7 +46,7 @@ mod mac_installer {
             },
             Err(Error::Development) => 1,
             Err(Error::RateLimited) => 2,
-            Err(Error::InvalidFeed) => 3,
+            Err(Error::Feed(_)) => 3,
             Err(Error::Download) => 4,
             Err(Error::Signature) => 5,
             Err(Error::Cancelled) => 6,

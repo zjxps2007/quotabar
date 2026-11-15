@@ -13,12 +13,12 @@ mod platform;
 
 #[cfg(windows)]
 #[path = "provider_http/windows.rs"]
-mod platform;
+pub(crate) mod platform;
 #[cfg(windows)]
 #[path = "provider_http/windows_proxy.rs"]
-mod proxy;
+pub(crate) mod proxy;
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
 
 pub struct Reply {
     pub status: u16,

@@ -9,8 +9,8 @@ internal static class NativeRelease
     private const string Library = "quotabar_native";
     [DllImport(Library, EntryPoint = "qb_release_version")]
     private static extern int Version(byte[] data, nuint length, [Out] int[] components);
-    [DllImport(Library, EntryPoint = "qb_release_feed")]
-    private static extern IntPtr Feed(ReleasePlatform platform, byte[] data, nuint length);
+    [DllImport(Library, EntryPoint = "qb_windows_release_parse")]
+    private static extern int Feed(ReleasePlatform platform, byte[] data, nuint length, out IntPtr result);
     [DllImport(Library, EntryPoint = "qb_string_free")]
     private static extern void Free(IntPtr value);
     [DllImport(Library, EntryPoint = "qb_release_verify")]
@@ -29,8 +29,8 @@ internal static class NativeRelease
     internal static AppRelease? ParseFeed(ReadOnlyMemory<byte> data, ReleasePlatform platform)
     {
         if (data.Length > ReleaseFeed.MaximumResponseBytes) throw InvalidFeed();
-        var result = Feed(platform, data.ToArray(), (nuint)data.Length);
-        if (result == IntPtr.Zero) throw InvalidFeed();
+        int status = Feed(platform, data.ToArray(), (nuint)data.Length, out var result);
+        if (status != 0) throw ReleaseTransfer.Failure(status, 0, default);
         try { return JsonSerializer.Deserialize<AppRelease>(Marshal.PtrToStringUTF8(result)!, Json.Options); }
         finally { Free(result); }
     }

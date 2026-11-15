@@ -11,6 +11,7 @@ use std::{
     str::FromStr,
 };
 
+pub mod download;
 #[cfg(target_os = "macos")]
 pub mod macos;
 pub mod monitor;
@@ -189,24 +190,36 @@ impl Release {
     }
 }
 
-pub fn parse_feed(bytes: &[u8], platform: Platform) -> io::Result<Option<Release>> {
+#[derive(Clone, Copy, Debug)]
+pub enum FeedError {
+    MalformedJson,
+    MissingProperty,
+    WrongType,
+    InvalidRelease,
+}
+impl From<io::Error> for FeedError {
+    fn from(_: io::Error) -> Self {
+        Self::InvalidRelease
+    }
+}
+
+pub fn parse_feed(bytes: &[u8], platform: Platform) -> Result<Option<Release>, FeedError> {
     use serde_json::Value;
     if bytes.len() > MAX_FEED {
-        return Err(invalid("Oversized release feed"));
+        return Err(FeedError::InvalidRelease);
     }
-    let value: Value = serde_json::from_slice(bytes)?;
+    let value: Value = serde_json::from_slice(bytes).map_err(|_| FeedError::MalformedJson)?;
+    let object = value.as_object().ok_or(FeedError::WrongType)?;
+    let required = |key: &str| object.get(key).ok_or(FeedError::MissingProperty);
     for key in ["draft", "prerelease"] {
-        if value[key]
-            .as_bool()
-            .ok_or_else(|| invalid("Invalid release state"))?
-        {
+        if required(key)?.as_bool().ok_or(FeedError::WrongType)? {
             return Ok(None);
         }
     }
     let string = |val: &Value| {
         val.as_str()
             .map(str::to_owned)
-            .ok_or_else(|| invalid("Invalid release field"))
+            .ok_or(FeedError::InvalidRelease)
     };
     let tag = string(&value["tag_name"])?;
     let version = tag.parse::<Version>()?.to_string();
@@ -217,25 +230,30 @@ pub fn parse_feed(bytes: &[u8], platform: Platform) -> io::Result<Option<Release
         asset: None,
     };
     let name = platform.asset_name(release.version()?);
-    let assets = value["assets"]
-        .as_array()
-        .ok_or_else(|| invalid("Invalid release assets"))?;
+    let assets = required("assets")?.as_array().ok_or(FeedError::WrongType)?;
     let mut matches = assets.iter().filter(|a| a["name"].as_str() == Some(&name));
     if let Some(asset) = matches.next() {
         if matches.next().is_some() || asset["state"] != "uploaded" {
-            return Err(invalid("Invalid release asset state"));
+            return Err(FeedError::InvalidRelease);
         }
+        let url = string(&asset["browser_download_url"])?;
+        if url != format!("{REPOSITORY}/releases/download/{}/{name}", release.tag) {
+            return Err(FeedError::InvalidRelease);
+        }
+        let bytes = asset["size"]
+            .as_number()
+            .ok_or(FeedError::WrongType)?
+            .as_u64()
+            .ok_or(FeedError::InvalidRelease)?;
         let sha256 = asset["digest"]
             .as_str()
             .and_then(|s| s.strip_prefix("sha256:"))
-            .ok_or_else(|| invalid("Missing release asset digest"))?
+            .ok_or(FeedError::InvalidRelease)?
             .to_ascii_lowercase();
         release.asset = Some(Asset {
             name,
-            url: string(&asset["browser_download_url"])?,
-            bytes: asset["size"]
-                .as_u64()
-                .ok_or_else(|| invalid("Invalid release asset size"))?,
+            url,
+            bytes,
             sha256,
         });
         release.validate_asset(platform)?;

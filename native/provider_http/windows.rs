@@ -32,14 +32,22 @@ impl From<windows::core::Error> for TransportError {
     }
 }
 
-struct Apartment;
+pub(crate) struct Apartment;
+impl Apartment {
+    pub(crate) fn mta() -> windows::core::Result<Self> {
+        unsafe {
+            RoInitialize(RO_INIT_MULTITHREADED)?;
+        }
+        Ok(Self)
+    }
+}
 impl Drop for Apartment {
     fn drop(&mut self) {
         unsafe { RoUninitialize() };
     }
 }
 
-fn client(use_system_proxy: bool) -> windows::core::Result<&'static HttpClient> {
+pub(crate) fn client(use_system_proxy: bool) -> windows::core::Result<&'static HttpClient> {
     static SYSTEM: OnceLock<HttpClient> = OnceLock::new();
     static DIRECT: OnceLock<HttpClient> = OnceLock::new();
     let shared = if use_system_proxy { &SYSTEM } else { &DIRECT };
@@ -60,7 +68,7 @@ fn client(use_system_proxy: bool) -> windows::core::Result<&'static HttpClient> 
     Ok(shared.get().expect("client was initialized"))
 }
 
-fn wait<T: RuntimeType, P: RuntimeType>(
+pub(crate) fn wait<T: RuntimeType, P: RuntimeType>(
     op: IAsyncOperationWithProgress<T, P>,
     cancel: &AtomicBool,
     deadline: Option<Instant>,
@@ -105,9 +113,7 @@ pub(super) fn send(
     cancel: &AtomicBool,
 ) -> Result<Reply, TransportError> {
     use super::proxy::{Environment, Route};
-    static PROXIES: OnceLock<Environment> = OnceLock::new();
-    let proxies = PROXIES.get_or_init(Environment::from_process);
-    match proxies.route(&description.url)? {
+    match Environment::process().route(&description.url)? {
         Route::Explicit(proxy) => proxy.send(description, discovery, cancel),
         Route::System => send_winrt(description, discovery, cancel, true),
         Route::Direct => send_winrt(description, discovery, cancel, false),
@@ -121,10 +127,7 @@ pub(super) fn send_winrt(
     use_system_proxy: bool,
 ) -> Result<Reply, TransportError> {
     // The background caller owns this apartment until every local WinRT object is dropped.
-    unsafe {
-        RoInitialize(RO_INIT_MULTITHREADED)?;
-    }
-    let _apartment = Apartment;
+    let _apartment = Apartment::mta()?;
     let client = client(use_system_proxy)?;
     let method = HttpMethod::Create(&HSTRING::from(description.method))?;
     let request =

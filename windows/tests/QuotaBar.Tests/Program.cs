@@ -68,6 +68,12 @@ if (args.Length == 2 && args[0] == "--compare-settings")
     return 0;
 }
 
+if (args.Length == 2 && args[0] is "--compare-updates" or "--compare-public-update")
+{
+    await ReleaseCompatibility.Compare(args[1], live: args[0] == "--compare-public-update");
+    return 0;
+}
+
 if (args.Length == 6 && args[0] == "--update-integration")
 {
     await UpdateIntegration.Run(args[1], args[2], args[3], args[4], args[5]);
