@@ -402,59 +402,7 @@ pub fn mac_scroll(ui: &mut Ui, scroll: ScrollArea, p: Palette, body: impl FnOnce
 }
 
 #[cfg(target_os = "macos")]
-pub fn choose(
-    ui: &mut Ui,
-    name: &str,
-    width: f32,
-    labels: &[impl AsRef<str>],
-    selected: usize,
-    size: f32,
-) -> Option<usize> {
-    let mut index = selected;
-    ui.scope(|ui| {
-        ui.spacing_mut().button_padding = vec2(6., 2.);
-        ui.spacing_mut().icon_width = 16.;
-        ui.spacing_mut().interact_size.y = 22.;
-        let enabled = ui.is_enabled();
-        let visual = ui.visuals();
-        let ink = visual.text_color();
-        let on = if visual.dark_mode {
-            Color32::BLACK
-        } else {
-            Color32::WHITE
-        };
-        ComboBox::from_id_salt(name)
-            .width(width)
-            .icon(move |ui, rect, _, _| {
-                let badge = Rect::from_center_size(rect.center(), Vec2::splat(16.));
-                if enabled {
-                    ui.painter().rect_filled(badge, 4., ink);
-                }
-                crate::mac::symbol(
-                    ui.painter(),
-                    badge.shrink(2.),
-                    "chevron.up.chevron.down",
-                    11.,
-                    true,
-                    if enabled { on } else { ink },
-                );
-            })
-            .selected_text(rich(
-                labels[index].as_ref(),
-                size,
-                false,
-                ui.visuals().text_color(),
-            ))
-            .show_ui(ui, |ui| {
-                for (i, label) in labels.iter().enumerate() {
-                    ui.selectable_value(&mut index, i, label.as_ref());
-                }
-            })
-            .response
-            .widget_info(|| WidgetInfo::labeled(WidgetType::ComboBox, enabled, name));
-    });
-    (index != selected).then_some(index)
-}
+pub use crate::mac::popup_choice as choose;
 /// Windows ButtonBase activates on Space release and cancels a held press on
 /// focus loss. Enter, pointer clicks and accessibility Invoke keep their own timing.
 pub fn button_pressed(ui: &Ui, response: &mut Response) -> bool {

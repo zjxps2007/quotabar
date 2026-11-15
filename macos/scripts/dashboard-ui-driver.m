@@ -255,7 +255,8 @@ static BOOL clickControl(NSWindow *window, NSString *label) {
     // The Dock switch occupies the same part of both windows. Give both helpers
     // one down/up pair so an accessibility action cannot introduce a duplicate.
     BOOL sheetSegment = window.sheetParent && [@[@"Codex", @"Claude", @"Gemini", @"브라우저 로그인", @"파일 가져오기"] containsObject:label];
-    if (!getenv("QUOTABAR_TEST_REFERENCE_INPUT") && !sheetSegment && ![label isEqual:@"Dock에 앱 아이콘 표시"] &&
+    BOOL popup = [label isEqual:@"Provider 필터"] || [label isEqual:@"자동 새로고침 간격"];
+    if (!getenv("QUOTABAR_TEST_REFERENCE_INPUT") && !sheetSegment && !popup && ![label isEqual:@"Dock에 앱 아이콘 표시"] &&
         ![label hasSuffix:@" 계정 메뉴"]) return NO;
     NSView *view = window.contentView;
     CGFloat w = NSWidth(view.bounds), h = NSHeight(view.bounds), x, y;
@@ -265,6 +266,11 @@ static BOOL clickControl(NSWindow *window, NSString *label) {
     else if ([label isEqual:@"아이콘만"]) { x = 609; y = 387; }
     else if ([label isEqual:@"이름 + 잔여량"]) { x = 329; y = 387; }
     else if ([label isEqual:@"Dock에 앱 아이콘 표시"]) { x = w - 83; y = 292; }
+    else if (popup) {
+        BOOL interval = [label isEqual:@"자동 새로고침 간격"];
+        x = interval ? 452 : 602;
+        y = (interval ? 569 : 142) + ([NSProcessInfo.processInfo.arguments containsObject:@"--demo"] ? 31 : 0);
+    }
     else if ([label hasSuffix:@" 계정 메뉴"]) {
         x = w - 68;
         y = [NSProcessInfo.processInfo.arguments containsObject:@"--demo"] ? 240 : 209;
@@ -352,38 +358,58 @@ static NSDictionary *perform(NSDictionary *request) {
     return @{@"error": @"control exposes no press action", @"label": label};
 }
 
-static void selectAccountItem(NSDictionary *request, void (^reply)(NSDictionary *)) {
+static void selectMenuItem(NSDictionary *request, void (^reply)(NSDictionary *)) {
     NSWindow *window = dashboardWindow();
     if (!window) { reply(@{@"pending": @"dashboard window"}); return; }
-    NSString *title = [request[@"op"] isEqual:@"accountRefresh"] ? @"새로고침" : @"계정 삭제…";
+    NSString *op = request[@"op"];
+    BOOL accountMenu = [op hasPrefix:@"account"], interval = [op hasPrefix:@"interval"];
+    BOOL cancel = [op isEqual:@"intervalCancel"];
+    NSString *control = accountMenu ? request[@"label"] : interval ? @"자동 새로고침 간격" : @"Provider 필터";
+    NSString *title = accountMenu ? ([op isEqual:@"accountRefresh"] ? @"새로고침" : @"계정 삭제…") : request[@"label"];
     NSNotificationCenter *center = NSNotificationCenter.defaultCenter;
     __block id observer;
     observer = [center addObserverForName:NSMenuDidBeginTrackingNotification object:nil queue:nil usingBlock:^(NSNotification *notice) {
         NSMenu *menu = notice.object;
-        if (![menu itemWithTitle:@"새로고침"] || ![menu itemWithTitle:@"계정 삭제…"]) return;
+        NSArray *known = accountMenu ? @[@"새로고침", @"계정 삭제…"] : interval ? @[@"5분", @"15분"] : @[@"전체 Provider", @"Gemini"];
+        for (NSString *entry in known) if (![menu itemWithTitle:entry]) return;
         [NSNotificationCenter.defaultCenter removeObserver:observer];
         observer = nil;
         CFRunLoopPerformBlock(CFRunLoopGetMain(), (__bridge CFStringRef)NSEventTrackingRunLoopMode, ^{
             [menu update];
             NSMenuItem *item = [menu itemWithTitle:title];
-            BOOL enabled = item.enabled;
-            if (enabled) [menu performActionForItemAtIndex:[menu indexOfItem:item]];
-            [menu cancelTracking];
+            BOOL enabled = item && item.enabled;
+            NSMutableArray *choices = [NSMutableArray array], *checked = [NSMutableArray array];
+            for (NSMenuItem *entry in menu.itemArray) {
+                if (entry.isSeparatorItem || entry.isHidden || !entry.title.length) continue;
+                [choices addObject:entry.title];
+                if (entry.state == NSControlStateValueOn) [checked addObject:entry.title];
+            }
+            if (cancel) {
+                NSEvent *escape = [NSEvent keyEventWithType:NSEventTypeKeyDown location:NSZeroPoint modifierFlags:0
+                    timestamp:NSProcessInfo.processInfo.systemUptime windowNumber:window.windowNumber context:nil
+                    characters:@"\x1b" charactersIgnoringModifiers:@"\x1b" isARepeat:NO keyCode:53];
+                [NSApp postEvent:escape atStart:YES];
+            } else {
+                if (enabled) [menu performActionForItemAtIndex:[menu indexOfItem:item]];
+                [menu cancelTracking];
+            }
             // A click is only queued by postEvent. Acknowledge the actual
             // selection after AppKit has left its nested menu tracking loop.
             CFRunLoopPerformBlock(CFRunLoopGetMain(), kCFRunLoopDefaultMode, ^{
-                reply(enabled ? @{@"selected": title} : @{@"error": @"disabled account menu item", @"label": title});
+                if (!enabled) reply(@{@"error": @"disabled menu item", @"label": title});
+                else if (accountMenu) reply(@{@"selected": title});
+                else reply(@{@"choices": choices, @"checked": checked, @"selection": cancel ? NSNull.null : title});
             });
             CFRunLoopWakeUp(CFRunLoopGetMain());
         });
         CFRunLoopWakeUp(CFRunLoopGetMain());
     }];
-    clickControl(window, request[@"label"]);
+    clickControl(window, control);
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 1500 * NSEC_PER_MSEC), dispatch_get_main_queue(), ^{
         if (observer) {
             [center removeObserver:observer];
             observer = nil;
-            reply(@{@"pending": @"account menu did not begin tracking", @"label": title});
+            reply(@{@"pending": @"menu did not begin tracking", @"label": control});
         }
     });
 }
@@ -426,8 +452,8 @@ __attribute__((constructor)) static void startDashboardDriver(void) {
                         captureRegion(window.sheetParent ?: window, window.frame, DashboardWindow, [dir URLByAppendingPathComponent:@"frame.png"], reply);
                         return;
                     }
-                    if ([request[@"op"] isEqual:@"accountRefresh"] || [request[@"op"] isEqual:@"accountRemove"]) {
-                        selectAccountItem(request, reply);
+                    if ([@[@"accountRefresh", @"accountRemove", @"providerSelect", @"intervalSelect", @"intervalCancel"] containsObject:request[@"op"]]) {
+                        selectMenuItem(request, reply);
                         return;
                     }
                     NSDictionary *result;

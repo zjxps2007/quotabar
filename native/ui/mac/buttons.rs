@@ -1,10 +1,10 @@
 use super::{bitmap_pixels, bitmap_rep};
 use block2::StackBlock;
 use eframe::egui::*;
-use objc2::{MainThreadMarker, rc::Retained};
+use objc2::{MainThreadMarker, MainThreadOnly, rc::Retained};
 use objc2_app_kit::{
-    NSAppearanceCustomization, NSApplication, NSButton, NSControl, NSSegmentDistribution,
-    NSSegmentSwitchTracking, NSSegmentedControl,
+    NSAppearanceCustomization, NSApplication, NSButton, NSControl, NSPopUpButton,
+    NSSegmentDistribution, NSSegmentSwitchTracking, NSSegmentedControl,
 };
 use objc2_foundation::{NSArray, NSPoint, NSRect, NSSize, NSString};
 
@@ -156,6 +156,116 @@ pub fn draw_segments(
     } else {
         false
     }
+}
+
+fn popup_button(
+    main: MainThreadMarker,
+    labels: &[impl AsRef<str>],
+    selected: usize,
+) -> Retained<NSPopUpButton> {
+    let button =
+        NSPopUpButton::initWithFrame_pullsDown(NSPopUpButton::alloc(main), NSRect::ZERO, false);
+    let titles: Vec<_> = labels
+        .iter()
+        .map(|value| NSString::from_str(value.as_ref()))
+        .collect();
+    button.addItemsWithTitles(&NSArray::from_retained_slice(&titles));
+    button.selectItemAtIndex(selected as isize);
+    button
+}
+
+pub fn popup_choice(
+    ui: &mut Ui,
+    name: &str,
+    width: f32,
+    labels: &[impl AsRef<str>],
+    selected: usize,
+    size: f32,
+) -> Option<usize> {
+    let title = labels.get(selected)?.as_ref();
+    let (rect, response) = ui.allocate_exact_size(vec2(width, 22.), Sense::click());
+    let enabled = ui.is_enabled();
+    response.widget_info(|| {
+        let mut info = WidgetInfo::labeled(WidgetType::ComboBox, enabled, name);
+        info.current_text_value = Some(title.to_owned());
+        info
+    });
+    if let Some(image) = control_image(
+        ui,
+        "AppKit pop-up button",
+        Id::new(title),
+        rect.size(),
+        |main| {
+            popup_button(main, labels, selected)
+                .into_super()
+                .into_super()
+        },
+    ) {
+        image.paint(ui, rect);
+    } else {
+        let visuals = ui.style().interact(&response);
+        ui.painter().rect(
+            rect,
+            5.,
+            visuals.bg_fill,
+            visuals.bg_stroke,
+            StrokeKind::Inside,
+        );
+        ui.painter().text(
+            rect.left_center() + vec2(6., 0.),
+            Align2::LEFT_CENTER,
+            title,
+            FontId::proportional(size),
+            visuals.text_color(),
+        );
+    }
+    if response.has_focus() {
+        ui.painter().rect_stroke(
+            rect.expand(1.),
+            6.,
+            Stroke::new(3.0_f32, ui.visuals().selection.stroke.color),
+            StrokeKind::Middle,
+        );
+    }
+    let keyboard = enabled
+        && response.has_focus()
+        && ui.input_mut(|i| {
+            i.consume_key(Modifiers::NONE, Key::ArrowDown)
+                || i.consume_key(Modifiers::ALT, Key::ArrowDown)
+        });
+    if !(enabled && (response.clicked() || keyboard)) {
+        return None;
+    }
+    let main = MainThreadMarker::new()?;
+    let view = NSApplication::sharedApplication(main)
+        .keyWindow()?
+        .contentView()?;
+    let zoom = f64::from(ui.ctx().zoom_factor());
+    let bounds = view.bounds();
+    let x = bounds.origin.x + f64::from(rect.left()) * zoom;
+    let y = bounds.origin.y
+        + if view.isFlipped() {
+            f64::from(rect.top()) * zoom
+        } else {
+            bounds.size.height - f64::from(rect.bottom()) * zoom
+        };
+    let alignment = NSRect::new(
+        NSPoint::new(x, y),
+        NSSize::new(
+            f64::from(rect.width()) * zoom,
+            f64::from(rect.height()) * zoom,
+        ),
+    );
+    let button = popup_button(main, labels, selected);
+    button.setFrame(button.frameForAlignmentRect(alignment));
+    view.addSubview(&button);
+    // AppKit tracks the menu synchronously, including Escape, arrow keys and type selection.
+    unsafe {
+        button.performClick(None);
+    }
+    button.removeFromSuperview();
+    let index = usize::try_from(button.indexOfSelectedItem()).ok()?;
+    (index < labels.len() && index != selected).then_some(index)
 }
 
 pub fn standard_button(ui: &mut Ui, title: &str, focus: Color32) -> Option<Response> {

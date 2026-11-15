@@ -12,7 +12,8 @@ fn provider_filter(ui: &mut Ui, filter: &mut String, width: f32) {
         .iter()
         .position(|s| *s == filter.as_str())
         .unwrap_or(0);
-    if let Some(index) = choose(ui, "Provider 필터", width, &providers, selected, 12.) {
+    let label = if MAC { "Provider" } else { "Provider 필터" };
+    if let Some(index) = choose(ui, label, width, &providers, selected, 12.) {
         *filter = providers[index].into();
     }
 }

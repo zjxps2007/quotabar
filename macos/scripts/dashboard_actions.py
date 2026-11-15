@@ -114,10 +114,34 @@ def exercise(dashboard, executable, folder, library, fixture, observed):
             preference("이름 + 잔여량", "menuBarMode", "menuBarDisplayMode", "providerAndRemaining")
             preference("Dock에 앱 아이콘 표시", "dockIcon", "showDockIcon", False)
             preference("Dock에 앱 아이콘 표시", "dockIcon", "showDockIcon", True)
+            fixture["settings"]["autoRefresh"] = True
+            send({"state": {"_0": fixture}})
+            time.sleep(0.3)
+            selection = controls.request("intervalSelect", "15분")
+            if (selection["choices"] != ["1분", "5분", "15분", "30분", "60분"] or
+                    selection["checked"] != ["5분"] or command("interval")["_0"] != 900):
+                raise ValueError(f"Unexpected interval selection: {selection}")
+            observed.append({"intervalSelection": selection})
+            fixture["settings"]["refreshSeconds"] = 900
+            send({"state": {"_0": fixture}})
+            time.sleep(0.3)
+            dismissed = controls.request("intervalCancel", "5분")
+            if dismissed["checked"] != ["15분"] or dismissed["selection"] is not None:
+                raise ValueError(f"Unexpected dismissed interval: {dismissed}")
+            expect_no_command("interval")
+            observed.append({"intervalDismissed": dismissed})
+            fixture["settings"].update(autoRefresh=False, refreshSeconds=300)
+            send({"state": {"_0": fixture}})
             menu("Dashboard 열기", "route", "dashboard")
             send({"show": {"route": "accounts"}})
             route("accounts")
             time.sleep(0.35)
+            for previous, provider in (("전체 Provider", "Gemini"), ("Gemini", "전체 Provider")):
+                selection = controls.request("providerSelect", provider)
+                if selection["checked"] != [previous] or selection["choices"] != ["전체 Provider", "Codex", "Claude", "Gemini"]:
+                    raise ValueError(f"Unexpected provider selection: {selection}")
+                observed.append({"providerFilter": selection})
+                time.sleep(0.20)
             account = fixture["settings"]["accounts"][0]
             for enabled in (False, True):
                 controls.request("press", f"Codex({account['name']}) 모니터링")
