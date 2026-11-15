@@ -481,11 +481,24 @@ impl Dashboard {
             });
     }
     pub fn settings(&mut self, ui: &mut Ui, p: Palette) {
+        // PreferencesView uses the same 18-point VStack spacing on both sides of each rule.
+        let section_divider = |ui: &mut Ui| {
+            if MAC {
+                let contrast = if p.dark {
+                    Color32::WHITE
+                } else {
+                    Color32::BLACK
+                };
+                spaced_divider(ui, p.card.lerp_to_gamma(contrast, 0.10), 18., 18.);
+            } else {
+                divider(ui, p);
+            }
+        };
         p.frame(20).show(ui,|ui|{ui.set_width(ui.available_width());settings_title(ui,"화면 및 표시","menubar.dock.rectangle",p);ui.add_space(18.);
             label(ui,"화면 모드",if MAC {13.} else {12.},false,p.ink);ui.add_space(if MAC {18.} else {12.});
             if let Some(v)=segments(ui,&[("system","시스템 설정 따르기"),("light","라이트"),("dark","다크")],self.state.setting("appearance","system"),p,420.){
                 self.preference("appearance","appearance",json!(v));}
-            divider(ui,p);let dock=self.state.flag("showTaskbarIcon","showDockIcon");
+            section_divider(ui);let dock=self.state.flag("showTaskbarIcon","showDockIcon");
             #[cfg(target_os = "macos")]
             let dock_toggle = mac_setting_toggle(ui,"Dock에 앱 아이콘 표시",Some("끄면 상단바에서 Dashboard와 설정을 열 수 있습니다."),dock,p.accent,p);
             #[cfg(windows)]
@@ -494,7 +507,7 @@ impl Dashboard {
                 self.preference(if MAC{"showDockIcon"}else{"showTaskbarIcon"},"dockIcon",json!(!dock));}
             #[cfg(windows)]
             {ui.add_space(6.);caption(ui,"끄면 트레이에서 Dashboard와 설정을 열 수 있습니다.",p);}
-            divider(ui,p);label(ui,if MAC{"상단바 표시 형식"}else{"트레이 표시"},12.,false,p.ink);ui.add_space(12.);
+            section_divider(ui);label(ui,if MAC{"상단바 표시 형식"}else{"트레이 표시"},if MAC {13.} else {12.},false,p.ink);ui.add_space(12.);
             let (key,modes):(&str,&[(&str,&str)])=if MAC{("menuBarDisplayMode",&[("providerAndRemaining","이름 + 잔여량"),("remainingOnly","잔여량만"),("iconOnly","아이콘만")])}
                 else{("trayDisplayMode",&[("remaining","남은 비율 숫자"),("icon","로고만")])};
             if let Some(v)=segments(ui,modes,self.state.setting(key,modes[0].0),p,420.){self.preference(key,"menuBarMode",json!(v));}
@@ -525,7 +538,7 @@ impl Dashboard {
                     }
                 });
             });ui.add_space(if MAC {18.} else {10.});caption(ui,"창을 닫아도 선택한 주기로 조회합니다. 꺼도 앱 시작 시 조회와 수동 새로고침은 사용할 수 있습니다.",p);
-            divider(ui,p);let scan=self.state.flag("scanLocalLogs","scanLocalLogs");
+            section_divider(ui);let scan=self.state.flag("scanLocalLogs","scanLocalLogs");
             let scan_detail="Dashboard가 열려 있을 때만 로그를 확인합니다. 대화 본문은 저장하지 않습니다.";
             #[cfg(target_os = "macos")]
             let scan_toggle=mac_setting_toggle(ui,"로컬 토큰 통계",Some(scan_detail),scan,p.accent,p);

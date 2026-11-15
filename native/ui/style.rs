@@ -708,10 +708,19 @@ pub fn link(ui: &mut Ui, s: &str, p: Palette, backdrop: Color32) -> Response {
     .on_hover_cursor(CursorIcon::PointingHand)
 }
 pub fn divider(ui: &mut Ui, p: Palette) {
-    ui.add_space(if cfg!(windows) { 16. } else { 15. });
+    let (above, below) = if cfg!(windows) {
+        (16., 16.)
+    } else {
+        (15., 14.)
+    };
+    spaced_divider(ui, p.line, above, below);
+}
+
+pub fn spaced_divider(ui: &mut Ui, color: Color32, above: f32, below: f32) {
+    ui.add_space(above);
     let (r, _) = ui.allocate_exact_size(vec2(ui.available_width(), 1.), Sense::hover());
-    ui.painter().rect_filled(r, 0, p.line);
-    ui.add_space(if cfg!(windows) { 16. } else { 14. });
+    ui.painter().rect_filled(r, 0, color);
+    ui.add_space(below);
 }
 pub fn toggle(ui: &mut Ui, s: &str, value: bool, tint: Color32, p: Palette) -> Response {
     #[cfg(target_os = "macos")]
