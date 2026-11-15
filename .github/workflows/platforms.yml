@@ -138,16 +138,17 @@ jobs:
           $test = 'windows/tests/QuotaBar.Tests/bin/Release/net10.0-windows/QuotaBar.Tests.exe'
           cargo build --locked --release --example windows-resident-contract
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          $env:QUOTABAR_TEST_ROOT = $env:RUNNER_TEMP
           & target/release/examples/windows-resident-contract.exe $app 'artifacts/QuotaBar-Windows-x64' (Join-Path $comparison 'resident.json')
-          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          $contractResults = @($LASTEXITCODE)
           & $test --compare-claude $app
-          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          $contractResults += $LASTEXITCODE
           & $test --compare-settings $app
-          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          $contractResults += $LASTEXITCODE
           & $test --compare-updates $app
-          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          $contractResults += $LASTEXITCODE
           & $test --compare-providers $app
-          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          $contractResults += $LASTEXITCODE
           $old = Join-Path $app 'Dashboard/QuotaBar.Dashboard.exe'
           $new = 'artifacts/QuotaBar-Windows-x64/Dashboard/QuotaBar.Dashboard.exe'
           & $test --compare-dashboard-actions $old $new
@@ -169,7 +170,7 @@ jobs:
           & $test --compare-dashboards $old $new $comparison
           $dashboardResult = $LASTEXITCODE
           & $test --compare-tray-apps (Join-Path $app 'QuotaBar.Monitor.exe') 'artifacts/QuotaBar-Windows-x64/QuotaBar.Monitor.exe' (Join-Path $comparison 'tray')
-          if ($actionResult -ne 0 -or $visibleResult -notin 0,2 -or $dashboardResult -ne 0 -or $LASTEXITCODE -ne 0) { exit 1 }
+          if (($contractResults -ne 0) -or $actionResult -ne 0 -or $visibleResult -notin 0,2 -or $dashboardResult -ne 0 -or $LASTEXITCODE -ne 0) { exit 1 }
       - uses: actions/upload-artifact@v7
         if: always()
         with:

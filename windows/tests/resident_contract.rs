@@ -112,18 +112,30 @@ mod test {
             let claude = self.work.join("claude");
             let file = claude.join("settings.json");
             let data = self.work.join("data");
+            let reported = PathBuf::from(self.state["dataDirectory"].as_str().unwrap_or_default());
+            let resolved_data = fs::canonicalize(&data)?;
             self.record(
                 "private application data",
-                json!(Path::new(self.state["dataDirectory"].as_str().unwrap_or_default()) == data),
+                json!(fs::canonicalize(&reported).is_ok_and(|path| path == resolved_data)),
                 json!(true),
-            )?;
+            )
+            .map_err(|err| {
+                io::Error::other(format!("{err}: reported {reported:?}, expected {data:?}"))
+            })?;
             let defaults = &self.state["defaultPaths"];
+            let codex_auth = Path::new(defaults["codex"].as_str().unwrap_or_default());
+            let codex_home = fs::canonicalize(self.work.join("codex"))?;
+            let claude_home = fs::canonicalize(&claude)?;
             self.record(
                 "isolated CLI defaults",
                 json!([
-                    Path::new(defaults["codex"].as_str().unwrap_or_default())
-                        == self.work.join("codex").join("auth.json"),
-                    Path::new(defaults["claude"].as_str().unwrap_or_default()) == claude
+                    codex_auth
+                        .file_name()
+                        .is_some_and(|name| name == "auth.json")
+                        && codex_auth.parent().and_then(|p| fs::canonicalize(p).ok())
+                            == Some(codex_home),
+                    fs::canonicalize(defaults["claude"].as_str().unwrap_or_default())?
+                        == claude_home
                 ]),
                 json!([true, true]),
             )?;
@@ -302,18 +314,25 @@ mod test {
                 .arg(&data)
                 .stdin(std::process::Stdio::piped())
                 .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::piped())
                 .spawn()?;
                 let sample = json!({"session_id":Uuid::new_v4().to_string(),"rate_limits":{"five_hour":{"used_percentage":25,"resets_at":Utc::now().timestamp()+3600}}});
                 serde_json::to_writer(helper.stdin.take().unwrap(), &sample)?;
                 let output = helper.wait_with_output()?;
+                let forwarded = String::from_utf8_lossy(&output.stdout);
                 self.record(
                     "packaged callback forwards original output",
-                    json!(
-                        output.status.success()
-                            && String::from_utf8_lossy(&output.stdout).trim() == "previous"
-                    ),
+                    json!(output.status.success() && forwarded.trim() == "previous"),
                     json!(true),
-                )?;
+                )
+                .map_err(|err| {
+                    io::Error::other(format!(
+                        "{err}: shell {}, exit {}, stdout {forwarded:?}, stderr {:?}",
+                        profile["shell"],
+                        output.status,
+                        String::from_utf8_lossy(&output.stderr)
+                    ))
+                })?;
                 self.send("refresh-account", json!(id), Value::Null)?;
                 self.until(|f| {
                     f["type"] == "state" && f["payload"]["snapshots"][&id]["state"] == "snapshot"
@@ -351,8 +370,8 @@ mod test {
                 self.record(
                     "Codex login uses a private home",
                     json!(
-                        Path::new(fs::read_to_string(marker)?.trim())
-                            .starts_with(data.join("Login"))
+                        fs::canonicalize(fs::read_to_string(marker)?.trim())?
+                            .starts_with(fs::canonicalize(data.join("Login"))?)
                     ),
                     json!(true),
                 )?;
@@ -551,14 +570,19 @@ mod test {
             args.len() == 3,
             "Usage: windows-resident-contract <original folder> <candidate folder> <report.json>",
         )?;
-        let root = env::temp_dir().join(format!("QuotaBar-Resident-{}", Uuid::new_v4()));
+        let temp = env::var_os("QUOTABAR_TEST_ROOT").map_or_else(env::temp_dir, PathBuf::from);
+        let root = std::path::absolute(temp)?.join(format!("QuotaBar-Resident-{}", Uuid::new_v4()));
         files::ensure_private_directory(&root)?;
         let result = (|| {
             let mut observations = Vec::new();
             for (i, path) in args[..2].iter().enumerate() {
                 let dest = root.join(i.to_string());
                 files::ensure_private_directory(&dest)?;
-                observations.push(compare_one(Path::new(path), Path::new(&args[1]), &dest)?);
+                let side = if i == 0 { "original" } else { "Rust" };
+                observations.push(
+                    compare_one(Path::new(path), Path::new(&args[1]), &dest)
+                        .map_err(|err| io::Error::other(format!("{side}: {err}")))?,
+                );
             }
             require(
                 observations[0] == observations[1],
