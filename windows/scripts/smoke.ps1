@@ -12,14 +12,23 @@ $probe.Environment['QUOTABAR_PROBE_UI_ERROR'] = $uiError
 [void]$probe.Environment.Remove('DOTNET_ROOT')
 [void]$probe.Environment.Remove('DOTNET_ROOT_X64')
 [void]$probe.Environment.Remove('DOTNET_ROOT(x86)')
+$started = [DateTime]::UtcNow
 $process = [Diagnostics.Process]::Start($probe)
-if (-not $process.WaitForExit(30000)) { $process.Kill(); throw 'Packaged UI probe timed out.' }
-if ($process.ExitCode -ne 0) { throw 'Packaged app failed.' }
-$data = Get-Content -LiteralPath $result -Raw | ConvertFrom-Json
+# Dashboard captures have individual deadlines in the monitor. Leave the software
+# renderer time for both helper launches and all 26 captures across both themes.
+$finished = $process.WaitForExit(120000)
+if (-not $finished) { $process.Kill(); [void]$process.WaitForExit(5000) }
 if ([IO.File]::Exists($uiError)) {
     try { throw ("Packaged Dashboard failed: " + [IO.File]::ReadAllText($uiError)) }
     finally { [IO.File]::Delete($uiError) }
 }
+if (-not $finished) {
+    $captured = @(Get-ChildItem -LiteralPath (Split-Path -Parent $result) -Filter '*.png' -File |
+        Where-Object LastWriteTimeUtc -ge $started | Sort-Object LastWriteTimeUtc)
+    throw "Packaged UI probe timed out after 120 seconds. Saved $($captured.Count) PNGs. Last capture: $($captured.Name | Select-Object -Last 1)"
+}
+if ($process.ExitCode -ne 0) { throw "Packaged app exited with code $($process.ExitCode)." }
+$data = Get-Content -LiteralPath $result -Raw | ConvertFrom-Json
 if (-not $data.passed -or $data.monitorPid -ne $process.Id -or $data.dashboardRunning -or $data.wpfLoadedInMonitor -or $data.windowsFormsLoadedInMonitor -ne $false) { throw "Packaged probe failed: $($data | ConvertTo-Json -Compress)" }
 $runtime = Get-Content -LiteralPath (Join-Path $ApplicationDirectory 'QuotaBar.Monitor.runtimeconfig.json') -Raw | ConvertFrom-Json
 $frameworks = @($runtime.runtimeOptions.includedFrameworks | ForEach-Object name)

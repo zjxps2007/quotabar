@@ -629,6 +629,20 @@ impl Status {
                 .bestMatchFromAppearancesWithNames(&names)
                 .is_some_and(|name| name == dark_aqua)
         });
+        // A SwiftUI popover resolves its content's semantic text and control
+        // colors in the vibrant popover material, including when its body is opaque.
+        let contrast = NSApplication::sharedApplication(m)
+            .effectiveAppearance()
+            .name()
+            .to_string()
+            .contains("HighContrast");
+        let material_appearance = match (dark, contrast) {
+            (true, true) => "NSAppearanceNameAccessibilityHighContrastVibrantDark",
+            (false, true) => "NSAppearanceNameAccessibilityHighContrastVibrantLight",
+            (true, false) => "NSAppearanceNameVibrantDark",
+            (false, false) => "NSAppearanceNameVibrantLight",
+        };
+        root.setAppearance(NSAppearance::appearanceNamed(&s(material_appearance)).as_deref());
         let background = if dark { 0.075 } else { 1. };
         root.setWantsLayer(true);
         if let Some(layer) = root.layer() {
@@ -797,7 +811,7 @@ impl View<'_> {
         // NSTextFieldCell insets text two points from each horizontal edge.
         t.setFrame(self.rect(x - 2., y, w + 4., h));
         let font = if bold {
-            NSFont::boldSystemFontOfSize(size)
+            NSFont::systemFontOfSize_weight(size, unsafe { NSFontWeightSemibold })
         } else {
             NSFont::systemFontOfSize(size)
         };

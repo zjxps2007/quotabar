@@ -547,11 +547,12 @@ pub fn action_on(ui: &mut Ui, s: &str, primary: bool, p: Palette, backdrop: Colo
     } else {
         (s, None)
     };
-    let size = crate::mac_text::natural_size(ui, text, 13., false).unwrap_or_else(|| {
+    let mut size = crate::mac_text::natural_size(ui, text, 13., false).unwrap_or_else(|| {
         ui.painter()
             .layout_no_wrap(text.to_owned(), FontId::proportional(13.), p.ink)
             .size()
     });
+    size.y = size.y.max(crate::mac_text::system_line_height(ui, 13.));
     let icon_width = if symbol.is_some() { 20. } else { 0. };
     let padding = if primary { vec2(12., 6.) } else { vec2(8., 3.) };
     let (rect, response) = ui.allocate_exact_size(

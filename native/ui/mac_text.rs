@@ -223,6 +223,14 @@ pub fn natural_size(ui: &Ui, text: &str, size: f32, heavy: bool) -> Option<Vec2>
     )
 }
 
+pub fn system_line_height(ui: &Ui, size: f64) -> f32 {
+    // The control reserves its system font's line box even if every glyph
+    // comes from a shorter fallback face, e.g. an all-Hangul button title.
+    let font = NSFont::systemFontOfSize(size);
+    let scale = f64::from(ui.ctx().pixels_per_point());
+    (((font.ascender() - font.descender() + font.leading()) * scale).ceil() / scale) as f32
+}
+
 pub fn label(ui: &mut Ui, text: &str, size: f32, heavy: bool, color: Color32) -> Option<Response> {
     draw_label(ui, text, size, Face::label(heavy), color)
 }
