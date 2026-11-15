@@ -129,6 +129,16 @@ int32_t qb_sessions_complete(const QBCodexSessions *, const char *uuid, uint64_t
 int32_t qb_sessions_flush(const QBCodexSessions *, const QBSessionStore *);
 /* Invalidating (0) returns the detached ticket or zero. Revoke (1) and end (2) apply only to the supplied ticket. */
 uint64_t qb_sessions_event(const QBCodexSessions *, const char *uuid, uint64_t ticket, int32_t event);
+typedef struct QBManagedAccounts QBManagedAccounts;
+typedef int32_t (*QBManagedHTTP)(void *context, const uint8_t *request, size_t length, int32_t isRotation, QBSessionRead *body);
+QBManagedAccounts *qb_managed_accounts_new(const char *directory);
+void qb_managed_accounts_free(QBManagedAccounts *);
+void qb_managed_accounts_invalidate(const QBManagedAccounts *, const char *uuid);
+int32_t qb_managed_accounts_flush(const QBManagedAccounts *);
+/* Output contains a quota snapshot or provider error. A null transport uses the system HTTP client. */
+int32_t qb_managed_accounts_fetch(const QBManagedAccounts *, const char *uuid, const uint8_t *identity, size_t identityLength,
+                                  const QBCancel *, void *context, QBManagedHTTP transport, int32_t *osError,
+                                  uint8_t **output, size_t *outputLength);
 typedef struct QBProviderQuery QBProviderQuery;
 /* A positive result is the next HTTP request (1 optional, 2 required). Zero is
  * the final result. -30 carries a provider error. Release buffers with qb_secret_free. */

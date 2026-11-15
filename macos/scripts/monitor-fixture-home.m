@@ -11,6 +11,34 @@ static NSURL *fixtureHomeURL(id manager, SEL selector) {
     return [NSURL fileURLWithPath:fixtureHome() isDirectory:YES];
 }
 
+static NSDictionary *requestJSON(NSURLRequest *request) {
+    NSData *data = request.HTTPBody;
+    if (!data && request.HTTPBodyStream) {
+        NSInputStream *stream = request.HTTPBodyStream;
+        NSMutableData *buffer = [NSMutableData data];
+        uint8_t chunk[1024];
+        [stream open];
+        NSInteger n;
+        while ((n = [stream read:chunk maxLength:sizeof(chunk)]) > 0 && buffer.length < 8192) {
+            [buffer appendBytes:chunk length:(NSUInteger)n];
+        }
+        [stream close];
+        data = buffer;
+    }
+    return data.length ? [NSJSONSerialization JSONObjectWithData:data options:0 error:NULL] : nil;
+}
+
+static BOOL vaultContains(NSString *access) {
+    NSString *directory = [fixtureHome() stringByAppendingPathComponent:@"Library/Application Support/AIUsage Lite/Credentials"];
+    for (NSString *name in [[NSFileManager defaultManager] contentsOfDirectoryAtPath:directory error:NULL]) {
+        if (![name.pathExtension isEqual:@"json"]) continue;
+        NSData *data = [NSData dataWithContentsOfFile:[directory stringByAppendingPathComponent:name]];
+        NSDictionary *login = data ? [NSJSONSerialization JSONObjectWithData:data options:0 error:NULL] : nil;
+        if ([login[@"tokens"][@"access_token"] isEqual:access]) return YES;
+    }
+    return NO;
+}
+
 __attribute__((used, section("__DATA,__interpose")))
 static const struct { const void *replacement, *original; } interposeHome = {
     (const void *)fixtureHome, (const void *)NSHomeDirectory
@@ -43,12 +71,19 @@ static const struct { const void *replacement, *original; } interposeHome = {
             [self.request valueForHTTPHeaderField:@"Cookie"]) fixture = nil;
     } else {
         fixture = fixture[url];
-        NSString *bearer = [@"Bearer " stringByAppendingString:fixture[@"token"] ?: @""];
-        if (![self.request.HTTPMethod isEqual:fixture[@"method"]] ||
-            ![[self.request valueForHTTPHeaderField:@"Authorization"] isEqual:bearer] ||
-            (fixture[@"account"] && ![[self.request valueForHTTPHeaderField:@"ChatGPT-Account-Id"] isEqual:fixture[@"account"]])) {
-            fixture = nil;
+        NSString *authorization = [self.request valueForHTTPHeaderField:@"Authorization"];
+        if (fixture[@"byBearer"]) fixture = fixture[@"byBearer"][authorization ?: @""];
+        BOOL expected;
+        if (fixture[@"refresh"]) {
+            NSDictionary *body = requestJSON(self.request);
+            expected = !authorization && [body[@"grant_type"] isEqual:@"refresh_token"] &&
+                [body[@"client_id"] isEqual:@"app_EMoamEEZ73f0CkXaXp7hrann"] && [body[@"refresh_token"] isEqual:fixture[@"refresh"]];
+        } else {
+            expected = [authorization isEqual:[@"Bearer " stringByAppendingString:fixture[@"token"] ?: @""]];
         }
+        if (!expected || ![self.request.HTTPMethod isEqual:fixture[@"method"]] ||
+            (fixture[@"account"] && ![[self.request valueForHTTPHeaderField:@"ChatGPT-Account-Id"] isEqual:fixture[@"account"]]) ||
+            (fixture[@"stored"] && !vaultContains(fixture[@"stored"]))) fixture = nil;
     }
     if (![fixture[@"status"] isKindOfClass:NSNumber.class]) {
         [self.client URLProtocol:self didFailWithError:[NSError errorWithDomain:NSURLErrorDomain code:NSURLErrorBadURL userInfo:nil]];

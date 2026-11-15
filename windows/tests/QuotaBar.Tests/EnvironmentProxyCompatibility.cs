@@ -14,10 +14,10 @@ internal static class EnvironmentProxyCompatibility
     // Each client gets a fresh process because HttpClient.DefaultProxy is cached.
     public static async Task Compare(string referenceDirectory)
     {
-        foreach (string operation in new[] { "FetchCodex", "Refresh" })
-        foreach (string protocol in new[] { "http", "https", "socks5" })
+        foreach (string operation in new[] { "FetchCodex", "Refresh", "ManagedFresh", "ManagedExpired" })
+        foreach (string protocol in operation.StartsWith("Managed") ? new[] { "http" } : new[] { "http", "https", "socks5" })
         {
-            string target = operation == "Refresh" ? "auth.openai.com" : "chatgpt.com";
+            string target = operation is "Refresh" or "ManagedExpired" ? "auth.openai.com" : "chatgpt.com";
             foreach (string assembly in new[] { Path.GetFullPath(referenceDirectory), "current" })
             {
                 using var listener = new TcpListener(IPAddress.Loopback, 0);
@@ -121,6 +121,13 @@ internal static class EnvironmentProxyCompatibility
         {
             Type type = directory == "current" ? typeof(ProviderClient) :
                 reference.LoadFromAssemblyPath(Path.Combine(directory, "QuotaBar.Core.dll")).GetType("QuotaBar.Core.ProviderClient", true)!;
+            if (operation is "ManagedFresh" or "ManagedExpired")
+            {
+                var monitor = directory == "current" ? typeof(QuotaBar.Windows.MonitorService).Assembly :
+                    reference.LoadFromAssemblyPath(Path.Combine(directory, "QuotaBar.Windows.dll"));
+                await ManagedAccountCompatibility.DefaultTransport(monitor, operation == "ManagedExpired");
+                return 0;
+            }
             using var client = (IDisposable)Activator.CreateInstance(type, new object?[] { null })!;
             object[] args = operation == "Refresh" ? [Fixtures.Auth()] : [Fixtures.Auth(), CancellationToken.None];
             await (Task)type.GetMethod(operation)!.Invoke(client, args)!;

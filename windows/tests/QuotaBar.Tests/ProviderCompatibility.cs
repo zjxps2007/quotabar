@@ -97,6 +97,8 @@ internal static class ProviderCompatibility
                 Console.WriteLine($"PASS {example.Name}");
             }
             Console.WriteLine($"Compared {cases.Count} Windows provider scenarios against the original client.");
+            var originalMonitor = reference.LoadFromAssemblyPath(Path.GetFullPath(Path.Combine(referenceDirectory, "QuotaBar.Windows.dll")));
+            await ManagedAccountCompatibility.Compare(originalMonitor, original);
         }
         finally { reference.Unload(); }
     }

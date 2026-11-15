@@ -13,6 +13,8 @@ use unicode_normalization::UnicodeNormalization;
 use uuid::Uuid;
 use zeroize::Zeroizing;
 
+#[cfg(any(windows, target_os = "macos"))]
+pub mod managed;
 #[cfg(test)]
 mod tests;
 
@@ -37,7 +39,7 @@ impl Store for Directory<'_> {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Error {
     Credentials(credentials::Error),
     Missing,
@@ -64,21 +66,27 @@ struct PendingWrite {
     replacement: Secret,
 }
 
-pub struct Sessions {
+pub struct Sessions<W = usize> {
     platform: Platform,
-    state: RefCell<State>,
+    state: RefCell<State<W>>,
 }
 
-struct State {
+struct State<W> {
     next_ticket: u64,
     jobs: HashMap<Uuid, Flight>,
     pending: IndexMap<Uuid, Arc<PendingWrite>>,
     revoked: HashSet<Uuid>,
-    windows_queue: HashMap<Uuid, VecDeque<usize>>,
+    windows_queue: HashMap<Uuid, VecDeque<W>>,
 }
 
 impl Sessions {
     pub fn new(platform: Platform) -> Self {
+        Self::with_waiters(platform)
+    }
+}
+
+impl<W> Sessions<W> {
+    fn with_waiters(platform: Platform) -> Self {
         Self {
             platform,
             state: RefCell::new(State {
@@ -93,7 +101,7 @@ impl Sessions {
 
     // Windows queues each caller, including across reconnection. It re-reads the
     // vault on admission. macOS instead joins the currently running task in begin().
-    pub fn enter_windows(&self, id: Uuid, waiter: usize) -> bool {
+    pub fn enter_windows(&self, id: Uuid, waiter: W) -> bool {
         match self.state.borrow_mut().windows_queue.entry(id) {
             Entry::Vacant(entry) => {
                 entry.insert(VecDeque::new());
@@ -106,7 +114,7 @@ impl Sessions {
         }
     }
 
-    pub fn leave_windows(&self, id: Uuid) -> Option<usize> {
+    pub fn leave_windows(&self, id: Uuid) -> Option<W> {
         let mut state = self.state.borrow_mut();
         if let Some(next) = state.windows_queue.get_mut(&id)?.pop_front() {
             return Some(next);

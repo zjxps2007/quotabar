@@ -35,6 +35,14 @@ enum NativeProviderQuery {
         throw NativeCredentials.failure(state, provider: operation == .gemini ? .gemini : .codex)
     }
 
+    static func nativeResult(_ state: Int32, osError: Int32, data: Data, operation: Operation) throws -> Data {
+        switch state {
+        case -40: throw NSError(domain: NSURLErrorDomain, code: Int(osError))
+        case -41: throw URLError(.cancelled)
+        default: return try checked(state, data: data, operation: operation)
+        }
+    }
+
     static func native(_ operation: Operation, auth: Data, timeout: TimeInterval, now: Date? = nil) async throws -> Data {
         let cancellation = NativeCancellation()
         let micros = now.map { Int64(($0.timeIntervalSince1970 * 1_000_000).rounded()) } ?? Int64.min
@@ -50,11 +58,7 @@ enum NativeProviderQuery {
                     }
                     let bytes = NativeCredentials.take(output, count: count)
                     continuation.resume(with: Result {
-                        switch state {
-                        case -40: throw NSError(domain: NSURLErrorDomain, code: Int(osError))
-                        case -41: throw URLError(.cancelled)
-                        default: return try checked(state, data: bytes, operation: operation)
-                        }
+                        try nativeResult(state, osError: osError, data: bytes, operation: operation)
                     })
                 }
             }

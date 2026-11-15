@@ -71,7 +71,7 @@ internal sealed class NativeCodexSessions(string? directory, ICredentialStore? i
         waiter.SetResult();
     }
 
-    private static int Check(int status)
+    internal static int Check(int status)
     {
         if (status >= 0) return status;
         throw status switch

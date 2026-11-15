@@ -12,7 +12,7 @@ public sealed class MonitorService : IDisposable
     private readonly SettingsStore store;
     private readonly SecretVault vault;
     private readonly ProviderClient client;
-    private readonly CodexSessions sessions;
+    private readonly ManagedCodexAccounts sessions;
     private readonly ClaudeConnection claude;
     private readonly CodexLogin login;
     private readonly ILaunchAtLogin launchAtLogin;
@@ -36,7 +36,7 @@ public sealed class MonitorService : IDisposable
         client = providerClient ?? new();
         this.launchAtLogin = launchAtLogin ?? new LaunchAtLogin();
         Paths = paths; PrivateFiles.EnsureDirectory(paths.Root); store = new(paths); vault = new(paths);
-        Settings = store.Load(); claude = new(paths); login = new(paths); sessions = new(paths.Credentials, client.Refresh);
+        Settings = store.Load(); claude = new(paths); login = new(paths); sessions = new(paths.Credentials, client);
         RefreshLaunchAtLogin();
         try { snapshots = store.LoadSnapshots(Settings); }
         catch (Exception e) when (e is IOException or JsonException) { message = "이전 사용량 캐시를 읽지 못했습니다. 새로고침하면 다시 저장합니다."; }
@@ -140,19 +140,15 @@ public sealed class MonitorService : IDisposable
         {
             await workers.WaitAsync(cancel.Token); acquired = true; Snapshot result;
             if (account.Provider == Provider.Claude) result = claude.Fetch(account.SourcePath);
+            else if (account.Provider == Provider.Codex && account.AppManagedLogin) result = await sessions.Fetch(account, cancel.Token);
             else
             {
-                byte[] auth = account.AppManagedLogin ? await sessions.Credential(account) : store.Imported(account);
+                byte[] auth = store.Imported(account);
                 try {
                     cancel.Token.ThrowIfCancellationRequested();
                     if (account.Provider == Provider.Gemini) result = await client.FetchGemini(auth, cancel.Token);
-                    else
-                    {
-                        try { result = await client.FetchCodex(auth, cancel.Token); }
-                        catch (UsageException e) when (e.Code == "unauthorized" && account.AppManagedLogin)
-                        { auth = await sessions.Credential(account, auth); cancel.Token.ThrowIfCancellationRequested(); result = await client.FetchCodex(auth, cancel.Token); }
-                    }
-                } finally { if (!account.AppManagedLogin) CryptographicOperations.ZeroMemory(auth); }
+                    else result = await client.FetchCodex(auth, cancel.Token);
+                } finally { CryptographicOperations.ZeroMemory(auth); }
             }
             if (!cancel.IsCancellationRequested && !disposed) { snapshots[account.Id] = result; errors.Remove(account.Id); SaveSnapshots(); }
         }

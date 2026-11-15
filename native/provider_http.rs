@@ -25,7 +25,7 @@ pub struct Reply {
     pub body: Zeroizing<Vec<u8>>,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub enum TransportError {
     Network(i32),
     Cancelled,
@@ -33,6 +33,7 @@ pub enum TransportError {
     LargeResponse,
 }
 
+#[derive(Clone, Debug)]
 pub enum Failure {
     Query(Error),
     Transport(TransportError),
@@ -51,7 +52,7 @@ pub fn run(
     )
 }
 
-fn drive(
+pub fn drive(
     mut query: Query,
     cancel: &AtomicBool,
     fixed_time: Option<DateTime<Utc>>,

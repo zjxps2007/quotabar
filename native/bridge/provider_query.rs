@@ -39,6 +39,26 @@ fn failure(error: Error, output: &mut *mut u8, count: &mut usize) -> i32 {
     }
 }
 
+#[cfg(any(windows, target_os = "macos"))]
+pub(super) fn http_failure(
+    error: quotabar::provider_http::Failure,
+    os_error: &mut i32,
+    output: &mut *mut u8,
+    count: &mut usize,
+) -> i32 {
+    use quotabar::provider_http::{Failure, TransportError};
+    match error {
+        Failure::Query(error) => failure(error, output, count),
+        Failure::Transport(TransportError::Network(code)) => {
+            *os_error = code;
+            -40
+        }
+        Failure::Transport(TransportError::Cancelled) => -41,
+        Failure::Transport(TransportError::Timeout) => -42,
+        Failure::Transport(TransportError::LargeResponse) => -43,
+    }
+}
+
 fn request(query: &Query, output: &mut *mut u8, count: &mut usize) -> i32 {
     let Ok(bytes) = serde_json::to_vec(&query.request()) else {
         return -1;
@@ -184,7 +204,7 @@ pub unsafe extern "C" fn qb_provider_query_run(
     output: *mut *mut u8,
     count: *mut usize,
 ) -> i32 {
-    use quotabar::provider_http::{self, Failure, TransportError};
+    use quotabar::provider_http;
     let (Some(cancel), Some(os_error), Some(output), Some(count)) = (
         unsafe { cancel.as_ref() },
         unsafe { os_error.as_mut() },
@@ -231,16 +251,7 @@ pub unsafe extern "C" fn qb_provider_query_run(
                 publish(bytes, output, count);
                 0
             }
-            Err(Failure::Query(error)) => failure(error, output, count),
-            Err(Failure::Transport(error)) => match error {
-                TransportError::Network(code) => {
-                    *os_error = code;
-                    -40
-                }
-                TransportError::Cancelled => -41,
-                TransportError::Timeout => -42,
-                TransportError::LargeResponse => -43,
-            },
+            Err(error) => http_failure(error, os_error, output, count),
         }
     }))
     .unwrap_or(-1)

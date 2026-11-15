@@ -56,7 +56,11 @@ internal static class NativeProviderQuery
         using var cancel = NativeCancellation.Create();
         using var registration = token.Register(cancel.Cancel);
         int status = Execute(op, auth, (nuint)auth.Length, 20, long.MinValue, cancel, out int osError, out var bytes, out var count);
-        return status switch
+        return NativeResult(status, osError, bytes, count, token);
+    }, token);
+
+    internal static byte[] NativeResult(int status, int osError, IntPtr bytes, nuint count, CancellationToken token) =>
+        status switch
         {
             -40 => throw new HttpRequestException("사용량 서버에 연결하지 못했습니다.", Marshal.GetExceptionForHR(osError)),
             -41 => throw new OperationCanceledException(token),
@@ -64,7 +68,6 @@ internal static class NativeProviderQuery
             -43 => throw new UsageException("large_response", "응답이 너무 큽니다."),
             _ => Result(status, bytes, count)
         };
-    }, token);
 
     internal static async Task<byte[]> Run(Operation op, byte[] auth, CancellationToken token,
         Func<Request, CancellationToken, Task<(int Status, byte[] Body)>> send)

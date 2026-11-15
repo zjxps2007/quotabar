@@ -13,8 +13,8 @@ struct FetchOutcome: Sendable {
 actor MonitorService {
     let vault = SecretVault()
     let profiles: ClaudeSubscriptionStore
-    let codexSessions: CodexSessionManager
-    init(root: URL, codexSessions: CodexSessionManager) {
+    let codexSessions: ManagedCodexAccounts
+    init(root: URL, codexSessions: ManagedCodexAccounts) {
         profiles = ClaudeSubscriptionStore(root: root.appendingPathComponent("ClaudeProfiles"))
         self.codexSessions = codexSessions
     }
@@ -24,12 +24,7 @@ actor MonitorService {
             var note: String?
             var updatedCredential: Data?
             if account.usesAppLogin {
-                let data = try await codexSessions.credential(id: account.id, identity: account.identity)
-                do { usage = try await CodexProvider().fetch(authData: data) }
-                catch let error as ProviderError where error.code == "unauthorized" {
-                    let refreshed = try await codexSessions.credential(id: account.id, identity: account.identity, rejected: data)
-                    usage = try await CodexProvider().fetch(authData: refreshed)
-                }
+                usage = try await codexSessions.fetch(id: account.id, identity: account.identity)
             } else if account.provider == .claude {
                 usage = try await ClaudeSubscriptionProvider(store: profiles).fetchUsage(with:
                     AccountCredential(providerId: "claude-subscription", authMethod: .auto,
@@ -88,7 +83,7 @@ final class MonitorStore {
     private let service: MonitorService
     private let loginItem = LaunchAtLoginManager()
     private let vault = SecretVault()
-    private let codexSessions = CodexSessionManager()
+    private let codexSessions = ManagedCodexAccounts()
     private var storageHealthy = true
     private let refreshQueue = AccountRefreshQueue()
     private var workers: [UUID: Task<Void, Never>] = [:]

@@ -17,7 +17,7 @@ pub enum Operation {
     Refresh,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub enum Error {
     Credentials(credentials::Error),
     QueryCredentials(i32),

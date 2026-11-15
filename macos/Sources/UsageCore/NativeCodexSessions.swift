@@ -53,6 +53,10 @@ final class NativeCodexSessions {
         } else {
             status = body(nil)
         }
+        return try Self.check(status)
+    }
+
+    static func check(_ status: Int32) throws -> Int32 {
         switch status {
         case 0...: return status
         case -50: throw ProviderError("missing_credentials", "앱에서 다시 로그인하세요.")

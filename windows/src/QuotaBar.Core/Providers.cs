@@ -14,7 +14,9 @@ public sealed class ProviderClient : IDisposable
         if (handler != null) http = new(handler) { Timeout = TimeSpan.FromSeconds(20) };
     }
 
-    private async Task<(int, byte[])> Send(NativeProviderQuery.Request description, CancellationToken token)
+    internal bool HasCustomTransport => http != null;
+
+    internal async Task<(int, byte[])> Send(NativeProviderQuery.Request description, CancellationToken token)
     {
         using var request = description.ToHttpRequest();
         using var response = await http!.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, token);

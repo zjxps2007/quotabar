@@ -69,7 +69,7 @@ impl Store for &StoreCallback {
     }
 }
 
-fn status(error: Error) -> i32 {
+pub(super) fn status(error: Error) -> i32 {
     match error {
         Error::Credentials(error) => error_code(error),
         Error::Missing => -50,
