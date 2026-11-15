@@ -195,6 +195,12 @@ fn choose_presented(
             .unwrap_or(selected),
         chosen: selected,
     };
+    // UI Automation focus and the user's next key can reach the same frame.
+    // Register that focus before interpreting keys, as ComboBox::show_ui runs later.
+    if ui.is_enabled() && ui.input(|i| i.has_accesskit_action_request(id, accesskit::Action::Focus))
+    {
+        ui.memory_mut(|m| m.interested_in_focus(id, ui.layer_id()));
+    }
     let focused = ui.memory(|m| m.has_focus(id));
     if ui.is_enabled() && (focused || was_open) {
         let search_id = id.with("typed prefix");
@@ -399,7 +405,9 @@ fn choose_presented(
                 EventFilter {
                     vertical_arrows: true,
                     horizontal_arrows: true,
-                    escape: open,
+                    // F4 and Escape can arrive before the open list gets a frame.
+                    // An unhandled Escape is still available to the dialog.
+                    escape: true,
                     ..Default::default()
                 },
             )
@@ -451,18 +459,16 @@ mod tests {
         let ctx = Context::default();
         let mut selected = 0;
         let mut path = String::new();
-        let mut frame = |key: Option<Key>| {
+        let key = |key| Event::Key {
+            key,
+            physical_key: Some(key),
+            pressed: true,
+            repeat: false,
+            modifiers: Modifiers::NONE,
+        };
+        let mut frame = |events: Vec<Event>| {
             let input = RawInput {
-                events: key
-                    .into_iter()
-                    .map(|key| Event::Key {
-                        key,
-                        physical_key: Some(key),
-                        pressed: true,
-                        repeat: false,
-                        modifiers: Modifiers::NONE,
-                    })
-                    .collect(),
+                events,
                 screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(400., 300.))),
                 ..Default::default()
             };
@@ -485,12 +491,27 @@ mod tests {
             });
             (provider, selected)
         };
-        let (provider, _) = frame(None);
+        let (provider, _) = frame(vec![]);
         ctx.memory_mut(|m| m.request_focus(provider));
-        assert_eq!(frame(Some(Key::ArrowDown)).1, 1);
+        assert_eq!(frame(vec![key(Key::ArrowDown)]).1, 1);
         assert_eq!(ctx.memory(|m| m.focused()), Some(provider));
-        assert_eq!(frame(Some(Key::Home)).1, 0);
-        frame(Some(Key::Tab));
+        assert_eq!(frame(vec![key(Key::Home)]).1, 0);
+        frame(vec![key(Key::Tab)]);
         assert_ne!(ctx.memory(|m| m.focused()), Some(provider));
+
+        let focus = Event::AccessKitActionRequest(accesskit::ActionRequest {
+            action: accesskit::Action::Focus,
+            target: provider.value().into(),
+            data: None,
+        });
+        assert_eq!(frame(vec![focus, key(Key::ArrowDown)]).1, 1);
+        assert_eq!(ctx.memory(|m| m.focused()), Some(provider));
+        frame(vec![key(Key::Home)]);
+        frame(vec![key(Key::F4), key(Key::ArrowDown), key(Key::Escape)]);
+        assert_eq!(ctx.memory(|m| m.focused()), Some(provider));
+        assert_eq!(
+            frame(vec![key(Key::F4), key(Key::ArrowDown), key(Key::Enter)]).1,
+            1
+        );
     }
 }

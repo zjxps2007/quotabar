@@ -15,6 +15,10 @@ try {
     Invoke-Dotnet @('publish','src/QuotaBar.Monitor/QuotaBar.Monitor.csproj','-c','Release','-r',$Runtime,'--self-contained','true','-p:PublishSingleFile=false','-p:PublishTrimmed=false',"-p:Version=$version",'-m:1','-nodeReuse:false','-p:UseSharedCompilation=false','-o',$output,'--nologo')
     Copy-Item -Path (Join-Path $output '*') -Destination $bundle -Recurse -Force
     Copy-Item -LiteralPath (Join-Path $RepoRoot 'LICENSE'), (Join-Path $RepoRoot 'NOTICE'), (Join-Path $RepoRoot 'windows\README.md') -Destination $bundle -Force
+    $accessKitLicenses = New-Item -ItemType Directory -Force -Path (Join-Path $bundle 'licenses\AccessKit')
+    foreach ($name in @('LICENSE-APACHE','LICENSE-MIT','LICENSE.chromium')) {
+        Copy-Item -LiteralPath (Join-Path $RepoRoot "vendor\accesskit_windows\$name") -Destination $accessKitLicenses.FullName
+    }
     $proxyLicenses = New-Item -ItemType Directory -Force -Path (Join-Path $bundle 'licenses\libcurl')
     Copy-Item -LiteralPath (Join-Path $RepoRoot 'windows\assets\Proxy-LICENSE') -Destination (Join-Path $proxyLicenses.FullName 'LICENSE')
     $arrowLicense = New-Item -ItemType Directory -Force -Path (Join-Path $bundle 'licenses\Windows Forms')

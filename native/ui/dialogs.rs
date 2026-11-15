@@ -226,10 +226,10 @@ impl Dashboard {
         let mut content = |ctx: &Context, capture: Option<&mut super::Capture>| {
             self.dialog_access.install(ctx, frame, title);
             ctx.send_viewport_cmd(ViewportCommand::Visible(true));
-            if ctx.input(|i| i.viewport().close_requested())
-                || !Popup::is_any_open(ctx)
-                    && ctx.input_mut(|i| i.consume_key(Modifiers::NONE, Key::Escape))
-            {
+            close |= ctx.input(|i| i.viewport().close_requested());
+            let had_popup = Popup::is_any_open(ctx);
+            #[cfg(target_os = "macos")]
+            if !had_popup && ctx.input_mut(|i| i.consume_key(Modifiers::NONE, Key::Escape)) {
                 close = true;
             }
             CentralPanel::default()
@@ -375,6 +375,15 @@ impl Dashboard {
                         }
                     }
                 });
+            // Let a Windows selector consume the cancellation of its list first,
+            // including when the list was opened by a key in this same frame.
+            #[cfg(windows)]
+            if !had_popup
+                && !Popup::is_any_open(ctx)
+                && ctx.input_mut(|i| i.consume_key(Modifiers::NONE, Key::Escape))
+            {
+                close = true;
+            }
             capture.and_then(|c| c.dialog_image(ctx, frame))
         };
         {

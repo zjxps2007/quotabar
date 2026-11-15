@@ -7,12 +7,14 @@ license = "Apache-2.0"
 
 [workspace]
 members = ["native/bridge", "native/ui"]
-exclude = ["vendor/accesskit_consumer"]
+exclude = ["vendor/accesskit_consumer", "vendor/accesskit_windows"]
 resolver = "3"
 
 # AccessKit 0.31 reports every ScrollBar as read-only to Windows UI Automation.
 [patch.crates-io]
 accesskit_consumer = { path = "vendor/accesskit_consumer" }
+# Expose expanded state and Expand/Collapse to Windows UI Automation clients.
+accesskit_windows = { path = "vendor/accesskit_windows" }
 
 [lib]
 path = "native/lib.rs"

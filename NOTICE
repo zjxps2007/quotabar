@@ -42,6 +42,8 @@ MIT license included in licenses/Windows Forms/LICENSE in the Windows distributi
 The Rust dashboard uses AccessKit. The vendored accesskit_consumer 0.31.0 is
 copyright 2021 The AccessKit Authors and distributed under Apache License 2.0.
 QuotaBar enables writable scrollbars in its accessibility state mapping.
+The vendored AccessKit Windows adapter 0.29.2 exposes expandable controls to
+UI Automation. Its licenses and Chromium notice are in licenses/AccessKit/.
 The native Rust Claude callback adapts the same AIUsage subscription snapshot,
 profile and command forwarding rules for the original Windows and macOS formats.
 The Rust macOS connection also adapts AIUsage's subscription installation,

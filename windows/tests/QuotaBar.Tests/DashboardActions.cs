@@ -19,7 +19,9 @@ internal static partial class DashboardActions
         {
             Console.WriteLine($"Dashboard actions for {side} ({Path.GetFileName(path)})");
             using var child = DashboardChild.Start(Path.GetFullPath(path));
-            using var deadline = new Timer(_ => child.Stop(), null, TimeSpan.FromSeconds(45), Timeout.InfiniteTimeSpan);
+            // Each interaction has its own deadline. Allow the complete sequence
+            // to include all native dialogs on a software-rendered CI desktop.
+            using var deadline = new Timer(_ => child.Stop(), null, TimeSpan.FromSeconds(90), Timeout.InfiniteTimeSpan);
             try
             {
                 Expect(child, "ready");
@@ -151,12 +153,17 @@ internal static partial class DashboardActions
                 var connect = Window(pid, "QuotaBar · 계정 연결");
                 var provider = Wait(() => connect.FindFirst(TreeScope.Descendants,
                     new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.ComboBox)), "연결 서비스");
+                var list = (ExpandCollapsePattern)provider.GetCurrentPattern(ExpandCollapsePattern.Pattern);
+                void ExpectList(ExpandCollapseState state) =>
+                    Wait(() => list.Current.ExpandCollapseState == state ? provider : null, $"Provider list {state}");
                 void ExpectProviderControl(string name, string transition)
                 {
                     var named = new PropertyCondition(AutomationElement.NameProperty, name);
                     try { Wait(() => connect.FindFirst(TreeScope.Descendants, named), transition); }
                     catch (TimeoutException cause)
                     {
+                        if (WindowHwnd(pid, "QuotaBar · 계정 연결") == 0)
+                            throw new TimeoutException($"{transition}. The connection dialog closed.", cause);
                         var buttons = connect.FindAll(TreeScope.Descendants, new PropertyCondition(
                             AutomationElement.ControlTypeProperty, ControlType.Button)).Cast<AutomationElement>();
                         var labels = string.Join(", ", buttons.Select(b => b.Current.Name));
@@ -164,6 +171,10 @@ internal static partial class DashboardActions
                     }
                 }
                 provider.SetFocus();
+                // SetFocus can return before the accessibility provider publishes
+                // the focused element and before this owned window becomes active.
+                Wait(() => provider.Current.HasKeyboardFocus && GetForegroundWindow() == WindowHwnd(pid, "QuotaBar · 계정 연결")
+                    ? provider : null, "keyboard focus in the connection provider");
                 TypeKey(provider, "{DOWN}"); // Down selects Claude with the list closed.
                 ExpectProviderControl("기존 status line을 보존하는 연결에 동의합니다", "Claude consent after keyboard selection");
                 TypeKey(provider, "{HOME}"); // Home returns to Codex.
@@ -171,11 +182,19 @@ internal static partial class DashboardActions
                 TypeKey(provider, "g"); // Typing G selects Gemini.
                 ExpectProviderControl("Gemini Code Assist의 현재 지원 대상 조직 계정만 연결할 수 있습니다. 개인용 종료 및 서버 정책에 따라 조회가 거절될 수 있습니다.", "Gemini after typing G");
                 TypeKey(provider, "{HOME}");
+                ExpectProviderControl("브라우저로 Codex 로그인", "Codex before opening the provider list");
+                list.Expand();
+                ExpectList(ExpandCollapseState.Expanded);
+                list.Collapse();
+                ExpectList(ExpandCollapseState.Collapsed);
                 TypeKey(provider, "{F4}"); // F4 opens the list; Escape discards an uncommitted selection.
+                ExpectList(ExpandCollapseState.Expanded);
                 TypeKey(provider, "{DOWN}");
                 TypeKey(provider, "{ESC}");
+                ExpectList(ExpandCollapseState.Collapsed);
                 ExpectProviderControl("브라우저로 Codex 로그인", "Codex after cancelling the provider list");
                 TypeKey(provider, "{F4}");
+                ExpectList(ExpandCollapseState.Expanded);
                 TypeKey(provider, "{DOWN}");
                 TypeKey(provider, "{ENTER}"); // Enter commits Claude.
                 Toggle(connect, "기존 status line을 보존하는 연결에 동의합니다");
