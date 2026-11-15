@@ -1,8 +1,6 @@
 #[cfg(windows)]
 use quotabar::dashboard::Endpoint;
 use quotabar::dashboard::MAX_FRAME;
-#[cfg(target_os = "macos")]
-use quotabar::dashboard::macos::DashboardChild;
 #[cfg(windows)]
 use quotabar::dashboard::windows::DashboardChild;
 use std::io;
@@ -54,31 +52,6 @@ pub unsafe extern "C" fn qb_dashboard_spawn(
             ptr::null_mut()
         }
     }
-}
-/// # Safety
-/// Supply a NUL-terminated executable path. Release the returned child exactly once.
-#[cfg(target_os = "macos")]
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn qb_mac_dashboard_spawn(
-    exe: *const c_char,
-    demo: i32,
-) -> *mut DashboardChild {
-    if exe.is_null() {
-        return ptr::null_mut();
-    }
-    use std::{ffi::OsStr, os::unix::ffi::OsStrExt};
-    let path = Path::new(OsStr::from_bytes(unsafe { CStr::from_ptr(exe) }.to_bytes()));
-    std::panic::catch_unwind(|| DashboardChild::spawn(path, demo != 0))
-        .ok()
-        .and_then(Result::ok)
-        .map_or(ptr::null_mut(), |c| Box::into_raw(Box::new(c)))
-}
-/// # Safety
-/// The child must be live for this call, including after its process exits.
-#[cfg(target_os = "macos")]
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn qb_mac_dashboard_timed_out(child: *const DashboardChild) -> i32 {
-    unsafe { child.as_ref() }.is_some_and(DashboardChild::timed_out) as i32
 }
 /// # Safety
 /// Pass a live child throughout this call.

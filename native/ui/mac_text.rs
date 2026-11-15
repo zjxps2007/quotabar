@@ -29,6 +29,7 @@ enum Face {
     Regular,
     Underlined,
     Emphasized,
+    TabularDigits,
     RoundedDigits,
 }
 
@@ -58,7 +59,7 @@ fn attributed(value: &str, size: f64, face: Face) -> CFMutableAttributedString {
         match face {
             Face::Regular | Face::Underlined => NSFontWeightRegular,
             Face::Emphasized if size >= 17. => NSFontWeightBold,
-            Face::Emphasized | Face::RoundedDigits => NSFontWeightSemibold,
+            Face::Emphasized | Face::TabularDigits | Face::RoundedDigits => NSFontWeightSemibold,
         }
     };
     let nsfont = if face == Face::RoundedDigits {
@@ -68,6 +69,8 @@ fn attributed(value: &str, size: f64, face: Face) -> CFMutableAttributedString {
             .fontDescriptorWithDesign(unsafe { objc2_app_kit::NSFontDescriptorSystemDesignRounded })
             .and_then(|descriptor| NSFont::fontWithDescriptor_size(&descriptor, size))
             .unwrap_or(digits)
+    } else if face == Face::TabularDigits {
+        NSFont::monospacedDigitSystemFontOfSize_weight(size, weight)
     } else {
         NSFont::systemFontOfSize_weight(size, weight)
     };
@@ -285,7 +288,7 @@ fn font_line_height(size: f64) -> f64 {
 }
 
 pub fn label(ui: &mut Ui, text: &str, size: f32, heavy: bool, color: Color32) -> Option<Response> {
-    draw_label(ui, text, size, Face::label(heavy), color, 0.)
+    draw_label(ui, text, size, Face::label(heavy), color, LineBox::Glyphs)
 }
 
 pub fn system_label(
@@ -297,13 +300,25 @@ pub fn system_label(
 ) -> Option<Response> {
     // A text line rounds its total extent once. A button reserves the next
     // full device pixel for its alignment box in system_line_height.
-    let scale = f64::from(ui.ctx().pixels_per_point());
-    let line_height = ((font_line_height(f64::from(size)) * scale).round() / scale) as f32;
-    draw_label(ui, text, size, Face::label(heavy), color, line_height)
+    draw_label(ui, text, size, Face::label(heavy), color, LineBox::System)
 }
 
 pub fn stat_value(ui: &mut Ui, text: &str, color: Color32) -> Option<Response> {
-    draw_label(ui, text, 28., Face::RoundedDigits, color, 0.)
+    draw_label(ui, text, 28., Face::RoundedDigits, color, LineBox::Stack)
+}
+
+pub fn stacked_label(
+    ui: &mut Ui,
+    text: &str,
+    size: f32,
+    heavy: bool,
+    color: Color32,
+) -> Option<Response> {
+    draw_label(ui, text, size, Face::label(heavy), color, LineBox::Stack)
+}
+
+pub fn quota_percent(ui: &mut Ui, text: &str, color: Color32) -> Option<Response> {
+    draw_label(ui, text, 11., Face::TabularDigits, color, LineBox::Stack)
 }
 
 pub fn hyperlink(ui: &mut Ui, title: &str, url: &str, size: f32, color: Color32) -> Response {
@@ -336,13 +351,19 @@ pub fn hyperlink(ui: &mut Ui, title: &str, url: &str, size: f32, color: Color32)
     }
 }
 
+enum LineBox {
+    Glyphs,
+    System,
+    Stack,
+}
+
 fn draw_label(
     ui: &mut Ui,
     text: &str,
     size: f32,
     face: Face,
     color: Color32,
-    minimum_height: f32,
+    line_box: LineBox,
 ) -> Option<Response> {
     if text.is_empty() || text.contains('\n') {
         return None;
@@ -357,7 +378,17 @@ fn draw_label(
     if run.size.x > ui.available_width() {
         return None;
     }
-    let height = run.size.y.max(minimum_height);
+    let height = match line_box {
+        LineBox::Glyphs => run.size.y,
+        LineBox::System => {
+            let scale = f64::from(ui.ctx().pixels_per_point());
+            let system = (font_line_height(f64::from(size)) * scale).round() / scale;
+            run.size.y.max(system as f32)
+        }
+        LineBox::Stack => run
+            .paragraph_line_height
+            .max(system_line_height(ui, f64::from(size))),
+    };
     let (rect, response) = ui.allocate_exact_size(vec2(run.size.x, height), Sense::hover());
     let top = rect.min + vec2(0., (height - run.size.y) * 0.5);
     ui.painter()

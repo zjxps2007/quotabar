@@ -2737,6 +2737,7 @@ dependencies = [
  "chrono",
  "curl",
  "curl-sys",
+ "dispatch2",
  "image",
  "indexmap",
  "libc",

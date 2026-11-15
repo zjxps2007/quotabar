@@ -34,7 +34,6 @@ typedef struct QBScanner QBScanner;
 typedef struct QBCancel QBCancel;
 typedef struct QBLogin QBLogin;
 typedef struct QBFrameDecoder QBFrameDecoder;
-typedef struct QBDashboard QBDashboard;
 int32_t qb_mac_monitor_run(void *context, void (*event)(void *, int32_t));
 typedef struct QBMacInstaller QBMacInstaller;
 typedef struct QBUpdatePolicy QBUpdatePolicy;
@@ -66,13 +65,18 @@ void qb_frame_decoder_free(QBFrameDecoder *);
 int32_t qb_frame_append(QBFrameDecoder *, const uint8_t *, size_t, void (*deliver)(void *, const uint8_t *, size_t), void *);
 int32_t qb_frame_finish(const QBFrameDecoder *);
 int32_t qb_frame_encode(const uint8_t *, size_t, uint8_t **output, size_t *outputLength);
-QBDashboard *qb_mac_dashboard_spawn(const char *executable, int32_t demo);
-uint32_t qb_dashboard_pid(const QBDashboard *);
-int32_t qb_dashboard_send(const QBDashboard *, const uint8_t *, size_t);
-int32_t qb_dashboard_read(const QBDashboard *, uint8_t **output, size_t *outputLength);
-void qb_dashboard_control(const QBDashboard *, int32_t action);
-int32_t qb_mac_dashboard_timed_out(const QBDashboard *);
-void qb_dashboard_free(QBDashboard *);
+typedef struct QBMacDashboardHost QBMacDashboardHost;
+typedef enum : int32_t {
+    QBHostStarted, QBHostExited, QBHostMissingHelper, QBHostLaunchFailed, QBHostPublishState, QBHostCommand
+} QBMacHostEvent;
+typedef int32_t (*QBMacHostCallback)(void *, QBMacHostEvent, uint32_t, const uint8_t *, size_t);
+const QBMacDashboardHost *qb_mac_dashboard_host_new(void *, QBMacHostCallback, int32_t demo);
+void qb_mac_dashboard_host_show(const QBMacDashboardHost *, const char *route);
+void qb_mac_dashboard_host_send(const QBMacDashboardHost *, const uint8_t *, size_t);
+void qb_mac_dashboard_host_changed(const QBMacDashboardHost *);
+void qb_mac_dashboard_host_close(const QBMacDashboardHost *);
+int32_t qb_mac_dashboard_host_running(const QBMacDashboardHost *);
+void qb_mac_dashboard_host_free(const QBMacDashboardHost *);
 
 QBScanner *qb_scanner_new(void);
 void qb_scanner_free(QBScanner *);

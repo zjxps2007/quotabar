@@ -59,6 +59,13 @@ def dashboard_probe():
     # carry app commands and state; the monitor executable itself is unmodified.
     wire = runpy.run_path(str(HERE / "check-dashboard.py"))
     incoming, outgoing = sys.stdin.buffer, sys.stdout.buffer
+    if stage := os.environ.get("QUOTABAR_TEST_HOST_STAGES"):
+        directory = Path(stage)
+        try:
+            return host_probe(wire, incoming, outgoing, directory)
+        except Exception:
+            (directory / "error").write_text(traceback.format_exc())
+            raise
     output = Path(os.environ["QUOTABAR_TEST_REFRESH_RESULT"])
     sample = Path(os.environ["QUOTABAR_TEST_SAMPLE"])
     checkpoints = []
@@ -166,6 +173,73 @@ def dashboard_probe():
         pass
 
 
+def host_probe(wire, incoming, outgoing, directory):
+    stage = (directory / "stage").read_text()
+    if stage == "timeout":
+        began = time.monotonic()
+        first = wire["receive"](incoming, began + 20)
+        assert first == {"close": {}} and time.monotonic() - began >= 8, first
+        write_json(directory / stage, {"firstFrame": "close"})
+        return
+    wire["send"](outgoing, {"ready": {}})
+    deadline = time.monotonic() + 10
+    first = wire["receive"](incoming, deadline)
+    state = first["state"]["_0"]
+    route = wire["wait_for"](incoming, "show")["route"]
+    previous = state.get("message")
+    if stage == "reopen":
+        assert previous == "Dashboard가 응답하지 않습니다. 다시 열어 주세요." and route == "dashboard", (previous, route)
+        wire["send"](outgoing, {"visibility": {"_0": True}})
+        wire["send"](outgoing, {"route": {"_0": "settings"}})
+        wire["send"](outgoing, {"message": {"_0": "host state barrier"}})
+        while wire["wait_for"](incoming, "state")["_0"].get("message") != "host state barrier":
+            if time.monotonic() > deadline:
+                raise TimeoutError("The store did not publish the route change")
+        wire["send"](outgoing, {"visibility": {"_0": False}})
+    else:
+        assert stage == "restore" and previous == "host state barrier" and route == "settings", (stage, previous, route)
+    write_json(directory / stage, {"firstFrame": "state", "showRoute": route, "message": previous})
+    if stage == "restore":
+        wire["send"](outgoing, {"quit": {}})
+
+
+def host_recovery(bundle, home, env):
+    directory = home / "host-stages"
+    directory.mkdir()
+    marker = directory / "stage"
+    marker.write_text("timeout")
+    log = directory / "diagnostics.jsonl"
+    with subprocess.Popen([bundle / "Contents/MacOS/QuotaBar", "--demo", "--diagnostics", log],
+                          env={**env, "QUOTABAR_TEST_HOST_STAGES": str(directory)}) as monitor:
+        try:
+            for count, stage in enumerate(("reopen", "restore"), 1):
+                deadline = time.monotonic() + 27
+                while time.monotonic() < deadline:
+                    if (directory / "error").exists():
+                        raise ValueError((directory / "error").read_text())
+                    records = [] if not log.exists() else [json.loads(line) for line in log.read_text().splitlines(keepends=True) if line.endswith("\n")]
+                    if sum(row["event"] == "dashboard-process-exited" for row in records) == count:
+                        break
+                    if monitor.poll() is not None:
+                        raise AssertionError(f"Monitor exited before {stage}")
+                    time.sleep(0.1)
+                else:
+                    raise TimeoutError(f"Timed out before {stage}: {[r['event'] for r in records]}")
+                marker.write_text(stage)
+                # Launch Services reopens the registered app just like clicking its Dock icon.
+                subprocess.run(["/usr/bin/open", "-a", str(bundle)], timeout=8, check=True)
+            deadline = time.monotonic() + 20
+            while monitor.poll() is None and time.monotonic() < deadline:
+                if (directory / "error").exists():
+                    raise ValueError((directory / "error").read_text())
+                time.sleep(0.1)
+            assert monitor.poll() == 0, "The reopened monitor did not quit"
+            return {stage: json.loads((directory / stage).read_text()) for stage in ("timeout", "reopen", "restore")}
+        finally:
+            if monitor.poll() is None:
+                monitor.kill()
+
+
 def compare(dashboard, work, reference):
     library, probe = work / "fixture-home.dylib", work / "foundation-home"
     subprocess.run(["xcrun", "clang", "-fobjc-arc", "-dynamiclib", "-framework", "Foundation",
@@ -215,7 +289,8 @@ print(URL(fileURLWithPath: CommandLine.arguments[1]).standardizedFileURL.resolvi
             assert not startup["demo"] and (startup["runningRequests"], startup["queuedRequests"]) == (3, 2), startup
             saved = json.loads((root / "settings.json").read_text())
             assert (root / "instance.lock").is_file() and [a["id"].upper() for a in saved["accounts"]] == IDS[:5]
-            results[side] = {**observed, "runningAtLaunch": 3, "queuedAtLaunch": 2, "persistedAccounts": IDS[:5]}
+            results[side] = {**observed, "runningAtLaunch": 3, "queuedAtLaunch": 2, "persistedAccounts": IDS[:5],
+                             "dashboardRecovery": host_recovery(bundle, home, env)}
         except (OSError, ValueError, AssertionError, StopIteration, subprocess.SubprocessError) as exc:
             details = json.loads(result.read_text()) if result.exists() else {}
             requests = (home / "release-requests.log").read_text().splitlines()

@@ -1,116 +1,83 @@
 import AppKit
 import Combine
 import UsageCore
+import CQuotaBar
 
-/// The persistent monitor owns every account, credential and quota request.
-/// Closing the Rust dashboard releases its rendering and local scan caches.
+/// Provides the monitor store's typed commands and snapshots to the Rust dashboard host.
 @MainActor
 final class DashboardHost {
     private let store: MonitorStore
-    private var process: NativeDashboardChild?
+    private var handle: OpaquePointer?
     private var observation: AnyCancellable?
-    private var generation = UUID()
-    private var ready = false
-    private var updatePending = false
-    private var requestedRoute: String?
-    private var startupDeadline: Task<Void, Never>?
     var onPopover: (() -> Void)?
-    var isRunning: Bool { process?.isRunning == true }
+    var isRunning: Bool { qb_mac_dashboard_host_running(handle) != 0 }
 
-    init(store: MonitorStore) { self.store = store }
+    init(store: MonitorStore) {
+        self.store = store
+        handle = qb_mac_dashboard_host_new(Unmanaged.passUnretained(self).toOpaque(), { context, event, value, bytes, length in
+            guard let context else { return -1 }
+            return MainActor.assumeIsolated {
+                Unmanaged<DashboardHost>.fromOpaque(context).takeUnretainedValue().event(event, value, bytes, length)
+            }
+        }, store.demo ? 1 : 0)
+    }
+    deinit { qb_mac_dashboard_host_free(handle) }
 
     func show(route: String?) {
-        requestedRoute = route ?? store.route
-        if isRunning {
-            if ready { process?.send(.show(route: requestedRoute)) }
-            return
-        }
-        let helperURL = Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers/QuotaBar Dashboard.app")
-        guard let executable = Bundle(url: helperURL)?.executableURL else {
+        (route ?? store.route).withCString { qb_mac_dashboard_host_show(handle, $0) }
+    }
+    func close() { qb_mac_dashboard_host_close(handle) }
+    func stop() {
+        observation = nil
+        qb_mac_dashboard_host_free(handle)
+        handle = nil
+    }
+
+    private func event(_ event: QBMacHostEvent, _ value: UInt32, _ bytes: UnsafePointer<UInt8>?, _ length: Int) -> Int32 {
+        switch event {
+        case QBHostStarted:
+            store.setDashboardRunning(true)
+            observation = store.objectWillChange.sink { [weak self] _ in qb_mac_dashboard_host_changed(self?.handle) }
+            store.diagnostic("dashboard-process-started", details: ["pid": value])
+        case QBHostExited:
+            observation = nil
+            if value != 0 { store.message = "Dashboard가 응답하지 않습니다. 다시 열어 주세요." }
+            store.setVisible(false)
+            store.setDashboardRunning(false)
+            store.diagnostic("dashboard-process-exited")
+        case QBHostMissingHelper:
             store.message = "Dashboard 실행 파일을 찾지 못했습니다. 앱을 다시 설치해 주세요."
-            return
-        }
-        let child: NativeDashboardChild
-        do { child = try NativeDashboardChild(executable: executable, demo: store.demo) }
-        catch {
+        case QBHostLaunchFailed:
             store.setDashboardRunning(false)
             store.message = "Dashboard를 열지 못했습니다. 앱을 다시 실행해 주세요."
-            return
+        case QBHostPublishState:
+            send(.state(store.dashboardState))
+        case QBHostCommand:
+            guard let bytes, let command = try? JSONDecoder().decode(DashboardCommand.self, from: Data(bytes: bytes, count: length)) else { return -1 }
+            return receive(command)
+        default: return -1
         }
-        let id = UUID(); generation = id; ready = false
-        process = child
-        store.setDashboardRunning(true)
-        child.start(onMessage: { [weak self] command in
-            DispatchQueue.main.async {
-                guard let self, self.generation == id else { return }
-                self.receive(command)
-            }
-        }, onExit: { [weak self] timedOut in
-            DispatchQueue.main.async {
-                guard let self, self.generation == id else { return }
-                if timedOut { self.store.message = "Dashboard가 응답하지 않습니다. 다시 열어 주세요." }
-                self.didExit(generation: id)
-            }
-        })
-        observation = store.objectWillChange.sink { [weak self] _ in self?.scheduleState() }
-        startupDeadline = Task { [weak self] in
-            do { try await Task.sleep(for: .seconds(10)) } catch { return }
-            guard let self, self.generation == id, !self.ready else { return }
-            self.store.message = "Dashboard가 응답하지 않습니다. 다시 열어 주세요."
-            self.close()
-        }
-        store.diagnostic("dashboard-process-started", details: ["pid": child.processIdentifier])
+        return 0
     }
 
-    func close() {
-        process?.close()
+    private func send(_ event: DashboardEvent) {
+        guard let data = try? JSONEncoder().encode(event) else { close(); return }
+        data.withUnsafeBytes { qb_mac_dashboard_host_send(handle, $0.bindMemory(to: UInt8.self).baseAddress, $0.count) }
     }
 
-    func stop() {
-        startupDeadline?.cancel(); startupDeadline = nil
-        observation = nil
-        process?.close()
-    }
-
-    private func didExit(generation id: UUID) {
-        guard generation == id else { return }
-        generation = UUID()
-        startupDeadline?.cancel(); startupDeadline = nil
-        observation = nil; process = nil
-        ready = false; updatePending = false
-        store.setVisible(false)
-        store.setDashboardRunning(false)
-        store.diagnostic("dashboard-process-exited")
-    }
-
-    private func scheduleState() {
-        guard ready, !updatePending else { return }
-        updatePending = true
-        DispatchQueue.main.async { [weak self] in
-            guard let self else { return }
-            self.updatePending = false
-            if self.ready { self.sendState() }
-        }
-    }
-
-    private func sendState() { process?.send(.state(store.dashboardState)) }
-
-    private func receive(_ command: DashboardCommand) {
+    private func receive(_ command: DashboardCommand) -> Int32 {
         func account(_ id: UUID) -> MonitoredAccount? { store.accounts.first { $0.id == id } }
         func reply(_ id: UUID, operation: () throws -> Void) {
             do {
                 try operation()
-                sendState()
-                process?.send(.reply(id: id, error: nil))
+                send(.state(store.dashboardState))
+                send(.reply(id: id, error: nil))
             } catch {
-                process?.send(.reply(id: id, error: (error as? ProviderError)?.message ?? error.localizedDescription))
+                send(.reply(id: id, error: (error as? ProviderError)?.message ?? error.localizedDescription))
             }
         }
         switch command {
-        case .ready:
-            startupDeadline?.cancel(); startupDeadline = nil
-            process?.ready()
-            ready = true; sendState(); process?.send(.show(route: requestedRoute))
+        case .ready: return 1
         case .visibility(let visible): store.setVisible(visible)
         case .route(let route):
             if ["dashboard", "accounts", "settings"].contains(route) { store.route = route }
@@ -146,5 +113,6 @@ final class DashboardHost {
         case .quit: NSApp.terminate(nil)
         case .showPopover: onPopover?()
         }
+        return 0
     }
 }

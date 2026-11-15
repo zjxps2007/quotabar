@@ -312,8 +312,8 @@ impl Dashboard {
                 p.accent,
             ),
         ];
-        ui.horizontal_top(|ui| {
-            let w = (ui.available_width() - 36.) / 4.;
+        let w = (ui.available_width() - 36.) / 4.;
+        let tiles = |ui: &mut Ui| {
             ui.spacing_mut().item_spacing.x = 12.;
             let card = p.frame(20);
             let content_width = (w - card.total_margin().sum().x).max(1.);
@@ -356,7 +356,7 @@ impl Dashboard {
                             } else {
                                 10.
                             };
-                            if crate::mac_text::system_label(ui, &sub, size, false, p.tertiary)
+                            if crate::mac_text::stacked_label(ui, &sub, size, false, p.tertiary)
                                 .is_none()
                             {
                                 ui.add(Label::new(rich(sub, size, false, p.tertiary)).truncate());
@@ -367,7 +367,17 @@ impl Dashboard {
                     })
                 });
             }
-        });
+        };
+        #[cfg(target_os = "macos")]
+        Grid::new("dashboard-statistics")
+            .num_columns(4)
+            .spacing(vec2(12., 0.))
+            .min_col_width(w)
+            .max_col_width(w)
+            .min_row_height(0.)
+            .show(ui, tiles);
+        #[cfg(windows)]
+        ui.horizontal_top(tiles);
         ui.add_space(24.);
         if self.state.accounts.is_empty() {
             p.frame(20).show(ui, |ui| {
@@ -509,13 +519,13 @@ impl Dashboard {
                 ui.horizontal(|ui| {
                     system_label(ui, text(w, "title", ""), 11., false, p.muted);
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        label(
-                            ui,
-                            format!("{percent}% 남음"),
-                            11.,
-                            true,
-                            if n <= 20. { p.warning } else { p.ink },
-                        );
+                        let percent = format!("{percent}% 남음");
+                        let color = if n <= 20. { p.warning } else { p.ink };
+                        #[cfg(target_os = "macos")]
+                        if crate::mac_text::quota_percent(ui, &percent, color).is_some() {
+                            return;
+                        }
+                        label(ui, percent, 11., true, color);
                     });
                 });
                 ui.add_space(if MAC { 6. } else { 7. });
@@ -673,9 +683,16 @@ impl Dashboard {
     }
 }
 pub fn section_title(ui: &mut Ui, title: &str, subtitle: &str, p: Palette) {
-    system_label(ui, title, 15., true, p.ink);
+    let line = |ui: &mut Ui, text: &str, size, heavy, color| {
+        #[cfg(target_os = "macos")]
+        if crate::mac_text::stacked_label(ui, text, size, heavy, color).is_some() {
+            return;
+        }
+        system_label(ui, text, size, heavy, color);
+    };
+    line(ui, title, 15., true, p.ink);
     ui.add_space(4.);
-    system_label(ui, subtitle, if MAC { 10. } else { 11. }, false, p.muted);
+    line(ui, subtitle, if MAC { 10. } else { 11. }, false, p.muted);
 }
 pub fn columns(width: f32, min: f32, gap: f32) -> usize {
     ((width + gap) / (min + gap)).floor().max(1.) as usize

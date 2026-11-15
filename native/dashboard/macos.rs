@@ -1,3 +1,5 @@
+pub mod host;
+
 use crate::dashboard::{read_frame, write_frame};
 use std::{
     io,

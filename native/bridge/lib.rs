@@ -3,7 +3,7 @@
 mod claude;
 mod codex_sessions;
 mod credentials;
-#[cfg(any(windows, target_os = "macos"))]
+#[cfg(windows)]
 mod dashboard;
 mod frames;
 #[cfg(windows)]
@@ -11,6 +11,8 @@ mod instance;
 mod login_item;
 #[cfg(any(target_os = "macos", feature = "mac-settings-compat"))]
 mod mac_claude;
+#[cfg(target_os = "macos")]
+mod mac_dashboard;
 #[cfg(target_os = "macos")]
 mod mac_login;
 #[cfg(target_os = "macos")]
