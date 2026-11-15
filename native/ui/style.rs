@@ -655,6 +655,14 @@ pub fn action_on(ui: &mut Ui, s: &str, primary: bool, p: Palette, backdrop: Colo
     })
     .on_hover_cursor(CursorIcon::PointingHand)
 }
+pub fn sheet_button(ui: &mut Ui, title: &str, p: Palette) -> Response {
+    #[cfg(target_os = "macos")]
+    if let Some(response) = crate::mac::standard_button(ui, title, p.focus_ring) {
+        return response;
+    }
+    action(ui, title, false, p)
+}
+
 pub fn action(ui: &mut Ui, s: &str, primary: bool, p: Palette) -> Response {
     action_on(ui, s, primary, p, p.card)
 }

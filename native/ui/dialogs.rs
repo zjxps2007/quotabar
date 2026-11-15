@@ -651,7 +651,7 @@ impl Dashboard {
                             let field =
                                 mac_field(ui, &mut c.path, "경로", "connect-path", width, p);
                             crate::accessibility::text_value(ui, field, &mut c.path, "경로");
-                            action(ui, title, false, p).clicked()
+                            sheet_button(ui, title, p).clicked()
                         })
                         .inner
                     }
@@ -750,7 +750,7 @@ impl Dashboard {
                         })
                         .inner
                         .clicked();
-                    close = action(ui, "취소", false, p).clicked();
+                    close = sheet_button(ui, "취소", p).clicked();
                     submit
                 },
             )

@@ -25,6 +25,23 @@ use std::{
     time::{Duration, Instant},
 };
 
+mod buttons;
+pub use buttons::standard_button;
+
+fn bitmap_rep(
+    width: isize,
+    height: isize,
+) -> Option<objc2::rc::Retained<objc2_app_kit::NSBitmapImageRep>> {
+    use objc2::AnyThread;
+    use objc2_app_kit::{NSBitmapImageRep, NSDeviceRGBColorSpace};
+    unsafe {
+        NSBitmapImageRep::initWithBitmapDataPlanes_pixelsWide_pixelsHigh_bitsPerSample_samplesPerPixel_hasAlpha_isPlanar_colorSpaceName_bytesPerRow_bitsPerPixel(
+            NSBitmapImageRep::alloc(), std::ptr::null_mut(), width, height, 8, 4, true,
+            false, NSDeviceRGBColorSpace, 0, 0,
+        )
+    }
+}
+
 fn bitmap_pixels(rep: &objc2_app_kit::NSBitmapImageRep) -> Option<image::RgbaImage> {
     use objc2_app_kit::NSBitmapImageFileType;
     use objc2_foundation::NSDictionary;
@@ -59,10 +76,7 @@ pub fn provider_logo(
     points: f32,
 ) -> Option<eframe::egui::TextureHandle> {
     use eframe::egui::{ColorImage, Id, TextureHandle, TextureOptions};
-    use objc2::AnyThread;
-    use objc2_app_kit::{
-        NSBitmapImageRep, NSDeviceRGBColorSpace, NSGraphicsContext, NSImageInterpolation,
-    };
+    use objc2_app_kit::{NSGraphicsContext, NSImageInterpolation};
     use objc2_foundation::{NSPoint, NSRect, NSSize};
 
     let pixels = (points * ctx.pixels_per_point()).round().max(1.) as isize;
@@ -74,12 +88,7 @@ pub fn provider_logo(
     let source = quotabar::mac_menu::provider_image(provider, side)?;
     // Allocate the destination at backing resolution. AppKit then selects the
     // source representation and performs SwiftUI BrandIcon's high-quality resize.
-    let bitmap = unsafe {
-        NSBitmapImageRep::initWithBitmapDataPlanes_pixelsWide_pixelsHigh_bitsPerSample_samplesPerPixel_hasAlpha_isPlanar_colorSpaceName_bytesPerRow_bitsPerPixel(
-            NSBitmapImageRep::alloc(), std::ptr::null_mut(), pixels, pixels, 8, 4, true,
-            false, NSDeviceRGBColorSpace, 0, 0,
-        )
-    }?;
+    let bitmap = bitmap_rep(pixels, pixels)?;
     let graphics = NSGraphicsContext::graphicsContextWithBitmapImageRep(&bitmap)?;
     NSGraphicsContext::saveGraphicsState_class();
     NSGraphicsContext::setCurrentContext(Some(&graphics));
