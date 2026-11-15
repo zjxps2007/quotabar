@@ -157,10 +157,12 @@ impl Dashboard {
             ui.horizontal_top(|ui| {
                 let width = cell_width(ui.available_width(), cols, 16.);
                 ui.spacing_mut().item_spacing.x = 16.;
+                let card = p.frame(16);
+                let content_width = width - card.total_margin().sum().x;
                 for &pr in chunk {
-                    p.frame(16).show(ui, |ui| {
+                    card.show(ui, |ui| {
                         ui.vertical(|ui| {
-                            ui.set_width(width - 34.);
+                            ui.set_width(content_width);
                             self.activity_card(ui, pr, p);
                         })
                     });

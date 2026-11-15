@@ -243,7 +243,13 @@ impl Palette {
             .fill(self.card)
             .stroke(Stroke::new(1.0_f32, self.line))
             .corner_radius(16)
-            .inner_margin(pad)
+            // SwiftUI's card border overlays the padded content. egui includes
+            // its stroke in the space allocated around that content.
+            .inner_margin(if cfg!(target_os = "macos") {
+                pad - 1
+            } else {
+                pad
+            })
     }
 }
 #[cfg(target_os = "macos")]

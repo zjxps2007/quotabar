@@ -269,9 +269,13 @@ pub fn natural_size(ui: &Ui, text: &str, size: f32, heavy: bool) -> Option<Vec2>
 pub fn system_line_height(ui: &Ui, size: f64) -> f32 {
     // The control reserves its system font's line box even if every glyph
     // comes from a shorter fallback face, e.g. an all-Hangul button title.
-    let font = NSFont::systemFontOfSize(size);
     let scale = f64::from(ui.ctx().pixels_per_point());
-    (((font.ascender() - font.descender() + font.leading()) * scale).ceil() / scale) as f32
+    ((font_line_height(size) * scale).ceil() / scale) as f32
+}
+
+fn font_line_height(size: f64) -> f64 {
+    let font = NSFont::systemFontOfSize(size);
+    font.ascender() - font.descender() + font.leading()
 }
 
 pub fn label(ui: &mut Ui, text: &str, size: f32, heavy: bool, color: Color32) -> Option<Response> {
@@ -285,7 +289,10 @@ pub fn system_label(
     heavy: bool,
     color: Color32,
 ) -> Option<Response> {
-    let line_height = system_line_height(ui, f64::from(size));
+    // A text line rounds its total extent once. A button reserves the next
+    // full device pixel for its alignment box in system_line_height.
+    let scale = f64::from(ui.ctx().pixels_per_point());
+    let line_height = ((font_line_height(f64::from(size)) * scale).round() / scale) as f32;
     draw_label(ui, text, size, Face::label(heavy), color, line_height)
 }
 

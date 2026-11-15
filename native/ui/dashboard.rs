@@ -182,13 +182,15 @@ impl Dashboard {
                     ui.set_width(ui.available_width());
                     let note = "미리보기 · 샘플 데이터입니다. 실제 계정이나 로그인 파일에 접근하지 않습니다.";
                     #[cfg(target_os = "macos")]
-                    ui.horizontal(|ui| {
+                    {
                         ui.spacing_mut().interact_size.y = 0.;
-                        ui.spacing_mut().item_spacing.x = 7.;
-                        let (icon, _) = ui.allocate_exact_size(vec2(16., 12.), Sense::hover());
-                        crate::mac::symbol(ui.painter(), icon, "eye", 10., false, p.muted);
-                        system_label(ui, note, 10., false, p.muted);
-                    });
+                        ui.horizontal(|ui| {
+                            ui.spacing_mut().item_spacing.x = 7.;
+                            let (icon, _) = ui.allocate_exact_size(vec2(16., 12.), Sense::hover());
+                            crate::mac::symbol(ui.painter(), icon, "eye", 10., false, p.muted);
+                            system_label(ui, note, 10., false, p.muted);
+                        });
+                    }
                     #[cfg(windows)]
                     caption(ui, note, p);
                 });
@@ -308,10 +310,12 @@ impl Dashboard {
         ui.horizontal_top(|ui| {
             let w = (ui.available_width() - 36.) / 4.;
             ui.spacing_mut().item_spacing.x = 12.;
+            let card = p.frame(20);
+            let content_width = (w - card.total_margin().sum().x).max(1.);
             for (title, value, sub, symbol, color) in stats {
-                p.frame(20).show(ui, |ui| {
+                card.show(ui, |ui| {
                     ui.vertical(|ui| {
-                        ui.set_width((w - 42.).max(1.));
+                        ui.set_width(content_width);
                         ui.spacing_mut().interact_size.y = 0.;
                         ui.horizontal(|ui| {
                             caption(ui, title, p);
@@ -406,10 +410,12 @@ impl Dashboard {
             ui.horizontal_top(|ui| {
                 let w = cell_width(ui.available_width(), columns, 14.);
                 ui.spacing_mut().item_spacing.x = 14.;
+                let card = p.frame(20);
+                let content_width = (w - card.total_margin().sum().x).max(1.);
                 for a in chunk {
-                    p.frame(20).show(ui, |ui| {
+                    card.show(ui, |ui| {
                         ui.vertical(|ui| {
-                            ui.set_width((w - 42.).max(1.));
+                            ui.set_width(content_width);
                             self.quota_card(ui, p, a);
                         })
                     });
