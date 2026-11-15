@@ -151,14 +151,30 @@ impl Dashboard {
         if let Some(msg) = status {
             p.frame(20).show(ui, |ui| {
                 ui.set_width(ui.available_width());
+                #[cfg(target_os = "macos")]
+                ui.horizontal(|ui| {
+                    let symbol = if self.state.flag("scanLocalLogs", "scanLocalLogs") {
+                        "clock"
+                    } else {
+                        "pause.circle"
+                    };
+                    crate::mac::intrinsic_symbol(ui, symbol, 13., false, p.muted);
+                    system_label(ui, msg, 13., false, p.muted);
+                });
+                #[cfg(not(target_os = "macos"))]
                 caption(ui, msg, p);
             });
             return;
         }
         let cols = columns(ui.available_width(), 300., 16.);
-        for chunk in providers.chunks(cols) {
+        for (row, chunk) in providers.chunks(cols).enumerate() {
+            if row > 0 {
+                ui.add_space(16.);
+            }
             ui.horizontal_top(|ui| {
                 let width = cell_width(ui.available_width(), cols, 16.);
+                #[cfg(target_os = "macos")]
+                let width = width.min(560.);
                 ui.spacing_mut().item_spacing.x = 16.;
                 let card = p.frame(16).corner_radius(if MAC { 18 } else { 16 });
                 let content_width = width - card.total_margin().sum().x;
@@ -171,20 +187,23 @@ impl Dashboard {
                     });
                 }
             });
-            ui.add_space(if MAC { 24. } else { 16. });
         }
+        ui.add_space(if MAC { 24. } else { 16. });
         for w in list(&self.state.report["warnings"]) {
             if let Some(msg) = w.as_str() {
                 label(ui, msg, 11., false, p.warning);
             }
         }
-        caption(
-            ui,
-            "토큰은 계정별 할당이 아닌 기기 전체 기록입니다. 구독 요금이나 API 청구 금액으로 환산하지 않습니다.",
-            p,
-        );
+        const NOTE: &str = "토큰은 계정별 할당이 아닌 기기 전체 기록입니다. 구독 요금이나 API 청구 금액으로 환산하지 않습니다.";
+        #[cfg(target_os = "macos")]
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 5.;
+            crate::mac::intrinsic_symbol(ui, "info.circle", 10., false, p.muted);
+            system_label(ui, NOTE, 10., false, p.muted);
+        });
         #[cfg(windows)]
         {
+            caption(ui, NOTE, p);
             ui.add_space(6.);
             let at = local_date(&self.state.report["scannedAt"])
                 .map(crate::platform::month_day_time)
@@ -214,15 +233,37 @@ impl Dashboard {
             |ui| {
                 ui.spacing_mut().item_spacing.x = if MAC { 6. } else { 10. };
                 self.assets.logo(ui, provider, 26.);
-                label(ui, provider, 13., true, tint);
+                system_label(ui, provider, if MAC { 11. } else { 13. }, true, tint);
             },
         );
         let cal = Calendar::new(&self.state.report, provider);
         let active = cal.totals.values().filter(|n| **n > 0).count();
         if active == 0 {
-            ui.add_space(24.);
-            label(ui, "아직 사용 기록이 없습니다", 13., true, p.ink);
-            caption(ui, "로컬 로그가 확인되면 일별 토큰이 표시됩니다.", p);
+            #[cfg(target_os = "macos")]
+            {
+                ui.add_space(32.);
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 10.;
+                    crate::mac::intrinsic_symbol(ui, "square.grid.3x3", 15., false, p.muted);
+                    ui.vertical(|ui| {
+                        system_label(ui, "아직 사용 기록이 없습니다", 11., true, p.ink);
+                        ui.add_space(2.);
+                        system_label(
+                            ui,
+                            "로컬 로그가 확인되면 일별 토큰이 표시됩니다.",
+                            10.,
+                            false,
+                            p.muted,
+                        );
+                    });
+                });
+            }
+            #[cfg(windows)]
+            {
+                ui.add_space(24.);
+                label(ui, "아직 사용 기록이 없습니다", 13., true, p.ink);
+                caption(ui, "로컬 로그가 확인되면 일별 토큰이 표시됩니다.", p);
+            }
             ui.add_space(24.);
             return;
         }
@@ -278,14 +319,10 @@ impl Dashboard {
                     }
                 {
                     ui.painter().text(
-                        pos2(rect.min.x, y + if MAC { 0. } else { side / 2. }),
-                        if MAC {
-                            Align2::LEFT_TOP
-                        } else {
-                            Align2::LEFT_CENTER
-                        },
+                        pos2(rect.min.x, y + side / 2.),
+                        Align2::LEFT_CENTER,
                         s,
-                        FontId::proportional(9.),
+                        FontId::proportional(if MAC && side < 9. { 8. } else { 9. }),
                         p.muted,
                     );
                 }
@@ -315,7 +352,7 @@ impl Dashboard {
                     p.track
                 };
                 let border = if date == cal.today {
-                    Stroke::new(1_f32, tint)
+                    Stroke::new(if MAC { 1.2_f32 } else { 1. }, tint)
                 } else {
                     Stroke::NONE
                 };
@@ -335,7 +372,7 @@ impl Dashboard {
                     }
                     if border != Stroke::NONE {
                         ui.painter()
-                            .rect_stroke(cell, radius, border, StrokeKind::Inside);
+                            .rect_stroke(cell, radius, border, StrokeKind::Middle);
                     }
                 }
                 let accessible = !MAC || n > 0 || date == cal.today;
@@ -437,9 +474,9 @@ impl Dashboard {
             if MAC {
                 ui.horizontal_wrapped(|ui| {
                     ui.spacing_mut().item_spacing.x = 6.;
-                    label(ui, summary, 11., true, p.ink);
+                    system_label(ui, &summary, 10., true, p.ink);
                     label(ui, "·", 10., false, p.muted);
-                    label(ui, peak, 10., false, p.muted);
+                    system_label(ui, &peak, 10., false, p.muted);
                 });
                 return;
             }

@@ -5,6 +5,7 @@ from pathlib import Path
 import shutil
 import select
 from copy import deepcopy
+from datetime import datetime, timedelta
 import subprocess
 import time
 from uuid import UUID
@@ -241,6 +242,35 @@ def build_driver(work):
     return library
 
 
+def activity_fixtures(fixture):
+    empty = deepcopy(fixture)
+    empty["settings"]["accounts"] = []
+    empty["snapshots"] = []
+    yield "empty", empty
+
+    state = deepcopy(empty)
+    for i in range(6):
+        provider = ("codex", "claude")[i % 2]
+        key = str(UUID(int=i + 1))
+        state["settings"]["accounts"].append({
+            **fixture["settings"]["accounts"][0], "id": key, "provider": provider,
+            "name": f"{provider.title()} {i + 1}", "identity": key,
+        })
+        state["snapshots"].extend([key, fixture["snapshots"][1]])
+    yield "activity-empty", state
+
+    state = deepcopy(state)
+    report = state["demoReport"]
+    today = datetime.fromtimestamp(report["scannedAt"] + 978307200).date()
+    report["scannedFiles"] = 6
+    for provider, amounts in (("claude", (100, 220, 240)), ("codex", (240, 270, 300))):
+        for days_ago, total in zip((57, 23, 1), amounts):
+            report["days"].append({"day": (today - timedelta(days=days_ago)).isoformat(),
+                                   "provider": provider, "model": f"{provider}-fixture",
+                                   "counts": {"input": total - 20, "cached": 10, "output": 20}})
+    yield "activity", state
+
+
 def capture_windows(dashboard, program, folder, library, fixture, output, theme, pixel_reader):
     folder.mkdir()
     env = {**os.environ, **dashboard.fixture_environment(), "DYLD_INSERT_LIBRARIES": str(library),
@@ -318,7 +348,7 @@ def capture_windows(dashboard, program, folder, library, fixture, output, theme,
             except (OSError, ValueError, subprocess.SubprocessError) as error:
                 observed["settingsScrollerError"] = str(error)
             for _ in range(3):
-                controls.request("scrollSettings")
+                controls.request("scrollContent")
                 time.sleep(0.30)
             try:
                 positions.append(controls.request("scrollerPosition", expected={"position": "bottom"})["position"])
@@ -351,6 +381,21 @@ def capture_windows(dashboard, program, folder, library, fixture, output, theme,
             controls.request("documentEscape")
             controls.request("sheet", expected={"sheet": False})
             observed["licenseEscapeClosed"] = True
+            for scene, state in activity_fixtures(fixture):
+                if scene != "empty":
+                    show("accounts")
+                dashboard.send(app.stdin, {"state": {"_0": state}})
+                show("dashboard")
+                if scene != "empty":
+                    time.sleep(0.35)
+                    for _ in range(3):
+                        controls.request("scrollContent")
+                        time.sleep(0.30)
+                capture(scene)
+                if scene != "empty":
+                    observed[scene + "Scroll"] = controls.request("scrollerPosition")["position"]
+                if scene == "activity" and "error" not in observed[scene]:
+                    observed["activityTotals"] = controls.request("activityTotals")
         except (OSError, ValueError, KeyError, RuntimeError, EOFError, subprocess.SubprocessError) as error:
             observed["error"] = str(error)
         finally:
@@ -375,7 +420,7 @@ def compare_windows(dashboard, work, original, library):
                                                   library, fixture, output, theme, original)
     for theme in dashboard.THEMES:
         for route in (*dashboard.ROUTES, "remove", "popover-sample", "popover-empty", "popover-overflow",
-                      "settings-bottom", "licenses-notice", "licenses-apache"):
+                      "settings-bottom", "licenses-notice", "licenses-apache", "empty", "activity-empty", "activity"):
             name = f"{route}-{theme}"
             lhs, rhs = (dest / side / f"{name}.png" for side in ("original", "rust"))
             if not lhs.is_file() or not rhs.is_file():
@@ -401,7 +446,11 @@ def compare_windows(dashboard, work, original, library):
     scroll_matches = all(results[side][theme].get("settingsScroller") == ["top", "middle", "bottom"]
                          and results[side][theme].get("settingsPageChangedPixels", 0) > 1000
                          for side in ("original", "rust") for theme in dashboard.THEMES)
-    return documents_match and scroll_matches and all(row["identical"] for row in results["comparisons"].values())
+    activity_matches = all(results[side][theme].get("activityScroll") == "bottom"
+                           and results[side][theme].get("activity-emptyScroll") == "bottom"
+                           and results[side][theme].get("activityTotals") == {"claude": True, "codex": True}
+                           for side in ("original", "rust") for theme in dashboard.THEMES)
+    return documents_match and scroll_matches and activity_matches and all(row["identical"] for row in results["comparisons"].values())
 
 
 def compare(dashboard, work, original, fixture, library):

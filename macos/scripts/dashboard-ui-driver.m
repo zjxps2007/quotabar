@@ -303,7 +303,7 @@ static BOOL clickControl(NSWindow *window, NSString *label) {
     return YES;
 }
 
-static NSDictionary *scrollSettings(NSWindow *window) {
+static NSDictionary *scrollContent(NSWindow *window) {
     NSView *view = window.contentView;
     NSPoint local = NSMakePoint(NSMidX(view.bounds), NSMidY(view.bounds));
     NSPoint point = [view convertPoint:local toView:nil];
@@ -359,10 +359,14 @@ static NSDictionary *settingsScroller(NSWindow *window, BOOL page) {
 
 // Read the actual composited sheet. Picker titles alone cannot prove that the
 // body changed, and SwiftUI's text-selection view does not always expose it to AX.
-static NSDictionary *visibleDocument(NSURL *frame) {
+static NSDictionary *visibleText(NSURL *frame, BOOL activity) {
     VNRecognizeTextRequest *request = [VNRecognizeTextRequest new];
     request.recognitionLanguages = @[@"en-US"];
     request.recognitionLevel = VNRequestTextRecognitionLevelAccurate;
+    if (activity) {
+        request.minimumTextHeight = 0.006;
+        request.usesLanguageCorrection = NO;
+    }
     VNImageRequestHandler *reader = [[VNImageRequestHandler alloc] initWithURL:frame options:@{}];
     NSError *error = nil;
     if (![reader performRequests:@[request] error:&error]) return @{@"error": error.localizedDescription};
@@ -373,6 +377,11 @@ static NSDictionary *visibleDocument(NSURL *frame) {
     }
     NSString *letters = [[body componentsSeparatedByCharactersInSet:NSCharacterSet.alphanumericCharacterSet.invertedSet]
                          componentsJoinedByString:@""];
+    if (activity) {
+        BOOL claude = [letters containsString:@"560tokens"], codex = [letters containsString:@"810tokens"];
+        if (claude && codex) return @{@"claude": @YES, @"codex": @YES};
+        return @{@"claude": @(claude), @"codex": @(codex), @"recognized": body};
+    }
     if ([letters containsString:@"copyright2026quotabar"] || [letters containsString:@"previouslydistributedas"])
         return @{@"document": @"NOTICE"};
     if ([letters containsString:@"version20january2004"] || [letters containsString:@"termsandconditionsforuse"])
@@ -384,12 +393,12 @@ static NSDictionary *perform(NSDictionary *request) {
     NSWindow *window = dashboardWindow();
     if (!window) return @{@"pending": @"dashboard window"};
     NSString *op = request[@"op"], *label = request[@"label"];
-    if ([op isEqual:@"scrollSettings"]) return scrollSettings(window);
+    if ([op isEqual:@"scrollContent"]) return scrollContent(window);
     if ([op isEqual:@"scrollerPosition"] || [op isEqual:@"pageSettings"])
         return settingsScroller(window, [op isEqual:@"pageSettings"]);
-    if ([op isEqual:@"document"]) {
+    if ([op isEqual:@"document"] || [op isEqual:@"activityTotals"]) {
         NSURL *dir = [NSURL fileURLWithFileSystemRepresentation:getenv("QUOTABAR_TEST_UI_DIRECTORY") isDirectory:YES relativeToURL:nil];
-        return visibleDocument([dir URLByAppendingPathComponent:@"frame.png"]);
+        return visibleText([dir URLByAppendingPathComponent:@"frame.png"], [op isEqual:@"activityTotals"]);
     }
     if ([op isEqual:@"size"]) {
         [window setContentSize:NSMakeSize(1120, 810)];
