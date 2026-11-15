@@ -7,6 +7,8 @@ $probe = [Diagnostics.ProcessStartInfo]::new($exe)
 $probe.UseShellExecute = $false
 $probe.CreateNoWindow = $true
 $probe.Arguments = '--probe "' + $result + '"'
+$uiError = Join-Path ([IO.Path]::GetTempPath()) ("quotabar-probe-" + [guid]::NewGuid() + ".log")
+$probe.Environment['QUOTABAR_PROBE_UI_ERROR'] = $uiError
 [void]$probe.Environment.Remove('DOTNET_ROOT')
 [void]$probe.Environment.Remove('DOTNET_ROOT_X64')
 [void]$probe.Environment.Remove('DOTNET_ROOT(x86)')
@@ -14,6 +16,10 @@ $process = [Diagnostics.Process]::Start($probe)
 if (-not $process.WaitForExit(30000)) { $process.Kill(); throw 'Packaged UI probe timed out.' }
 if ($process.ExitCode -ne 0) { throw 'Packaged app failed.' }
 $data = Get-Content -LiteralPath $result -Raw | ConvertFrom-Json
+if ([IO.File]::Exists($uiError)) {
+    try { throw ("Packaged Dashboard failed: " + [IO.File]::ReadAllText($uiError)) }
+    finally { [IO.File]::Delete($uiError) }
+}
 if (-not $data.passed -or $data.monitorPid -ne $process.Id -or $data.dashboardRunning -or $data.wpfLoadedInMonitor -or $data.windowsFormsLoadedInMonitor -ne $false) { throw "Packaged probe failed: $($data | ConvertTo-Json -Compress)" }
 $runtime = Get-Content -LiteralPath (Join-Path $ApplicationDirectory 'QuotaBar.Monitor.runtimeconfig.json') -Raw | ConvertFrom-Json
 $frameworks = @($runtime.runtimeOptions.includedFrameworks | ForEach-Object name)

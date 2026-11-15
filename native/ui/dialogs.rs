@@ -9,6 +9,63 @@ use serde_json::Value;
 use serde_json::json;
 use std::time::{Duration, Instant};
 
+#[cfg(target_os = "macos")]
+fn mac_field(
+    ui: &mut Ui,
+    text: &mut String,
+    hint: &str,
+    id: &str,
+    width: f32,
+    p: Palette,
+) -> Response {
+    use objc2_app_kit::{NSColor, NSColorSpace};
+    let system_color = |value: &NSColor, fallback: Color32| {
+        let Some(c) = value.colorUsingColorSpace(&NSColorSpace::sRGBColorSpace()) else {
+            return fallback;
+        };
+        let byte = |n: f64| (n.clamp(0., 1.) * 255.).round() as u8;
+        Color32::from_rgba_unmultiplied(
+            byte(c.redComponent()),
+            byte(c.greenComponent()),
+            byte(c.blueComponent()),
+            byte(c.alphaComponent()),
+        )
+    };
+    let placeholder = system_color(&NSColor::placeholderTextColor(), p.muted);
+    let background = ui.painter().add(Shape::Noop);
+    let field = ui.add(
+        TextEdit::singleline(text)
+            .id(Id::new(id))
+            .hint_text(rich(hint, 13., false, placeholder))
+            .font(FontId::proportional(13.))
+            .frame(false)
+            .margin(Margin::symmetric(10, 0))
+            .vertical_align(Align::Center)
+            .min_size(vec2(0., 22.))
+            .desired_width((width - 20.).max(0.)),
+    );
+    ui.painter().set(
+        background,
+        epaint::RectShape::new(
+            field.rect,
+            6.,
+            p.card,
+            Stroke::new(1.0_f32, p.line),
+            StrokeKind::Inside,
+        ),
+    );
+    if field.has_focus() {
+        let ring = system_color(&NSColor::keyboardFocusIndicatorColor(), p.ink);
+        ui.painter().rect_stroke(
+            field.rect.expand(1.),
+            6.,
+            Stroke::new(3.0_f32, ring),
+            StrokeKind::Middle,
+        );
+    }
+    field
+}
+
 fn full_button(ui: &mut Ui, title: &str, primary: bool, p: Palette) -> bool {
     let fill = if primary { p.accent } else { p.card };
     let ink = if primary { p.on } else { p.ink };
@@ -451,9 +508,15 @@ impl Dashboard {
         if MAC {
             let dismissed = ui
                 .horizontal(|ui| {
-                    label(ui, title, 20., true, p.ink);
+                    label(ui, title, 17., true, p.ink);
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        link(ui, "×", p, p.card).on_hover_text("닫기").clicked()
+                        let (_rect, mut close) =
+                            ui.allocate_exact_size(vec2(16., 16.), Sense::click());
+                        #[cfg(target_os = "macos")]
+                        crate::mac::symbol(ui.painter(), _rect, "xmark", 13., false, p.ink);
+                        button_pressed(ui, &mut close);
+                        close.widget_info(|| WidgetInfo::labeled(WidgetType::Button, true, "닫기"));
+                        close.on_hover_text("닫기").clicked()
                     })
                     .inner
                 })
@@ -474,7 +537,7 @@ impl Dashboard {
             } else {
                 "CLI에 로그인한 계정을 가져와 모니터링합니다."
             },
-            12.,
+            if MAC { 13. } else { 12. },
             false,
             p.muted,
         );
@@ -521,6 +584,10 @@ impl Dashboard {
             c.path = self.state.defaults(c.provider);
             c.consent = false;
             c.error = None;
+            #[cfg(target_os = "macos")]
+            {
+                c.focus_alias = !ui.memory(|m| m.has_focus(Id::new("connect-path")));
+            }
         }
         ui.add_space(20.);
         if MAC && c.provider == "Codex" && c.replacing.is_none() {
@@ -544,16 +611,22 @@ impl Dashboard {
             });
             ui.add_space(20.);
         }
-        if MAC {
+        #[cfg(target_os = "macos")]
+        {
             label(ui, "계정 이름", 11., true, p.ink);
             ui.add_space(8.);
-            let field = ui.add_enabled(
-                !locked,
-                TextEdit::singleline(&mut c.alias)
-                    .desired_width(f32::INFINITY)
-                    .hint_text("예: 개인 계정, 연구실"),
-            );
-            #[cfg(target_os = "macos")]
+            let field = ui
+                .add_enabled_ui(!locked, |ui| {
+                    mac_field(
+                        ui,
+                        &mut c.alias,
+                        "예: 개인 계정, 연구실",
+                        "connect-alias",
+                        ui.available_width(),
+                        p,
+                    )
+                })
+                .inner;
             if std::mem::take(&mut c.focus_alias) {
                 field.request_focus();
             }
@@ -604,19 +677,24 @@ impl Dashboard {
             ui.add_space(if MAC { 8. } else { 7. });
             let browse = ui
                 .add_enabled_ui(!locked, |ui| {
-                    if MAC {
+                    #[cfg(target_os = "macos")]
+                    {
                         ui.horizontal(|ui| {
-                            let width = (ui.available_width() - 92.).max(40.);
-                            let field = ui.add(
-                                TextEdit::singleline(&mut c.path)
-                                    .desired_width(width)
-                                    .hint_text("경로"),
-                            );
+                            let title = "찾아보기…";
+                            let button_width = crate::mac_text::natural_size(ui, title, 13., false)
+                                .map_or(73., |size| size.x.ceil() + 16.);
+                            let width =
+                                (ui.available_width() - button_width - ui.spacing().item_spacing.x)
+                                    .max(40.);
+                            let field =
+                                mac_field(ui, &mut c.path, "경로", "connect-path", width, p);
                             crate::accessibility::text_value(ui, field, &mut c.path, "경로");
-                            action(ui, "찾아보기…", false, p).clicked()
+                            action(ui, title, false, p).clicked()
                         })
                         .inner
-                    } else {
+                    }
+                    #[cfg(windows)]
+                    {
                         let editor = TextEdit::singleline(&mut c.path)
                             .desired_width(f32::INFINITY)
                             .font(FontId::proportional(13.))
@@ -750,7 +828,9 @@ impl Connect {
                 ui.set_width(ui.available_width());
                 ui.spacing_mut().item_spacing.y = 10.;
                 let note = |ui: &mut Ui, text: &str, color: Color32| {
-                    ui.label(rich(text, 12., false, color).line_height(Some(18.)));
+                    if crate::mac_text::paragraph(ui, text, 12., 3., color).is_none() {
+                        ui.label(rich(text, 12., false, color).line_height(Some(18.)));
+                    }
                 };
                 if browser {
                     note(ui, "ChatGPT 계정으로 로그인하세요. 인증 정보는 이 Mac의 사용자 전용 파일에 저장하고, 만료 시 자동 갱신합니다.", p.ink);
@@ -774,8 +854,9 @@ impl Connect {
                 } else {
                     note(ui, "로그인은 이 Mac의 사용자 전용 파일에 저장합니다. 파일 연결은 CLI가 갱신한 인증을 읽습니다. Codex 자동 갱신은 브라우저 로그인에서 사용할 수 있습니다.", p.ink);
                     if self.provider == "Gemini" {
-                        note(ui, "Code Assist Standard · Enterprise 전용. 개인용 Google 로그인은 2026년 6월 18일에 종료되었습니다.", p.warning);
-                        ui.hyperlink_to("Google 지원 범위 확인", "https://developers.google.com/gemini-code-assist/docs/deprecations/code-assist-individuals");
+                        let orange = if p.dark { Color32::from_rgb(255, 159, 10) } else { Color32::from_rgb(255, 149, 0) };
+                        note(ui, "Code Assist Standard · Enterprise 전용. 개인용 Google 로그인은 2026년 6월 18일에 종료되었습니다.", orange);
+                        ui.hyperlink_to(rich("Google 지원 범위 확인", 12., false, p.accent).underline(), "https://developers.google.com/gemini-code-assist/docs/deprecations/code-assist-individuals");
                     }
                     note(ui, if self.provider == "Codex" { "먼저 터미널에서 codex login을 실행하세요." } else { "먼저 Gemini CLI에서 지원되는 계정으로 로그인하세요." }, p.muted);
                 }

@@ -558,16 +558,13 @@ pub fn toggle(ui: &mut Ui, s: &str, value: bool, tint: Color32, p: Palette) -> R
     named_toggle(ui, s, s, value, tint, p)
 }
 pub fn checkbox(ui: &mut Ui, checked: &mut bool, title: &str, size: f32, p: Palette) -> Response {
-    if !cfg!(windows) {
-        return ui.checkbox(checked, rich(title, size, false, p.ink));
-    }
     let text = ui
         .painter()
         .layout_no_wrap(title.to_owned(), FontId::proportional(size), p.ink);
     #[cfg(windows)]
     let content = crate::windows_text::natural_size(ui, title, size, false).unwrap_or(text.size());
-    #[cfg(not(windows))]
-    let content = text.size();
+    #[cfg(target_os = "macos")]
+    let content = crate::mac_text::natural_size(ui, title, size, false).unwrap_or(text.size());
     let (row, mut response) = ui.allocate_exact_size(
         vec2(
             20. + content.x,
@@ -587,7 +584,12 @@ pub fn checkbox(ui: &mut Ui, checked: &mut bool, title: &str, size: f32, p: Pale
     let edge = if response.has_focus() {
         Stroke::new(2.0_f32, p.ink)
     } else {
-        Stroke::new(1.0_f32, p.muted)
+        let border = if cfg!(target_os = "macos") {
+            p.card.lerp_to_gamma(p.ink, 0.23)
+        } else {
+            p.muted
+        };
+        Stroke::new(1.0_f32, border)
     };
     ui.painter().rect(
         box_rect,

@@ -197,11 +197,11 @@ internal sealed class MonitorContext : IDisposable
                 dashboard.Publish();
                 string file = Path.Combine(Path.GetDirectoryName(path)!, name + ".png");
                 captured = null; dashboard.Send("capture", new { route = target, path = file, width, height });
-                await Until(() => captured == file, 10000); captures.Add(name);
+                await Until(() => captured == file, 10000, $"capturing {name}"); captures.Add(name);
             }
             for (int i = 0; i < 2; i++)
             {
-                dashboard.Show(); await Until(() => dashboard.Ready, 10000); pids.Add(dashboard.Pid!.Value);
+                dashboard.Show(); await Until(() => dashboard.Ready, 10000, "starting the Dashboard helper"); pids.Add(dashboard.Pid!.Value);
                 string theme = i == 0 ? "light" : "dark";
                 sample = sample with { Settings = sample.Settings with { Appearance = theme } };
                 foreach (string target in new[] { "dashboard", "activity", "accounts", "settings", "connect", "connect-claude" })
@@ -219,7 +219,7 @@ internal sealed class MonitorContext : IDisposable
                     await Capture("dashboard", "states-dark", 900, 660);
                     sample = original;
                 }
-                dashboard.Close(); await Until(() => !dashboard.IsRunning, 5000);
+                dashboard.Close(); await Until(() => !dashboard.IsRunning, 5000, "closing the Dashboard helper");
             }
             using var current = Process.GetCurrentProcess(); current.Refresh();
             Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path))!);
@@ -236,8 +236,16 @@ internal sealed class MonitorContext : IDisposable
         catch (Exception e) { File.WriteAllBytes(path, Json.Bytes(new { passed = false, error = e.GetType().Name + ": " + e.Message })); }
         finally { dispatcher.Exit(); }
     }
-    private static async Task Until(Func<bool> condition, int limit)
-    { var deadline = Environment.TickCount64 + limit; while (!condition()) { if (Environment.TickCount64 > deadline) throw new TimeoutException(); await Task.Delay(50); } }
+    private async Task Until(Func<bool> condition, int limit, string operation)
+    {
+        var deadline = Environment.TickCount64 + limit;
+        while (!condition())
+        {
+            if (Environment.TickCount64 > deadline)
+                throw new TimeoutException($"Timed out {operation} (helper running: {dashboard.IsRunning}, ready: {dashboard.Ready}).");
+            await Task.Delay(50);
+        }
+    }
     private void Post(Action action) => dispatcher.TryPost(action);
     private async Task Quit()
     {

@@ -4,9 +4,12 @@ use core_foundation::{
     boolean::CFBoolean,
     string::CFString,
 };
-use core_graphics::{base::kCGImageAlphaNone, color_space::CGColorSpace, context::CGContext};
+use core_graphics::{
+    base::kCGImageAlphaPremultipliedLast, color_space::CGColorSpace, context::CGContext,
+};
 use core_text::{
     font::{CTFont, CTFontRef},
+    framesetter::CTFramesetter,
     line::CTLine,
     string_attributes::{kCTFontAttributeName, kCTForegroundColorFromContextAttributeName},
 };
@@ -23,13 +26,11 @@ struct Key {
     heavy: bool,
 }
 
-fn raster(key: &Key, limit: usize) -> Option<(ColorImage, Vec2)> {
-    let size = f64::from(f32::from_bits(key.size));
-    let scale = f64::from(f32::from_bits(key.scale));
+fn attributed(value: &str, size: f64, heavy: bool) -> CFMutableAttributedString {
     // NSFont and CTFont are toll-free bridged. Use the AppKit font at its
     // logical point size so Retina drawing preserves its optical size.
     let weight = unsafe {
-        if !key.heavy {
+        if !heavy {
             NSFontWeightRegular
         } else if size >= 17. {
             NSFontWeightBold
@@ -40,7 +41,7 @@ fn raster(key: &Key, limit: usize) -> Option<(ColorImage, Vec2)> {
     let nsfont = NSFont::systemFontOfSize_weight(size, weight);
     let font = unsafe { CTFont::wrap_under_get_rule(Retained::as_ptr(&nsfont) as CTFontRef) };
     let mut text = CFMutableAttributedString::new();
-    text.replace_str(&CFString::new(&key.text), CFRange::init(0, 0));
+    text.replace_str(&CFString::new(value), CFRange::init(0, 0));
     let range = CFRange::init(0, text.char_len());
     text.set_attribute(range, unsafe { kCTFontAttributeName }, &font);
     text.set_attribute(
@@ -48,6 +49,13 @@ fn raster(key: &Key, limit: usize) -> Option<(ColorImage, Vec2)> {
         unsafe { kCTForegroundColorFromContextAttributeName },
         &CFBoolean::true_value(),
     );
+    text
+}
+
+fn raster(key: &Key, limit: usize) -> Option<(ColorImage, Vec2)> {
+    let size = f64::from(f32::from_bits(key.size));
+    let scale = f64::from(f32::from_bits(key.scale));
+    let text = attributed(&key.text, size, key.heavy);
     let line = CTLine::new_with_attributed_string(text.as_concrete_TypeRef());
     let bounds = line.get_typographic_bounds();
     let ascent = (bounds.ascent * scale).ceil();
@@ -61,19 +69,23 @@ fn raster(key: &Key, limit: usize) -> Option<(ColorImage, Vec2)> {
         width,
         height,
         8,
-        width,
-        &CGColorSpace::create_device_gray(),
-        kCGImageAlphaNone,
+        width * 4,
+        &CGColorSpace::create_device_rgb(),
+        kCGImageAlphaPremultipliedLast,
     );
     canvas.scale(scale, scale);
-    canvas.set_gray_fill_color(1., 1.);
+    // Coverage on a transparent surface is independent of the gamma of a
+    // black or white background. This mask is tinted during compositing.
+    canvas.set_rgb_fill_color(1., 1., 1., 1.);
     canvas.set_should_antialias(true);
+    canvas.set_allows_font_smoothing(false);
+    canvas.set_should_smooth_fonts(false);
     canvas.set_text_position(0., (height as f64 - ascent) / scale);
     line.draw(&canvas);
     let pixels = canvas
         .data()
-        .iter()
-        .map(|&alpha| Color32::from_white_alpha(alpha))
+        .chunks_exact(4)
+        .map(|rgba| Color32::from_white_alpha(rgba[3]))
         .collect();
     Some((
         ColorImage::new([width, height], pixels),
@@ -190,6 +202,69 @@ pub fn label(ui: &mut Ui, text: &str, size: f32, heavy: bool, color: Color32) ->
     let (rect, response) = ui.allocate_exact_size(run.size, Sense::hover());
     ui.painter()
         .add(run.shape(rect.min, ui.ctx().pixels_per_point(), color));
+    response.widget_info(|| WidgetInfo::labeled(WidgetType::Label, ui.is_enabled(), text));
+    Some(response)
+}
+
+pub fn paragraph(
+    ui: &mut Ui,
+    text: &str,
+    size: f32,
+    spacing: f32,
+    color: Color32,
+) -> Option<Response> {
+    use core_graphics::{
+        geometry::{CGPoint, CGRect, CGSize},
+        path::CGPath,
+    };
+    use std::sync::Arc;
+    let width = ui.available_width().max(1.);
+    let id = Id::new(("mac-text-wrap", text, size.to_bits(), width.to_bits()));
+    let cached = ui.ctx().data(|data| data.get_temp::<Arc<Vec<String>>>(id));
+    let lines = cached.unwrap_or_else(|| {
+        let styled = attributed(text, f64::from(size), false);
+        let frame = CTFramesetter::new_with_attributed_string(styled.as_concrete_TypeRef())
+            .create_frame(
+                CFRange::init(0, 0),
+                &CGPath::from_rect(
+                    CGRect::new(
+                        &CGPoint::new(0., 0.),
+                        &CGSize::new(f64::from(width), 65536.),
+                    ),
+                    None,
+                ),
+            );
+        let utf16: Vec<_> = text.encode_utf16().collect();
+        let lines: Arc<Vec<String>> = Arc::new(
+            frame
+                .get_lines()
+                .iter()
+                .map(|line| {
+                    let range = line.get_string_range();
+                    String::from_utf16_lossy(
+                        &utf16[range.location as usize..(range.location + range.length) as usize],
+                    )
+                    .trim_end()
+                    .to_owned()
+                })
+                .collect(),
+        );
+        ui.ctx()
+            .data_mut(|data| data.insert_temp(id, lines.clone()));
+        lines
+    });
+    let handle = ui.ctx().plugin_opt::<Renderer>()?;
+    let mut renderer = handle.lock();
+    let mut y = 0.;
+    let mut shapes = Vec::with_capacity(lines.len());
+    let origin = ui.next_widget_position();
+    for line in lines.iter() {
+        let run = renderer.run(ui.ctx(), line, size, false)?;
+        shapes.push(run.shape(origin + vec2(0., y), ui.ctx().pixels_per_point(), color));
+        y += run.size.y + spacing;
+    }
+    let (_, response) = ui.allocate_exact_size(vec2(width, (y - spacing).max(0.)), Sense::hover());
+    ui.painter().extend(shapes);
     response.widget_info(|| WidgetInfo::labeled(WidgetType::Label, ui.is_enabled(), text));
     Some(response)
 }

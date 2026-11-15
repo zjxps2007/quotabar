@@ -307,11 +307,13 @@ impl Dashboard {
         }
     }
     fn preference(&mut self, key: &str, mac: &str, value: Value) {
-        self.state.raw["settings"][key] = value.clone();
         if MAC {
+            // The monitor publishes the saved state back to AppKit. Applying it
+            // here would hide the appearance change from the incoming-state handler.
             self.wire.action(mac, value);
             return;
         }
+        self.state.raw["settings"][key] = value;
         let s = &self.state.raw["settings"];
         self.wire.action("preferences",json!({"seconds":s["refreshSeconds"].as_i64().unwrap_or(300),"autoRefresh":s["autoRefresh"].as_bool().unwrap_or(true),
             "theme":text(s,"appearance","system"),"scan":s["scanLocalLogs"].as_bool().unwrap_or(true),"taskbar":s["showTaskbarIcon"].as_bool().unwrap_or(true),

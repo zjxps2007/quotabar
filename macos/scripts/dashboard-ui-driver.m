@@ -13,25 +13,44 @@ static NSWindow *dashboardWindow(void) {
 
 // Both helpers use this identical WindowServer capture path. Only the current
 // process can supply windows, and the ID must match the selected AppKit window.
-static void captureRegion(NSWindow *root, NSRect target, NSURL *output, void (^done)(NSDictionary *)) {
+static void captureRegion(NSWindow *root, NSRect target, BOOL popover, NSURL *output, void (^done)(NSDictionary *)) {
     if (!root) { done(@{@"pending": @"window"}); return; }
     CGWindowID number = (CGWindowID)root.windowNumber;
     CGFloat scale = root.backingScaleFactor;
     NSRect frame = root.frame;
-    CGRect crop = CGRectMake(round((NSMinX(target)-NSMinX(frame))*scale), round((NSMaxY(frame)-NSMaxY(target))*scale),
-                             round(NSWidth(target)*scale), round(NSHeight(target)*scale));
+    BOOL includeSheet = root.attachedSheet != nil;
+    CGRect region = CGRectMake(round((NSMinX(target)-NSMinX(frame))*scale), round((NSMaxY(frame)-NSMaxY(target))*scale),
+                               round(NSWidth(target)*scale), round(NSHeight(target)*scale));
     [SCShareableContent getCurrentProcessShareableContentWithCompletionHandler:^(SCShareableContent *content, NSError *error) {
         if (error) { done(@{@"error": error.localizedDescription}); return; }
         for (SCWindow *item in content.windows) {
             if (item.windowID != number) continue;
+            CGRect crop = region;
             SCContentFilter *filter = [[SCContentFilter alloc] initWithDesktopIndependentWindow:item];
             SCStreamConfiguration *config = [SCStreamConfiguration new];
             config.width = lround(item.frame.size.width * scale);
             config.height = lround(item.frame.size.height * scale);
             config.showsCursor = NO;
             config.ignoreShadowsSingleWindow = YES;
-            config.includeChildWindows = YES;
+            config.includeChildWindows = includeSheet;
             config.colorSpaceName = kCGColorSpaceSRGB;
+            if (popover) {
+                // A status item and its popover can share a WindowServer group.
+                // Filter to this process's one popover and capture its on-screen
+                // region at native scale, even when the status item spans a display.
+                CGRect onScreen = CGRectMake(item.frame.origin.x + region.origin.x/scale,
+                                             item.frame.origin.y + region.origin.y/scale,
+                                             region.size.width/scale, region.size.height/scale);
+                for (SCDisplay *display in content.displays) {
+                    if (!CGRectContainsPoint(display.frame, CGPointMake(CGRectGetMidX(onScreen), CGRectGetMidY(onScreen)))) continue;
+                    filter = [[SCContentFilter alloc] initWithDisplay:display includingWindows:@[item]];
+                    config.sourceRect = CGRectOffset(onScreen, -display.frame.origin.x, -display.frame.origin.y);
+                    config.width = lround(region.size.width);
+                    config.height = lround(region.size.height);
+                    crop.origin = CGPointZero;
+                    break;
+                }
+            }
             [SCScreenshotManager captureImageWithFilter:filter configuration:config completionHandler:^(CGImageRef frame, NSError *failed) {
                 if (!frame) { done(@{@"error": failed.localizedDescription ?: @"no window frame"}); return; }
                 // WindowServer composites a sheet with its parent. Capture the full
@@ -42,6 +61,15 @@ static void captureRegion(NSWindow *root, NSRect target, NSURL *output, void (^d
                 if (!visible) { done(@{@"error": @"could not extract window region"}); return; }
                 NSBitmapImageRep *rep = [[NSBitmapImageRep alloc] initWithCGImage:visible];
                 CGImageRelease(visible);
+                for (int x = 1; x <= 3; ++x) for (int y = 1; y <= 3; ++y) {
+                    NSColor *sample = [rep colorAtX:x*rep.pixelsWide/4 y:y*rep.pixelsHigh/4];
+                    if (!sample || sample.alphaComponent < 0.9) {
+                        done(@{@"error": @"window capture contains transparent interior",
+                               @"window": NSStringFromRect(item.frame), @"filter": NSStringFromRect(filter.contentRect),
+                               @"crop": NSStringFromRect(crop)});
+                        return;
+                    }
+                }
                 NSData *png = [rep representationUsingType:NSBitmapImageFileTypePNG properties:@{}];
                 if (![png writeToURL:output atomically:YES]) { done(@{@"error": @"could not save PNG"}); return; }
                 done(@{@"width": @(rep.pixelsWide), @"height": @(rep.pixelsHigh)});
@@ -59,7 +87,7 @@ int QBTestCaptureView(void *rawView, const char *filename) {
     NSRect target = [window convertRectToScreen:[view convertRect:view.bounds toView:nil]];
     NSURL *file = [NSURL fileURLWithFileSystemRepresentation:filename isDirectory:NO relativeToURL:nil];
     __block NSDictionary *result;
-    captureRegion(window, target, file, ^(NSDictionary *value) {
+    captureRegion(window, target, YES, file, ^(NSDictionary *value) {
         dispatch_async(dispatch_get_main_queue(), ^{ result = value; });
     });
     NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:6];
@@ -116,6 +144,12 @@ static BOOL clickReference(NSWindow *window, NSString *label) {
     NSView *view = window.contentView;
     CGFloat w = NSWidth(view.bounds), h = NSHeight(view.bounds), x, y;
     if ([label isEqual:@"계정 연결"]) { x = w - 76; y = 85; }
+    else if ([label isEqual:@"다크"]) { x = 609; y = 230; }
+    else if ([label isEqual:@"라이트"]) { x = 469; y = 230; }
+    else if ([label isEqual:@"아이콘만"]) { x = 609; y = 387; }
+    else if ([label isEqual:@"이름 + 잔여량"]) { x = 329; y = 387; }
+    else if ([label isEqual:@"Dock에 앱 아이콘 표시"]) { x = w - 83; y = 294; }
+    else if ([label hasSuffix:@") 모니터링"]) { x = w - 60; y = 251; }
     else if ([label isEqual:@"Claude"]) { x = w * 0.55; y = 116; }
     else if ([label isEqual:@"Gemini"]) { x = w * 0.81; y = 116; }
     else if ([label hasPrefix:@"이 폴더의 statusLine"]) { x = 50; y = h - 99; }
@@ -142,6 +176,10 @@ static NSDictionary *perform(NSDictionary *request) {
     }
     if ([op isEqual:@"sheet"])
         return @{@"sheet": @(window.attachedSheet != nil)};
+    if ([op isEqual:@"appearance"]) {
+        NSString *match = [window.effectiveAppearance bestMatchFromAppearancesWithNames:@[NSAppearanceNameAqua, NSAppearanceNameDarkAqua]];
+        return @{@"appearance": [match isEqual:NSAppearanceNameDarkAqua] ? @"dark" : @"light"};
+    }
     if ([op isEqual:@"menu"]) {
         for (NSMenuItem *entry in NSApp.mainMenu.itemArray) {
             NSMenu *menu = entry.submenu;
@@ -205,7 +243,7 @@ __attribute__((constructor)) static void startDashboardDriver(void) {
                     if ([request[@"op"] isEqual:@"snapshot"]) {
                         NSWindow *window = dashboardWindow();
                         if ([request[@"label"] isEqual:@"sheet"]) window = window.attachedSheet;
-                        captureRegion(window.sheetParent ?: window, window.frame, [dir URLByAppendingPathComponent:@"frame.png"], reply);
+                        captureRegion(window.sheetParent ?: window, window.frame, NO, [dir URLByAppendingPathComponent:@"frame.png"], reply);
                         return;
                     }
                     NSDictionary *result;

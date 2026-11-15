@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 import shutil
 import select
+from copy import deepcopy
 import subprocess
 import time
 from uuid import UUID
@@ -71,6 +72,18 @@ def exercise(dashboard, executable, folder, library, fixture, observed):
                 raise ValueError(f"{title}: {payload}")
             observed.append({"menu": item, "event": {event: payload}})
 
+        def preference(label, event, key, value):
+            controls.request("press", label)
+            reply = command(event)
+            if reply != {"_0": value}:
+                raise ValueError(f"{label}: expected {value}, got {reply}")
+            fixture["settings"][key] = value
+            send({"state": {"_0": fixture}})
+            if event == "appearance":
+                controls.request("appearance", expected={"appearance": value})
+            observed.append({"preference": event, "value": value})
+            time.sleep(0.25)
+
         consent = "이 폴더의 statusLine 연결 허용 (기존 명령은 보존)"
         try:
             command("ready")
@@ -80,10 +93,26 @@ def exercise(dashboard, executable, folder, library, fixture, observed):
             menu("새로고침", "refreshAll")
             menu("상단바 사용량 보기", "showPopover")
             menu("설정…", "route", "settings")
+            time.sleep(0.4)
+            preference("다크", "appearance", "appearance", "dark")
+            preference("라이트", "appearance", "appearance", "light")
+            preference("아이콘만", "menuBarMode", "menuBarDisplayMode", "iconOnly")
+            preference("이름 + 잔여량", "menuBarMode", "menuBarDisplayMode", "providerAndRemaining")
+            preference("Dock에 앱 아이콘 표시", "dockIcon", "showDockIcon", False)
+            preference("Dock에 앱 아이콘 표시", "dockIcon", "showDockIcon", True)
             menu("Dashboard 열기", "route", "dashboard")
             send({"show": {"route": "accounts"}})
             route("accounts")
             time.sleep(0.35)
+            account = fixture["settings"]["accounts"][0]
+            for enabled in (False, True):
+                controls.request("press", f"Codex({account['name']}) 모니터링")
+                if UUID(command("toggle")["_0"]) != UUID(account["id"]):
+                    raise ValueError("Monitoring switch targeted a different account")
+                account["enabled"] = enabled
+                send({"state": {"_0": fixture}})
+                observed.append({"monitoring": enabled})
+                time.sleep(0.25)
             controls.request("press", "계정 연결")
             controls.request("sheet", expected={"sheet": True})
             observed.append({"connectionSheet": "opened"})
@@ -246,7 +275,7 @@ def compare(dashboard, work, original, fixture, library):
         record = {"observed": []}
         results[side] = record
         try:
-            exercise(dashboard, program, work / side, library, fixture, record["observed"])
+            exercise(dashboard, program, work / side, library, deepcopy(fixture), record["observed"])
         except (OSError, ValueError, KeyError, RuntimeError, EOFError, subprocess.SubprocessError) as error:
             record["error"] = str(error)
         print(f"{side}: {len(record['observed'])} dashboard actions; {record.get('error', 'complete')}", flush=True)

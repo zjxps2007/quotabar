@@ -401,7 +401,7 @@ fn main() -> eframe::Result {
         dithering: !cfg!(windows),
         ..Default::default()
     };
-    eframe::run_native(
+    let result = eframe::run_native(
         "QuotaBar",
         options,
         Box::new(move |cc| {
@@ -451,5 +451,12 @@ fn main() -> eframe::Result {
             app.wire.initial = Some(first);
             Ok(Box::new(app))
         }),
-    )
+    );
+    #[cfg(windows)]
+    if let Err(error) = &result
+        && let Some(path) = std::env::var_os("QUOTABAR_PROBE_UI_ERROR")
+    {
+        let _ = std::fs::write(path, error.to_string());
+    }
+    result
 }

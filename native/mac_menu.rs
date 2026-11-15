@@ -1,7 +1,8 @@
 //! AppKit status item, transient popover and application menus. UI objects
 //! live on the application thread and the popover's view is released on close.
 use objc2::{
-    AllocAnyThread, DefinedClass, MainThreadMarker, MainThreadOnly, define_class, msg_send,
+    AllocAnyThread, ClassType, DefinedClass, MainThreadMarker, MainThreadOnly, define_class,
+    msg_send,
     rc::{Retained, Weak},
     runtime::{AnyObject, ProtocolObject, Sel},
     sel,
@@ -461,9 +462,18 @@ impl Status {
         let scroll = NSScrollView::initWithFrame(NSScrollView::alloc(m), rect(0., 0., 294., 430.));
         scroll.setDrawsBackground(false);
         let (mut headers, mut list_height) = measure(294.);
-        scroll.setHasVerticalScroller(list_height > 430.);
-        scroll.tile();
-        let list_width = scroll.contentSize().width;
+        let overflow = list_height > 430.;
+        let scroller_style = NSScroller::preferredScrollerStyle(m);
+        scroll.setScrollerStyle(scroller_style);
+        scroll.setHasVerticalScroller(overflow);
+        // Before the popover is shown an empty clip view still reports its full
+        // width. Ask AppKit for the occupied width with the user's scroller style.
+        let list_width = unsafe {
+            NSScrollView::contentSizeForFrameSize_horizontalScrollerClass_verticalScrollerClass_borderType_controlSize_scrollerStyle(
+                NSSize::new(294., 430.), None, overflow.then(NSScroller::class),
+                scroll.borderType(), NSControlSize::Regular, scroller_style, m,
+            )
+        }.width;
         if list_width != 294. {
             (headers, list_height) = measure(list_width);
         }
