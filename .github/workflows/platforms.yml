@@ -34,6 +34,7 @@ jobs:
       - name: Signed update release tooling
         run: python3 -m unittest discover -s scripts/tests -v
       - name: Build and package application and Dashboard helper
+        id: package
         run: bash macos/scripts/package.sh
       - name: Packaged Claude callback
         run: python3 scripts/check-statusline.py
@@ -46,7 +47,8 @@ jobs:
             artifacts/QuotaBar-*-macOS-*.zip
             artifacts/macos-build-info.json
           if-no-files-found: error
-      - name: Compare original SwiftUI and Rust dashboard and popover pixels
+      - name: Compare original SwiftUI and Rust windows, popovers and actions
+        if: ${{ !cancelled() && steps.package.outcome == 'success' }}
         run: python3 macos/scripts/compare-dashboard.py
       - uses: actions/upload-artifact@v7
         if: always()

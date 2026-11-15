@@ -1,15 +1,96 @@
 use eframe::egui::{self, *};
-use font_kit::{
-    family_name::FamilyName,
-    handle::Handle,
-    properties::{Properties, Weight},
-    source::SystemSource,
-};
+#[cfg(not(target_os = "macos"))]
+use font_kit::{family_name::FamilyName, handle::Handle, properties::Properties};
+use font_kit::{properties::Weight, source::SystemSource};
 use std::sync::Arc;
 
 fn bold() -> FontFamily {
     FontFamily::Name("system-semibold".into())
 }
+
+#[cfg(target_os = "macos")]
+fn system_face(_: &SystemSource, title: &str, weight: Weight) -> Option<FontData> {
+    use core_text::font;
+    // A Core Text family can contain descriptors without a file URL. Resolve
+    // the selected face directly and skip inaccessible fonts on this Mac.
+    let semibold = weight == Weight::SEMIBOLD;
+    let face = match title {
+        ".AppleSystemUIFont" => font::new_ui_font_for_language(
+            if semibold {
+                font::kCTFontEmphasizedSystemFontType
+            } else {
+                font::kCTFontSystemFontType
+            },
+            13.0,
+            None,
+        ),
+        "Apple SD Gothic Neo" => font::new_from_name(
+            if semibold {
+                "AppleSDGothicNeo-SemiBold"
+            } else {
+                "AppleSDGothicNeo-Regular"
+            },
+            13.0,
+        )
+        .ok()?,
+        _ => font::new_from_name(title, 13.0).ok()?,
+    };
+    fn read_face(face: &font::CTFont) -> Option<FontData> {
+        let bytes = std::fs::read(face.url()?.to_path()?).ok()?;
+        let index = if let Some(count) = ttf_parser::fonts_in_collection(&bytes) {
+            let postscript = face.postscript_name();
+            (0..count).find(|&index| {
+                ttf_parser::Face::parse(&bytes, index).is_ok_and(|f| {
+                    f.names().into_iter().any(|name| {
+                        name.name_id == ttf_parser::name_id::POST_SCRIPT_NAME
+                            && name.to_string().as_deref() == Some(postscript.as_str())
+                    })
+                })
+            })?
+        } else {
+            ttf_parser::Face::parse(&bytes, 0).ok()?;
+            0
+        };
+        let mut data = FontData::from_owned(bytes);
+        data.index = index;
+        Some(data)
+    }
+    read_face(&face).or_else(|| {
+        if title != ".AppleSystemUIFont" {
+            return None;
+        }
+        read_face(
+            &font::new_from_name(
+                if semibold {
+                    "HelveticaNeue-Medium"
+                } else {
+                    "HelveticaNeue"
+                },
+                13.0,
+            )
+            .ok()?,
+        )
+    })
+}
+
+#[cfg(not(target_os = "macos"))]
+fn system_face(source: &SystemSource, title: &str, weight: Weight) -> Option<FontData> {
+    let props = Properties {
+        weight,
+        ..Default::default()
+    };
+    let handle = source
+        .select_best_match(&[FamilyName::Title(title.to_owned())], &props)
+        .ok()?;
+    let (data, index) = match handle {
+        Handle::Path { path, font_index } => (std::fs::read(path).ok()?, font_index),
+        Handle::Memory { bytes, font_index } => (bytes.as_ref().clone(), font_index),
+    };
+    let mut face = FontData::from_owned(data);
+    face.index = index;
+    Some(face)
+}
+
 pub fn fonts(ctx: &Context) {
     let source = SystemSource::new();
     let mut defs = FontDefinitions::default();
@@ -42,26 +123,9 @@ pub fn fonts(ctx: &Context) {
                 names.push(name);
                 continue;
             }
-            let props = Properties {
-                weight,
-                ..Default::default()
-            };
-            let Ok(handle) =
-                source.select_best_match(&[FamilyName::Title(title.to_owned())], &props)
-            else {
+            let Some(face) = system_face(&source, title, weight) else {
                 continue;
             };
-            let (data, index) = match handle {
-                Handle::Path { path, font_index } => {
-                    let Ok(bytes) = std::fs::read(path) else {
-                        continue;
-                    };
-                    (bytes, font_index)
-                }
-                Handle::Memory { bytes, font_index } => (bytes.as_ref().clone(), font_index),
-            };
-            let mut face = FontData::from_owned(data);
-            face.index = index;
             defs.font_data.insert(name.clone(), Arc::new(face));
             names.push(name);
         }

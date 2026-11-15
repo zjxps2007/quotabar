@@ -96,9 +96,7 @@ def check_monitor():
         print("PASS packaged monitor launch, legacy helper forwarding, menu-only lifetime and AppKit termination")
 
 
-def main():
-    REPORT.mkdir(parents=True, exist_ok=True)
-    check_monitor()
+def write_fixtures():
     now = time.time() - 978307200
     state = {"settings": {"accounts": [{"id": ACCOUNT, "name": "개인 계정 · 샘플", "provider": "codex",
                                         "identity": "fixture", "createdAt": now, "enabled": True,
@@ -108,6 +106,15 @@ def main():
                                       "windows": [{"title": "5시간", "remaining": 38.5, "resetAt": now + 3600}]}],
              "errors": [], "notes": [], "loading": [],
              "demoReport": {"days": [], "scannedAt": now, "scannedFiles": 0, "warnings": []}}
+    for theme in THEMES:
+        state["settings"]["appearance"] = theme
+        (REPORT / f"fixture-{theme}.json").write_text(json.dumps(state, ensure_ascii=False))
+
+
+def main():
+    REPORT.mkdir(parents=True, exist_ok=True)
+    write_fixtures()
+    check_monitor()
     sizes = {}
     with tempfile.TemporaryDirectory() as home, subprocess.Popen(
         [APP, "--dashboard-helper", "--demo"], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
@@ -116,8 +123,7 @@ def main():
         try:
             wait_for(child.stdout, "ready")
             for theme in THEMES:
-                state["settings"]["appearance"] = theme
-                (REPORT / f"fixture-{theme}.json").write_text(json.dumps(state, ensure_ascii=False))
+                state = json.loads((REPORT / f"fixture-{theme}.json").read_text())
                 send(child.stdin, {"state": {"_0": state}})
                 send(child.stdin, {"show": {"route": "dashboard"}})
                 wait_for(child.stdout, "route")
