@@ -123,8 +123,8 @@ fn standalone_font(font: &CTFont) -> Option<Vec<u8>> {
     }
     bytes.resize(12 + usize::from(count) * 16, 0);
     let checksum = |words: &[u8]| {
-        words.chunks_exact(4).fold(0_u32, |sum, word| {
-            sum.wrapping_add(u32::from_be_bytes([word[0], word[1], word[2], word[3]]))
+        words.as_chunks::<4>().0.iter().fold(0_u32, |sum, word| {
+            sum.wrapping_add(u32::from_be_bytes(*word))
         })
     };
     let mut adjustment = None;

@@ -29,6 +29,8 @@ mod buttons;
 pub use buttons::{draw_segments, popup_choice, standard_button};
 mod document;
 pub use document::DocumentReader;
+mod scroller;
+pub use scroller::NativeScroller;
 
 fn bitmap_rep(
     width: isize,

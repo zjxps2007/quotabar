@@ -133,7 +133,9 @@ fn raster(key: &Key, limit: usize) -> Option<(ColorImage, Vec2, f32)> {
     line.draw(&canvas);
     let pixels = canvas
         .data()
-        .chunks_exact(4)
+        .as_chunks::<4>()
+        .0
+        .iter()
         .map(|rgb| {
             let shade = ((u16::from(rgb[0]) + u16::from(rgb[1]) + u16::from(rgb[2]) + 1) / 3) as u8;
             Color32::from_white_alpha(if key.light_ink { shade } else { 255 - shade })

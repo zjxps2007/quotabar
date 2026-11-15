@@ -323,6 +323,40 @@ static NSDictionary *scrollSettings(NSWindow *window) {
     return @{@"scrolled": @YES};
 }
 
+static NSScroller *visibleScroller(NSView *view) {
+    if (view.hiddenOrHasHiddenAncestor) return nil;
+    if ([view isKindOfClass:NSScroller.class]) {
+        NSScroller *bar = (NSScroller *)view;
+        if (NSHeight(bar.bounds) > 100 && bar.knobProportion > 0 && bar.knobProportion < 1) return bar;
+    }
+    for (NSView *child in view.subviews) {
+        NSScroller *bar = visibleScroller(child);
+        if (bar) return bar;
+    }
+    return nil;
+}
+
+static NSDictionary *settingsScroller(NSWindow *window, BOOL page) {
+    NSScroller *bar = visibleScroller(window.contentView);
+    if (!bar) return @{@"error": @"visible native settings scroller not found"};
+    if (!page) {
+        double fraction = bar.doubleValue;
+        return @{@"position": fraction < 0.001 ? @"top" : fraction > 0.999 ? @"bottom" : @"middle"};
+    }
+    NSRect knob = [bar convertRect:[bar rectForPart:NSScrollerKnob] toView:nil];
+    NSRect track = [bar convertRect:bar.bounds toView:nil];
+    NSPoint point = NSMakePoint(NSMidX(knob), (NSMinY(knob) + NSMinY(track)) / 2);
+    NSView *hit = [window.contentView hitTest:[window.contentView.superview convertPoint:point fromView:nil]];
+    if (hit != bar && ![hit isDescendantOf:bar]) return @{@"error": @"scroller does not receive clicks"};
+    for (NSNumber *kind in @[@(NSEventTypeLeftMouseDown), @(NSEventTypeLeftMouseUp)]) {
+        NSEvent *event = [NSEvent mouseEventWithType:kind.unsignedIntegerValue location:point modifierFlags:0
+            timestamp:NSProcessInfo.processInfo.systemUptime windowNumber:window.windowNumber context:nil
+            eventNumber:0 clickCount:1 pressure:kind.unsignedIntegerValue == NSEventTypeLeftMouseDown ? 1 : 0];
+        [NSApp postEvent:event atStart:NO];
+    }
+    return @{@"pressed": @YES};
+}
+
 // Read the actual composited sheet. Picker titles alone cannot prove that the
 // body changed, and SwiftUI's text-selection view does not always expose it to AX.
 static NSDictionary *visibleDocument(NSURL *frame) {
@@ -351,6 +385,8 @@ static NSDictionary *perform(NSDictionary *request) {
     if (!window) return @{@"pending": @"dashboard window"};
     NSString *op = request[@"op"], *label = request[@"label"];
     if ([op isEqual:@"scrollSettings"]) return scrollSettings(window);
+    if ([op isEqual:@"scrollerPosition"] || [op isEqual:@"pageSettings"])
+        return settingsScroller(window, [op isEqual:@"pageSettings"]);
     if ([op isEqual:@"document"]) {
         NSURL *dir = [NSURL fileURLWithFileSystemRepresentation:getenv("QUOTABAR_TEST_UI_DIRECTORY") isDirectory:YES relativeToURL:nil];
         return visibleDocument([dir URLByAppendingPathComponent:@"frame.png"]);

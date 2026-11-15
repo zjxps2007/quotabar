@@ -232,6 +232,10 @@ impl Dashboard {
                 scroll = scroll.vertical_scroll_offset(0.);
                 self.scroll_top = false;
             }
+            #[cfg(target_os = "macos")]
+            let rail = self.scroller.clone();
+            #[cfg(target_os = "macos")]
+            let capturing = self.capture.is_some();
             let body = |ui: &mut Ui| {
                 Frame::new().inner_margin(Margin { left: 28, right: 28, top: 0, bottom: 28 }).show(ui, |ui| {
                     ui.set_width(ui.available_width());
@@ -245,7 +249,7 @@ impl Dashboard {
             #[cfg(windows)]
             crate::windows_scroll::show(ui, scroll, p, body);
             #[cfg(target_os = "macos")]
-            mac_scroll(ui, scroll, p, body);
+            mac_scroll(ui, scroll, p, rail.as_deref(), capturing, body);
         });
     }
     fn overview(&mut self, ui: &mut Ui, p: Palette) {

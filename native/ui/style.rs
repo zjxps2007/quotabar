@@ -396,12 +396,23 @@ pub fn disclosure(
 #[cfg(windows)]
 pub use crate::windows_choice::choose;
 #[cfg(target_os = "macos")]
-pub fn mac_scroll(ui: &mut Ui, scroll: ScrollArea, p: Palette, body: impl FnOnce(&mut Ui)) {
+pub fn mac_scroll(
+    ui: &mut Ui,
+    scroll: ScrollArea,
+    p: Palette,
+    rail: Option<&crate::mac::NativeScroller>,
+    capturing: bool,
+    body: impl FnOnce(&mut Ui),
+) {
     use objc2::MainThreadMarker;
     use objc2_app_kit::{NSScroller, NSScrollerStyle};
     let content_style = ui.style().clone();
     ui.scope(|ui| {
         let style = ui.style_mut();
+        // NSClipView clips content exactly at the viewport, including when
+        // the last settings card is scrolled past the fixed demo banner.
+        style.visuals.clip_rect_margin = 0.;
+        let native_width = rail.and_then(|r| r.legacy_width());
         if MainThreadMarker::new()
             .is_some_and(|m| NSScroller::preferredScrollerStyle(m) == NSScrollerStyle::Overlay)
         {
@@ -426,10 +437,39 @@ pub fn mac_scroll(ui: &mut Ui, scroll: ScrollArea, p: Palette, body: impl FnOnce
         } else {
             Color32::from_gray(250)
         };
-        scroll.show(ui, |ui| {
+        if let Some(width) = native_width {
+            style.spacing.scroll.bar_width = width;
+            style.spacing.scroll.bar_inner_margin = 0.;
+            style.spacing.scroll.bar_outer_margin = 0.;
+            style.visuals.extreme_bg_color = Color32::TRANSPARENT;
+            style.visuals.widgets.inactive.bg_fill = Color32::TRANSPARENT;
+            style.visuals.widgets.hovered.bg_fill = Color32::TRANSPARENT;
+            style.visuals.widgets.active.bg_fill = Color32::TRANSPARENT;
+        }
+        let area = scroll.show(ui, |ui| {
             ui.set_style(content_style);
             body(ui);
         });
+        if let Some(rail) = rail {
+            if let Some(width) = native_width {
+                rail.place(
+                    area.id,
+                    area.inner_rect,
+                    width,
+                    area.content_size.y,
+                    area.state.offset.y,
+                );
+                if capturing {
+                    let rect = Rect::from_min_size(
+                        area.inner_rect.right_top(),
+                        vec2(width, area.inner_rect.height()),
+                    );
+                    rail.paint_capture(ui, rect);
+                }
+            } else {
+                rail.hide();
+            }
+        }
     });
 }
 

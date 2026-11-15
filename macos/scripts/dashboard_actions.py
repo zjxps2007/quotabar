@@ -241,7 +241,7 @@ def build_driver(work):
     return library
 
 
-def capture_windows(dashboard, program, folder, library, fixture, output, theme):
+def capture_windows(dashboard, program, folder, library, fixture, output, theme, pixel_reader):
     folder.mkdir()
     env = {**os.environ, **dashboard.fixture_environment(), "DYLD_INSERT_LIBRARIES": str(library),
            "QUOTABAR_TEST_UI_DIRECTORY": str(folder)}
@@ -299,9 +299,31 @@ def capture_windows(dashboard, program, folder, library, fixture, output, theme)
             controls.request("sheet", expected={"sheet": False})
             show("settings")
             time.sleep(0.35)
+            positions = []
+            observed["settingsScroller"] = positions
+            try:
+                positions.append(controls.request("scrollerPosition", expected={"position": "top"})["position"])
+                controls.request("pageSettings")
+                positions.append(controls.request("scrollerPosition", expected={"position": "middle"})["position"])
+                time.sleep(0.3)
+                controls.request("snapshot", "dashboard")
+                crops = [folder / "top.png", folder / "paged.png"]
+                for source, crop in zip((output / f"settings-{theme}.png", folder / "frame.png"), crops):
+                    subprocess.run(["sips", "--cropToHeightWidth", "320", "560", source, "--out", crop],
+                                   stdout=subprocess.DEVNULL, check=True, timeout=8)
+                difference = folder / "page-difference.json"
+                subprocess.run([pixel_reader, "--pixels", *crops, difference, "--reference-ui"], check=True, timeout=12)
+                # The centered crop contains the page body and excludes the track and its moving knob.
+                observed["settingsPageChangedPixels"] = json.loads(difference.read_bytes())["changedPixels"]
+            except (OSError, ValueError, subprocess.SubprocessError) as error:
+                observed["settingsScrollerError"] = str(error)
             for _ in range(3):
                 controls.request("scrollSettings")
                 time.sleep(0.30)
+            try:
+                positions.append(controls.request("scrollerPosition", expected={"position": "bottom"})["position"])
+            except (OSError, ValueError) as error:
+                observed["settingsScrollerError"] = str(error)
             capture("settings-bottom")
             controls.request("press", "라이선스 및 고지 보기")
             controls.request("sheet", expected={"sheet": True})
@@ -350,7 +372,7 @@ def compare_windows(dashboard, work, original, library):
         for theme in dashboard.THEMES:
             fixture = json.loads((dashboard.REPORT / f"fixture-{theme}.json").read_text())
             results[side][theme] = capture_windows(dashboard, program, work / f"windows-{side}-{theme}",
-                                                  library, fixture, output, theme)
+                                                  library, fixture, output, theme, original)
     for theme in dashboard.THEMES:
         for route in (*dashboard.ROUTES, "remove", "popover-sample", "popover-empty", "popover-overflow",
                       "settings-bottom", "licenses-notice", "licenses-apache"):
@@ -376,7 +398,10 @@ def compare_windows(dashboard, work, original, library):
     documents_match = all(results[side][theme].get("licenseDocuments") == ["NOTICE", "LICENSE", "NOTICE", "closed"]
                           and results[side][theme].get("licenseEscapeClosed") is True
                           for side in ("original", "rust") for theme in dashboard.THEMES)
-    return documents_match and all(row["identical"] for row in results["comparisons"].values())
+    scroll_matches = all(results[side][theme].get("settingsScroller") == ["top", "middle", "bottom"]
+                         and results[side][theme].get("settingsPageChangedPixels", 0) > 1000
+                         for side in ("original", "rust") for theme in dashboard.THEMES)
+    return documents_match and scroll_matches and all(row["identical"] for row in results["comparisons"].values())
 
 
 def compare(dashboard, work, original, fixture, library):

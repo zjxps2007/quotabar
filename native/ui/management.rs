@@ -146,6 +146,10 @@ impl Dashboard {
                 scroll
             }
         };
+        #[cfg(target_os = "macos")]
+        let rail = self.scroller.clone();
+        #[cfg(target_os = "macos")]
+        let capturing = self.capture.is_some();
         let cards = |ui: &mut Ui| {
             for account in rows {
                 ui.push_id(&account.id, |ui| {
@@ -156,7 +160,7 @@ impl Dashboard {
             }
         };
         #[cfg(target_os = "macos")]
-        mac_scroll(ui, scroll, p, cards);
+        mac_scroll(ui, scroll, p, rail.as_deref(), capturing, cards);
         #[cfg(windows)]
         cards(ui);
     }

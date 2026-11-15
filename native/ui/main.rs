@@ -122,6 +122,8 @@ struct Dashboard {
     #[cfg(target_os = "macos")]
     app_menu: mac::AppMenu,
     #[cfg(target_os = "macos")]
+    scroller: Option<std::rc::Rc<mac::NativeScroller>>,
+    #[cfg(target_os = "macos")]
     local: mac::Local,
 }
 
@@ -475,6 +477,8 @@ fn main() -> eframe::Result {
             local: Default::default(),
             #[cfg(target_os = "macos")]
             app_menu: mac::AppMenu::install(&cc.egui_ctx),
+            #[cfg(target_os = "macos")]
+            scroller: mac::NativeScroller::attach(cc),
         };
         // Queue the initial event ahead of subsequent messages.
         app.wire.initial = Some(first);
