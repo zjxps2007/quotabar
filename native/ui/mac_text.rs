@@ -275,11 +275,22 @@ pub fn system_line_height(ui: &Ui, size: f64) -> f32 {
 }
 
 pub fn label(ui: &mut Ui, text: &str, size: f32, heavy: bool, color: Color32) -> Option<Response> {
-    draw_label(ui, text, size, Face::label(heavy), color)
+    draw_label(ui, text, size, Face::label(heavy), color, 0.)
+}
+
+pub fn system_label(
+    ui: &mut Ui,
+    text: &str,
+    size: f32,
+    heavy: bool,
+    color: Color32,
+) -> Option<Response> {
+    let line_height = system_line_height(ui, f64::from(size));
+    draw_label(ui, text, size, Face::label(heavy), color, line_height)
 }
 
 pub fn stat_value(ui: &mut Ui, text: &str, color: Color32) -> Option<Response> {
-    draw_label(ui, text, 28., Face::RoundedDigits, color)
+    draw_label(ui, text, 28., Face::RoundedDigits, color, 0.)
 }
 
 pub fn hyperlink(ui: &mut Ui, title: &str, url: &str, size: f32, color: Color32) -> Response {
@@ -312,7 +323,14 @@ pub fn hyperlink(ui: &mut Ui, title: &str, url: &str, size: f32, color: Color32)
     }
 }
 
-fn draw_label(ui: &mut Ui, text: &str, size: f32, face: Face, color: Color32) -> Option<Response> {
+fn draw_label(
+    ui: &mut Ui,
+    text: &str,
+    size: f32,
+    face: Face,
+    color: Color32,
+    minimum_height: f32,
+) -> Option<Response> {
     if text.is_empty() || text.contains('\n') {
         return None;
     }
@@ -326,9 +344,11 @@ fn draw_label(ui: &mut Ui, text: &str, size: f32, face: Face, color: Color32) ->
     if run.size.x > ui.available_width() {
         return None;
     }
-    let (rect, response) = ui.allocate_exact_size(run.size, Sense::hover());
+    let height = run.size.y.max(minimum_height);
+    let (rect, response) = ui.allocate_exact_size(vec2(run.size.x, height), Sense::hover());
+    let top = rect.min + vec2(0., (height - run.size.y) * 0.5);
     ui.painter()
-        .add(run.shape(rect.min, ui.ctx().pixels_per_point(), color));
+        .add(run.shape(top, ui.ctx().pixels_per_point(), color));
     response.widget_info(|| WidgetInfo::labeled(WidgetType::Label, ui.is_enabled(), text));
     Some(response)
 }

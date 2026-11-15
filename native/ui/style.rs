@@ -341,6 +341,14 @@ pub fn caption(ui: &mut Ui, s: impl Into<String>, p: Palette) -> Response {
     label(ui, s, 11., false, p.muted)
 }
 
+pub fn system_label(ui: &mut Ui, text: &str, size: f32, heavy: bool, color: Color32) -> Response {
+    #[cfg(target_os = "macos")]
+    if let Some(response) = crate::mac_text::system_label(ui, text, size, heavy, color) {
+        return response;
+    }
+    label(ui, text, size, heavy, color)
+}
+
 pub fn disclosure(
     ui: &mut Ui,
     key: impl std::hash::Hash,
@@ -527,6 +535,12 @@ pub fn action_on(ui: &mut Ui, s: &str, primary: bool, p: Palette, backdrop: Colo
     } else {
         (s, None)
     };
+    if !primary
+        && symbol.is_some()
+        && let Some(response) = crate::mac::standard_button(ui, text, symbol, p.focus_ring)
+    {
+        return response;
+    }
     let mut size = crate::mac_text::natural_size(ui, text, 13., false).unwrap_or_else(|| {
         ui.painter()
             .layout_no_wrap(text.to_owned(), FontId::proportional(13.), p.ink)
@@ -618,7 +632,7 @@ pub fn action_on(ui: &mut Ui, s: &str, primary: bool, p: Palette, backdrop: Colo
 }
 pub fn sheet_button(ui: &mut Ui, title: &str, p: Palette) -> Response {
     #[cfg(target_os = "macos")]
-    if let Some(response) = crate::mac::standard_button(ui, title, p.focus_ring) {
+    if let Some(response) = crate::mac::standard_button(ui, title, None, p.focus_ring) {
         return response;
     }
     action(ui, title, false, p)

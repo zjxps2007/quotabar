@@ -27,13 +27,7 @@ impl Dashboard {
                 let side = ui.max_rect();
                 let top = side.top() - 34. - f32::from(titlebar);
                 let bottom = side.bottom() + 20.;
-                if MAC {
-                    ui.painter().vline(
-                        side.right() + 17.,
-                        top..=bottom,
-                        Stroke::new(1.0_f32, p.line),
-                    );
-                } else {
+                if !MAC {
                     let right = side.right() + 19.;
                     ui.painter().rect_filled(
                         Rect::from_min_max(pos2(right - 1., top), pos2(right, bottom)),
@@ -146,6 +140,15 @@ impl Dashboard {
                     });
                 });
             });
+        if MAC {
+            // SwiftUI places a one-device-pixel Divider next to its 210-point sidebar.
+            SidePanel::left("sidebar divider")
+                .exact_width(1. / ctx.pixels_per_point())
+                .resizable(false)
+                .show_separator_line(false)
+                .frame(Frame::new().fill(p.line))
+                .show(ctx, |_| {});
+        }
         CentralPanel::default().frame(Frame::new().fill(p.bg)).show(ctx, |ui| {
             Frame::new().inner_margin(Margin { left: 28, right: 28, top: 32 + titlebar, bottom: 22 }).show(ui, |ui| {
                 ui.set_width(ui.available_width());
@@ -156,9 +159,9 @@ impl Dashboard {
                 };
                 ui.horizontal(|ui| {
                     ui.vertical(|ui| {
-                        label(ui, title, 25., true, p.ink);
+                        system_label(ui, title, 25., true, p.ink);
                         ui.add_space(5.);
-                        label(ui, subtitle, if MAC { 12. } else { 11. }, false, p.muted);
+                        system_label(ui, subtitle, if MAC { 12. } else { 11. }, false, p.muted);
                     });
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| match self.route.as_str() {
                         "accounts" => {
@@ -182,9 +185,9 @@ impl Dashboard {
                     ui.horizontal(|ui| {
                         ui.spacing_mut().interact_size.y = 0.;
                         ui.spacing_mut().item_spacing.x = 7.;
-                        let (icon, _) = ui.allocate_exact_size(vec2(14., 12.), Sense::hover());
+                        let (icon, _) = ui.allocate_exact_size(vec2(16., 12.), Sense::hover());
                         crate::mac::symbol(ui.painter(), icon, "eye", 10., false, p.muted);
-                        caption(ui, note, p);
+                        system_label(ui, note, 10., false, p.muted);
                     });
                     #[cfg(windows)]
                     caption(ui, note, p);

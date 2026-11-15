@@ -3,8 +3,8 @@ use block2::StackBlock;
 use eframe::egui::*;
 use objc2::{MainThreadMarker, MainThreadOnly, rc::Retained};
 use objc2_app_kit::{
-    NSAppearanceCustomization, NSApplication, NSButton, NSControl, NSPopUpButton,
-    NSSegmentDistribution, NSSegmentSwitchTracking, NSSegmentedControl,
+    NSAppearanceCustomization, NSApplication, NSButton, NSCellImagePosition, NSControl, NSImage,
+    NSPopUpButton, NSSegmentDistribution, NSSegmentSwitchTracking, NSSegmentedControl,
 };
 use objc2_foundation::{NSArray, NSPoint, NSRect, NSSize, NSString};
 
@@ -94,22 +94,35 @@ fn control_image(
     Some(image)
 }
 
-fn button_image(ui: &Ui, title: &str, size: Vec2, pressed: bool) -> Option<ControlImage> {
+fn push_button(main: MainThreadMarker, title: &str, symbol: Option<&str>) -> Retained<NSButton> {
+    // The native button draws its symbol, bezel and title together; egui owns
+    // the dashboard action and its accessible hit target.
+    let button = unsafe {
+        NSButton::buttonWithTitle_target_action(&NSString::from_str(title), None, None, main)
+    };
+    if let Some(icon) = symbol.and_then(|name| {
+        NSImage::imageWithSystemSymbolName_accessibilityDescription(&NSString::from_str(name), None)
+    }) {
+        button.setImage(Some(&icon));
+        button.setImagePosition(NSCellImagePosition::ImageLeading);
+    }
+    button
+}
+
+fn button_image(
+    ui: &Ui,
+    title: &str,
+    symbol: Option<&str>,
+    size: Vec2,
+    pressed: bool,
+) -> Option<ControlImage> {
     control_image(
         ui,
         "AppKit push button",
-        Id::new((title, pressed)),
+        Id::new((title, symbol, pressed)),
         size,
         |main| {
-            // These views only draw. The dashboard handles actions and accessibility.
-            let button = unsafe {
-                NSButton::buttonWithTitle_target_action(
-                    &NSString::from_str(title),
-                    None,
-                    None,
-                    main,
-                )
-            };
+            let button = push_button(main, title, symbol);
             button.setHighlighted(pressed);
             button.into_super()
         },
@@ -268,20 +281,38 @@ pub fn popup_choice(
     (index < labels.len() && index != selected).then_some(index)
 }
 
-pub fn standard_button(ui: &mut Ui, title: &str, focus: Color32) -> Option<Response> {
-    let label = crate::mac_text::natural_size(ui, title, 13., false)?;
-    let size = vec2(
-        label.x.ceil() + 16.,
-        label
-            .y
-            .max(crate::mac_text::system_line_height(ui, 13.))
-            .ceil()
-            + 6.,
-    );
-    let normal = button_image(ui, title, size, false)?;
+pub fn standard_button(
+    ui: &mut Ui,
+    title: &str,
+    symbol: Option<&str>,
+    focus: Color32,
+) -> Option<Response> {
+    let size = if symbol.is_some() {
+        let main = MainThreadMarker::new()?;
+        let key = Id::new(("AppKit button alignment size", title, symbol));
+        ui.data_mut(|d| {
+            *d.get_temp_mut_or_insert_with(key, || {
+                let button = push_button(main, title, symbol);
+                button.sizeToFit();
+                let size = button.alignmentRectForFrame(button.frame()).size;
+                vec2(size.width as f32, size.height as f32)
+            })
+        })
+    } else {
+        let label = crate::mac_text::natural_size(ui, title, 13., false)?;
+        vec2(
+            label.x.ceil() + 16.,
+            label
+                .y
+                .max(crate::mac_text::system_line_height(ui, 13.))
+                .ceil()
+                + 6.,
+        )
+    };
+    let normal = button_image(ui, title, symbol, size, false)?;
     let (rect, response) = ui.allocate_exact_size(size, Sense::click());
     let image = if response.is_pointer_button_down_on() {
-        button_image(ui, title, size, true).unwrap_or(normal)
+        button_image(ui, title, symbol, size, true).unwrap_or(normal)
     } else {
         normal
     };
