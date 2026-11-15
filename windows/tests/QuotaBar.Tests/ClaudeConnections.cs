@@ -1,12 +1,17 @@
 using System.Runtime.Loader;
+using System.Runtime.InteropServices;
 using System.Security.AccessControl;
 using System.Security.Principal;
+using System.Text;
 using System.Text.Json.Nodes;
 using QuotaBar.Core;
 using QuotaBar.Windows;
 
 internal static class ClaudeConnections
 {
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, ExactSpelling = true)]
+    private static extern uint GetShortPathNameW(string path, StringBuilder output, uint capacity);
+
     private static JsonObject Read(string path) => JsonNode.Parse(File.ReadAllBytes(path))!.AsObject();
 
     public static void Recovery(Suite suite)
@@ -81,6 +86,14 @@ internal static class ClaudeConnections
             string file = Path.Combine(config, "settings.json");
             string id = ClaudeConnection.Id(config);
             Suite.Check((string?)originalType.GetMethod("Id")!.Invoke(null, [config + Path.DirectorySeparatorChar]) == id);
+            var shortPath = new StringBuilder(32768);
+            uint length = GetShortPathNameW(config, shortPath, (uint)shortPath.Capacity);
+            string alias = length > 0 && length < shortPath.Capacity ? shortPath.ToString() : config;
+            foreach (string spelling in new[] { alias, Path.Combine(alias, "not created") })
+            {
+                Suite.Check((string?)originalType.GetMethod("Id")!.Invoke(null, [spelling]) == ClaudeConnection.Id(spelling));
+                Suite.Check((string?)originalType.GetMethod("Canonical")!.Invoke(null, [spelling]) == ClaudeConnection.Canonical(spelling));
+            }
             const string script = "[Console]::Out.Write('원래 명령')";
             File.WriteAllText(file, new JsonObject { ["theme"] = "dark", ["statusLine"] = new JsonObject {
                 ["type"] = "command", ["command"] = script, ["padding"] = 3 } }.ToJsonString());
@@ -89,7 +102,7 @@ internal static class ClaudeConnections
             acl.SetAccessRuleProtection(true, true);
             info.SetAccessControl(acl);
             string FileDacl() => info.GetAccessControl().GetSecurityDescriptorSddlForm(AccessControlSections.Access);
-            dynamic first = original.Install(config, Fixtures.Helper, "powershell");
+            dynamic first = original.Install(alias, Fixtures.Helper, "powershell");
             var imported = native.Load(id);
             Suite.Check(imported.Command == (string)first.Command && imported.Original!["command"]!.GetValue<string>() == script);
             var session = Guid.NewGuid();
@@ -97,7 +110,7 @@ internal static class ClaudeConnections
             byte[] Sample(double used) => Json.Bytes(new { session_id = session, rate_limits = new {
                 five_hour = new { used_percentage = used, resets_at = reset } } });
             original.Capture(first, Sample(24.5));
-            var fetched = native.Fetch(config);
+            var fetched = native.Fetch(alias);
             Suite.Check(fetched.State == "snapshot" && fetched.Windows.Single().Remaining == 75.5);
             var observed = fetched.ObservedAt;
             native.Capture(imported, Sample(24.5));

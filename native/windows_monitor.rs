@@ -708,7 +708,9 @@ fn start(args: &[std::ffi::OsString], probe: Option<&Path>) -> Result<()> {
         None
     } else {
         Some(match arg("--data-dir") {
-            Some(path) => std::path::absolute(path).map_err(errors::file)?,
+            Some(path) => {
+                crate::windows_format::full_path(Path::new(path)).map_err(errors::file)?
+            }
             None => store::default_root()?,
         })
     };

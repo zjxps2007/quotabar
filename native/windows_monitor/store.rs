@@ -269,7 +269,7 @@ impl Store {
         if !helper.is_file() {
             return Err("StatusLine 실행 파일을 찾지 못했습니다.".into());
         }
-        let directory = connection::canonical(path).map_err(errors::claude)?;
+        let directory = connection::profile_directory(&self.root, path).map_err(errors::claude)?;
         let identity = format!("claude:{}", connection::profile_id(&directory));
         let name = Path::new(&directory)
             .file_name()
@@ -302,9 +302,10 @@ impl Store {
             .find(|a| a.id == id)
             .ok_or(errors::UNKNOWN)?;
         if account.provider == Provider::Claude {
-            let directory = connection::canonical(Path::new(
-                account.source_path.as_deref().unwrap_or_default(),
-            ))
+            let directory = connection::profile_directory(
+                &self.root,
+                Path::new(account.source_path.as_deref().unwrap_or_default()),
+            )
             .map_err(errors::claude)?;
             let restored = connection::uninstall(&self.root, &connection::profile_id(&directory))
                 .map_err(errors::claude)?;

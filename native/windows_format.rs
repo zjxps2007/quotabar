@@ -1,3 +1,70 @@
+use std::{
+    io,
+    path::{Path, PathBuf},
+};
+
+/// Path.GetFullPath expands existing DOS aliases, including the parent of a
+/// path that has not been created yet. Persisted profile and pipe IDs use this spelling.
+pub fn full_path(path: &Path) -> io::Result<PathBuf> {
+    use std::{
+        ffi::OsString,
+        os::windows::ffi::OsStringExt,
+        path::{Component, Prefix},
+    };
+    use windows_sys::Win32::{
+        Foundation::{ERROR_FILE_NOT_FOUND, ERROR_PATH_NOT_FOUND},
+        Storage::FileSystem::GetLongPathNameW,
+    };
+    let absolute = std::path::absolute(path)?;
+    if !absolute.as_os_str().as_encoded_bytes().contains(&b'~') {
+        return Ok(absolute);
+    }
+    for parent in absolute.ancestors() {
+        let input = crate::files::windows::wide_file_path(parent)?;
+        let mut buf = vec![0u16; input.len()];
+        loop {
+            let len =
+                unsafe { GetLongPathNameW(input.as_ptr(), buf.as_mut_ptr(), buf.len() as u32) };
+            if len == 0 {
+                match io::Error::last_os_error().raw_os_error().map(|n| n as u32) {
+                    Some(ERROR_FILE_NOT_FOUND | ERROR_PATH_NOT_FOUND) => break,
+                    _ => return Ok(absolute),
+                }
+            }
+            if len as usize >= buf.len() {
+                buf.resize(len as usize, 0);
+                continue;
+            }
+            let mut result = PathBuf::from(OsString::from_wide(&buf[..len as usize]));
+            // Strip only a prefix added by wide_file_path, preserving the caller's namespace.
+            if !parent.as_os_str().as_encoded_bytes().starts_with(br"\\?\")
+                && let Some(Component::Prefix(prefix)) = result.components().next()
+            {
+                let ordinary = match prefix.kind() {
+                    Prefix::VerbatimDisk(drive) => {
+                        Some(PathBuf::from(format!("{}:\\", char::from(drive))))
+                    }
+                    Prefix::VerbatimUNC(server, share) => {
+                        Some(Path::new(r"\\").join(server).join(share))
+                    }
+                    _ => None,
+                };
+                if let Some(root) = ordinary {
+                    result = root.join(result.components().skip(2).collect::<PathBuf>());
+                }
+            }
+            let suffix = absolute
+                .strip_prefix(parent)
+                .expect("ancestor of absolute path");
+            if !suffix.as_os_str().is_empty() {
+                result.push(suffix);
+            }
+            return Ok(result);
+        }
+    }
+    Ok(absolute)
+}
+
 pub(crate) fn known_folder(id: &windows_sys::core::GUID) -> Option<std::path::PathBuf> {
     use std::{ffi::OsString, os::windows::ffi::OsStringExt, ptr::null_mut};
     use windows_sys::Win32::{

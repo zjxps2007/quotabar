@@ -19,6 +19,9 @@ use windows_sys::Win32::{
     UI::Shell::{FOLDERID_LocalAppData, FOLDERID_ProgramFiles},
 };
 
+#[cfg(test)]
+mod tests;
+
 const MAX_CONFIG: usize = 1_048_576;
 const ACTIVE: &str = "profile.json";
 const PENDING: &str = "profile-pending.json";
@@ -33,7 +36,7 @@ pub fn canonical(path: &Path) -> io::Result<String> {
             "Windows 로컬 절대경로를 선택하세요. WSL/네트워크 경로는 아직 지원하지 않습니다.",
         ));
     }
-    let absolute = std::path::absolute(path)?;
+    let absolute = crate::windows_format::full_path(path)?;
     if absolute.parent().is_none() {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
@@ -50,6 +53,47 @@ pub fn canonical(path: &Path) -> io::Result<String> {
 
 pub fn profile_id(directory: &str) -> String {
     digest(&crate::windows_format::invariant_uppercase(directory))
+}
+
+/// Early Rust builds hashed the spelling of a DOS alias. Keep an installed
+/// callback and its backup together if that spelling already owns this profile.
+pub fn profile_directory(root: &Path, path: &Path) -> io::Result<String> {
+    let directory = canonical(path)?;
+    let canonical_id = profile_id(&directory);
+    // A reconnect may use the long name even though the installed wrapper
+    // points at an alias-based ID. Trust only its matching private profile.
+    if let Ok(config) = Config::read(&directory)
+        && let Some(wrapper) = config.command().filter(|cmd| cmd.contains(CALLBACK))
+    {
+        for id in wrapper
+            .split(|c: char| !c.is_ascii_hexdigit())
+            .filter(|s| s.len() == 64)
+        {
+            if id == canonical_id {
+                return Ok(directory);
+            }
+            let previous = folder(root, id)?;
+            if let Ok(profile) = load_folder(&previous, id)
+                && profile.command == wrapper
+                && profile.directory.contains('~')
+                && profile_id(&canonical(Path::new(&profile.directory))?) == canonical_id
+            {
+                return Ok(profile.directory);
+            }
+        }
+    }
+    if path.as_os_str().as_encoded_bytes().contains(&b'~') {
+        let spelled = std::path::absolute(path)?;
+        if let Some(legacy) = spelled.to_str().map(|s| s.trim_end_matches(['\\', '/']))
+            && legacy != directory
+        {
+            let previous = folder(root, &profile_id(legacy))?;
+            if previous.join(ACTIVE).try_exists()? || previous.join(PENDING).try_exists()? {
+                return Ok(legacy.to_owned());
+            }
+        }
+    }
+    Ok(directory)
 }
 
 pub fn bash() -> Option<PathBuf> {
@@ -82,7 +126,7 @@ fn wrapper(
     generation: &str,
     shell: &str,
 ) -> io::Result<String> {
-    let executable = std::path::absolute(helper)?;
+    let executable = crate::windows_format::full_path(helper)?;
     let slash = |p: &Path| {
         p.to_str()
             .map(|s| s.replace('\\', "/"))
@@ -223,7 +267,9 @@ pub(super) fn lock(folder: &Path) -> io::Result<File> {
 fn read_profile(path: &Path, id: &str) -> io::Result<Profile> {
     reject_links(path)?;
     let p: Profile = serde_json::from_slice(&read_file(path, MAX_CONFIG)?)?;
-    if p.id != id || profile_id(&canonical(Path::new(&p.directory))?) != id {
+    let directory = canonical(Path::new(&p.directory))?;
+    let legacy = p.directory.contains('~') && profile_id(&p.directory) == id;
+    if p.id != id || (profile_id(&directory) != id && !legacy) {
         return Err(invalid("Claude 프로필 경로가 변경되었습니다."));
     }
     Ok(p)
@@ -288,7 +334,7 @@ pub fn install(
     helper: &Path,
     shell: Option<&str>,
 ) -> io::Result<Profile> {
-    let directory = canonical(directory)?;
+    let directory = profile_directory(root, directory)?;
     let id = profile_id(&directory);
     let folder = folder(root, &id)?;
     fs::create_dir_all(&directory)?;
@@ -425,7 +471,7 @@ pub struct Usage {
 }
 
 pub fn fetch(root: &Path, directory: &Path) -> io::Result<Usage> {
-    let directory = canonical(directory)?;
+    let directory = profile_directory(root, directory)?;
     let id = profile_id(&directory);
     let folder = folder(root, &id)?;
     let _lock = lock(&folder)?;

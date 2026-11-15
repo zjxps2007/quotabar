@@ -29,6 +29,7 @@ fn event() -> io::Result<OwnedHandle> {
 // .NET ToUpperInvariant uses simple ICU mappings and preserves the Turkish dotless i.
 // Existing monitors hash the uppercased path and current SID to find each other's pipe.
 fn pipe_name(root: &Path, sid: &str) -> io::Result<Vec<u16>> {
+    let root = crate::windows_format::full_path(root)?;
     let path = root
         .to_str()
         .ok_or_else(|| invalid("Invalid monitor directory"))?;
