@@ -13,12 +13,11 @@ static NSWindow *dashboardWindow(void) {
 
 // Both helpers use this identical WindowServer capture path. Only the current
 // process can supply windows, and the ID must match the selected AppKit window.
-static void captureWindow(NSWindow *window, NSURL *output, void (^done)(NSDictionary *)) {
-    if (!window) { done(@{@"pending": @"window"}); return; }
-    NSWindow *root = window.sheetParent ?: window;
+static void captureRegion(NSWindow *root, NSRect target, NSURL *output, void (^done)(NSDictionary *)) {
+    if (!root) { done(@{@"pending": @"window"}); return; }
     CGWindowID number = (CGWindowID)root.windowNumber;
     CGFloat scale = root.backingScaleFactor;
-    NSRect frame = root.frame, target = window.frame;
+    NSRect frame = root.frame;
     CGRect crop = CGRectMake(round((NSMinX(target)-NSMinX(frame))*scale), round((NSMaxY(frame)-NSMaxY(target))*scale),
                              round(NSWidth(target)*scale), round(NSHeight(target)*scale));
     [SCShareableContent getCurrentProcessShareableContentWithCompletionHandler:^(SCShareableContent *content, NSError *error) {
@@ -51,6 +50,23 @@ static void captureWindow(NSWindow *window, NSURL *output, void (^done)(NSDictio
         }
         done(@{@"pending": @"window has no composited frame"});
     }];
+}
+
+int QBTestCaptureView(void *rawView, const char *filename) {
+    NSView *view = (__bridge NSView *)rawView;
+    NSWindow *window = view.window;
+    if (!window || !NSThread.isMainThread) return 0;
+    NSRect target = [window convertRectToScreen:[view convertRect:view.bounds toView:nil]];
+    NSURL *file = [NSURL fileURLWithFileSystemRepresentation:filename isDirectory:NO relativeToURL:nil];
+    __block NSDictionary *result;
+    captureRegion(window, target, file, ^(NSDictionary *value) {
+        dispatch_async(dispatch_get_main_queue(), ^{ result = value; });
+    });
+    NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:6];
+    while (!result && deadline.timeIntervalSinceNow > 0)
+        [NSRunLoop.mainRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.025]];
+    if (!result[@"width"]) NSLog(@"Popover window capture: %@", result);
+    return result[@"width"] != nil;
 }
 
 static NSArray<NSString *> *names(id element) {
@@ -189,7 +205,7 @@ __attribute__((constructor)) static void startDashboardDriver(void) {
                     if ([request[@"op"] isEqual:@"snapshot"]) {
                         NSWindow *window = dashboardWindow();
                         if ([request[@"label"] isEqual:@"sheet"]) window = window.attachedSheet;
-                        captureWindow(window, [dir URLByAppendingPathComponent:@"frame.png"], reply);
+                        captureRegion(window.sheetParent ?: window, window.frame, [dir URLByAppendingPathComponent:@"frame.png"], reply);
                         return;
                     }
                     NSDictionary *result;

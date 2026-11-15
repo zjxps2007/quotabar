@@ -73,6 +73,7 @@ private struct ProbeError: Error, CustomStringConvertible {
     panel.cacheDisplay(in: panel.bounds, to: bitmap)
     guard let png = bitmap.representation(using: .png, properties: [:]) else { throw CocoaError(.fileWriteUnknown) }
     try png.write(to: output)
+    captureVisiblePopover(panel)
     if accounts.count > 1 {
         func updateAccounts(_ updated: [[String: Any]]) throws -> NSScrollView {
             var value = fixture

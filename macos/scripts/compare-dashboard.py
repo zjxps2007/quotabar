@@ -49,6 +49,7 @@ def build_reference(work):
     subprocess.run(["tar", "-xf", archive, "-C", work], check=True)
     src = work / "macos/Sources/QuotaBar"
     with (src / "App.swift").open("a") as f:
+        f.write("\n" + (HERE / "capture-visible-popover.swift").read_text())
         f.write("\n" + (HERE / "reference-dashboard.swift").read_text())
     main = src / "main.swift"
     main.write_text(MAIN + "\n" + main.read_text())
@@ -64,11 +65,16 @@ def build_reference(work):
     return work / "artifacts/QuotaBar.app/Contents/MacOS/QuotaBar"
 
 
-def compare_popovers(work, app, originals, results, save_results):
+def compare_popovers(work, app, originals, results, save_results, library):
     probe = work / "check-popover"
-    subprocess.run(["swiftc", HERE / "check-popover.swift", "-I", dashboard.ROOT / "macos/Sources/CQuotaBar",
+    probe_source = work / "popover-probe.swift"
+    probe_source.write_text((HERE / "capture-visible-popover.swift").read_text() + "\n" + (HERE / "check-popover.swift").read_text())
+    subprocess.run(["swiftc", probe_source, "-I", dashboard.ROOT / "macos/Sources/CQuotaBar",
                     "-L", dashboard.ROOT / "target/release", "-lquotabar_native", "-o", probe], check=True)
-    env = {**os.environ, **dashboard.fixture_environment(), "DYLD_LIBRARY_PATH": str(dashboard.ROOT / "target/release")}
+    env = {**os.environ, **dashboard.fixture_environment(), "DYLD_LIBRARY_PATH": str(dashboard.ROOT / "target/release"),
+           "DYLD_INSERT_LIBRARIES": str(library)}
+    for side in ("original", "rust"):
+        (dashboard.REPORT / "windows" / side).mkdir(parents=True, exist_ok=True)
     for theme in dashboard.THEMES:
         for kind in ("sample", "empty", "overflow"):
             name = f"popover-{kind}-{theme}"
@@ -88,8 +94,10 @@ def compare_popovers(work, app, originals, results, save_results):
             state.write_text(json.dumps(data, ensure_ascii=False))
             original, native = originals / f"{name}.png", dashboard.REPORT / f"{name}.png"
             try:
-                subprocess.run([app, state, "popover", original, wire, "--demo", "--reference-ui"], env=env, timeout=30, check=True)
-                subprocess.run([probe, wire, native], env=env, timeout=30, check=True)
+                def visible(side):
+                    return {**env, "QUOTABAR_TEST_POPOVER_FRAME": str(dashboard.REPORT / "windows" / side / f"{name}.png")}
+                subprocess.run([app, state, "popover", original, wire, "--demo", "--reference-ui"], env=visible("original"), timeout=30, check=True)
+                subprocess.run([probe, wire, native], env=visible("rust"), timeout=30, check=True)
                 subprocess.run([app, "--pixels", original, native, result, "--reference-ui"], env=env, timeout=30, check=True)
                 results[name] = json.loads(result.read_text())
                 print(f"{name}: {results[name]['changedPixels']} different pixels", flush=True)
@@ -129,7 +137,7 @@ def main():
                     results[name] = {"identical": False, "error": str(error)}
                     print(f"{name}: {error}", flush=True)
                 save_results()
-        compare_popovers(work, app, originals, results, save_results)
+        compare_popovers(work, app, originals, results, save_results, library)
         windows_match = dashboard_actions.compare_windows(dashboard, work, app, library)
     save_results()
     return 0 if actions_match and windows_match and all(record["identical"] for record in results.values()) else 1

@@ -15,7 +15,7 @@ struct Store {
 impl Store {
     fn new() -> Self {
         let root = std::env::temp_dir().join(format!("quotabar-mac-settings-{}", Uuid::new_v4()));
-        fs::create_dir(&root).unwrap();
+        crate::files::ensure_private_directory(&root).unwrap();
         Self {
             path: root.join("settings.json"),
             vault: root.join("Credentials"),

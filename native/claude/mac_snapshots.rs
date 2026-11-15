@@ -127,7 +127,7 @@ mod tests {
         fn new() -> Self {
             let path =
                 std::env::temp_dir().join(format!("quotabar-mac-snapshots-{}", Uuid::new_v4()));
-            fs::create_dir(&path).unwrap();
+            crate::files::ensure_private_directory(&path).unwrap();
             Self(path)
         }
     }

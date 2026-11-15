@@ -165,6 +165,13 @@ def capture_windows(dashboard, program, folder, library, fixture, output, theme)
             try:
                 observed[route] = controls.request("snapshot", "sheet" if sheet else "dashboard")
                 shutil.copyfile(folder / "frame.png", output / f"{route}-{theme}.png")
+                if route in ("dashboard", "connect-claude"):
+                    # A second frame from the untouched window measures e.g. caret blinking.
+                    time.sleep(0.55)
+                    controls.request("snapshot", "sheet" if sheet else "dashboard")
+                    repeat = output / "repeat"
+                    repeat.mkdir(exist_ok=True)
+                    shutil.copyfile(folder / "frame.png", repeat / f"{route}-{theme}.png")
             except (ValueError, OSError) as error:
                 observed[route] = {"error": str(error)}
 
@@ -200,7 +207,7 @@ def capture_windows(dashboard, program, folder, library, fixture, output, theme)
 
 def compare_windows(dashboard, work, original, library):
     dest = dashboard.REPORT / "windows"
-    results = {"original": {}, "rust": {}, "comparisons": {}}
+    results = {"original": {}, "rust": {}, "comparisons": {}, "repeatability": {}}
     for side, program in (("original", original), ("rust", dashboard.APP)):
         output = dest / side
         output.mkdir(parents=True, exist_ok=True)
@@ -209,7 +216,7 @@ def compare_windows(dashboard, work, original, library):
             results[side][theme] = capture_windows(dashboard, program, work / f"windows-{side}-{theme}",
                                                   library, fixture, output, theme)
     for theme in dashboard.THEMES:
-        for route in dashboard.ROUTES:
+        for route in (*dashboard.ROUTES, "popover-sample", "popover-empty", "popover-overflow"):
             name = f"{route}-{theme}"
             lhs, rhs = (dest / side / f"{name}.png" for side in ("original", "rust"))
             if not lhs.is_file() or not rhs.is_file():
@@ -221,6 +228,13 @@ def compare_windows(dashboard, work, original, library):
                 results["comparisons"][name] = json.loads(result.read_text())
             except (OSError, ValueError, subprocess.SubprocessError) as error:
                 results["comparisons"][name] = {"identical": False, "error": str(error)}
+    for side in ("original", "rust"):
+        results["repeatability"][side] = {}
+        for repeated in sorted((dest / side / "repeat").glob("*.png")):
+            result = work / "repeat-pixels.json"
+            subprocess.run([original, "--pixels", repeated, dest / side / repeated.name, result, "--reference-ui"],
+                           check=True, timeout=20)
+            results["repeatability"][side][repeated.stem] = json.loads(result.read_text())
     (dest / "comparison.json").write_text(json.dumps(results, ensure_ascii=False, indent=2))
     return all(row["identical"] for row in results["comparisons"].values())
 

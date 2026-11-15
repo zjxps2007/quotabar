@@ -142,7 +142,7 @@ mod tests {
     #[test]
     fn managed_login_revokes_pending_rotation_before_replacing_the_saved_credential() {
         let root = std::env::temp_dir().join(format!("quotabar-managed-login-{}", Uuid::new_v4()));
-        fs::create_dir(&root).unwrap();
+        crate::files::ensure_private_directory(&root).unwrap();
         let directory = root.join("Credentials");
         let login = br#"{"access_token":"old","account_id":"a","user_id":"u"}"#;
         let rotated = br#"{"access_token":"new","account_id":"a","user_id":"u"}"#;

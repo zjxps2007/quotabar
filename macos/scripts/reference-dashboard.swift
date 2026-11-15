@@ -16,6 +16,7 @@ extension AppDelegate {
         guard let view = popover?.contentViewController?.view else { throw CocoaError(.fileReadUnknown) }
         RunLoop.main.run(until: Date().addingTimeInterval(1))
         try saveReferenceView(view, to: output)
+        captureVisiblePopover(view)
         let accounts: [[String: Any]] = try store.accounts.map { account in
             let snapshot = store.snapshots[account.id]
             let windows = try JSONSerialization.jsonObject(with: JSONEncoder().encode(snapshot?.windows ?? []))
