@@ -1,12 +1,16 @@
 """Drive the packaged dashboard through the private macOS monitor protocol."""
+import hashlib
 import json
 import os
 from pathlib import Path
+import platform
+import plistlib
 import select
 import struct
 import subprocess
 import tempfile
 import time
+import uuid
 
 ROOT = Path(__file__).resolve().parents[2]
 APP = ROOT / "artifacts/QuotaBar.app/Contents/Helpers/QuotaBar Dashboard.app/Contents/MacOS/QuotaBar"
@@ -55,9 +59,32 @@ def wait_for(pipe, name):
             return event[name]
 
 
+def update_receipt(home):
+    """Set up the helper's existing install.json for the just-started packaged app."""
+    bundle = MONITOR.parents[2]
+    info = plistlib.loads((bundle / "Contents/Info.plist").read_bytes())
+    version = info["CFBundleShortVersionString"]
+    archive = ROOT / f"artifacts/QuotaBar-{version}-macOS-{platform.machine()}.zip"
+    if not archive.is_file():
+        archive = home / archive.name
+        subprocess.run(["/usr/bin/ditto", "-c", "-k", "--keepParent", bundle, archive], check=True)
+    repository = "https://github.com/zjxps2007/quotabar/releases"
+    asset = {"name": archive.name, "bytes": archive.stat().st_size,
+             "sha256": hashlib.sha256(archive.read_bytes()).hexdigest(),
+             "url": f"{repository}/download/v{version}/{archive.name}"}
+    release = {"tag": f"v{version}", "version": version, "page": f"{repository}/tag/v{version}", "asset": asset}
+    directory = home / "Library/Application Support/AIUsage Lite/Updates" / str(uuid.uuid4()).upper()
+    directory.mkdir(mode=0o700, parents=True)
+    plan = {"target": bundle.as_uri(), "currentVersion": "0.0.0", "staged": {
+        "directory": directory.as_uri(), "update": {"build": int(info["CFBundleVersion"]), "release": release, "asset": asset}}}
+    (directory / "install.json").write_text(json.dumps(plan))
+    return directory, version
+
+
 def check_monitor():
     with tempfile.TemporaryDirectory() as home:
-        env = {**os.environ, **fixture_environment(), "HOME": home}
+        home = Path(home).resolve()
+        env = {**os.environ, **fixture_environment(), "HOME": str(home), "CFFIXED_USER_HOME": str(home)}
         with subprocess.Popen([MONITOR, "--dashboard-helper", "--demo"], stdin=subprocess.PIPE,
                               stdout=subprocess.PIPE, env=env, bufsize=0) as child:
             try:
@@ -67,12 +94,14 @@ def check_monitor():
             finally:
                 if child.poll() is None:
                     child.kill()
-        log = Path(home) / "monitor.jsonl"
+        log = home / "monitor.jsonl"
+        transaction, version = update_receipt(home)
         def events():
             if not log.exists():
                 return []
             return [json.loads(line) for line in log.read_text().splitlines(keepends=True) if line.endswith("\n")]
-        with subprocess.Popen([MONITOR, "--demo", "--menu-bar-only", "--memory-probe", "--diagnostics", log], env=env) as child:
+        with subprocess.Popen([MONITOR, "--demo", "--menu-bar-only", "--memory-probe", "--diagnostics", log,
+                               "--update-ack", transaction.name], env=env) as child:
             try:
                 deadline = time.monotonic() + 35
                 while not any(e["event"] == "memory-probe-idle" for e in events()):
@@ -92,8 +121,11 @@ def check_monitor():
         assert "ui-launched" in names and "ui-terminated" in names
         assert names.count("popover-opened") >= 2 and names.count("popover-closed") >= 2
         assert not idle["dashboardRetained"] and not idle["popoverVisible"]
+        receipt = transaction / "started.json"
+        result = json.loads(receipt.read_bytes())
+        assert result["success"] and result["version"] == version and receipt.stat().st_mode & 0o077 == 0
         (REPORT / "monitor.json").write_text(json.dumps(records, indent=2))
-        print("PASS packaged monitor launch, legacy helper forwarding, menu-only lifetime and AppKit termination")
+        print("PASS packaged monitor launch, update startup acknowledgement, legacy helper forwarding, menu-only lifetime and AppKit termination")
 
 
 def write_fixtures():
