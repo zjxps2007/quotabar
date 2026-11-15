@@ -117,13 +117,13 @@ struct InstallResult {
     message: String,
 }
 
-fn verified_stage(
-    update: &Verified,
+fn read_signed_manifest(
+    release: &Release,
     platform: Platform,
     current: &str,
     stage: &Path,
     key: &str,
-) -> io::Result<()> {
+) -> io::Result<Verified> {
     use crate::files::read_file;
     let manifest = stage.join("update-manifest.json");
     let signature = stage.join("update-manifest.sig");
@@ -131,14 +131,24 @@ fn verified_stage(
     for path in [&manifest, &signature] {
         crate::files::reject_links(path)?;
     }
-    let checked = verify_manifest(
-        &update.release,
+    verify_manifest(
+        release,
         platform,
         current,
         &read_file(&manifest, MAX_MANIFEST)?,
         &read_file(&signature, 128)?,
         key,
-    )?;
+    )
+}
+
+fn verified_stage(
+    update: &Verified,
+    platform: Platform,
+    current: &str,
+    stage: &Path,
+    key: &str,
+) -> io::Result<()> {
+    let checked = read_signed_manifest(&update.release, platform, current, stage, key)?;
     if checked != *update {
         return Err(invalid("Staged update mismatch"));
     }

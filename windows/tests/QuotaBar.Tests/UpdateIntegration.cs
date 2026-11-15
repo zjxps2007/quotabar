@@ -51,12 +51,32 @@ internal static class UpdateIntegration
             byte[] signature = key.SignData(manifest, HashAlgorithmName.SHA256, DSASignatureFormat.Rfc3279DerSequence);
             PrivateFiles.Write(Path.Combine(directory, "update-manifest.json"), manifest); PrivateFiles.Write(Path.Combine(directory, "update-manifest.sig"), signature);
             var staged = new StagedUpdate(UpdateSignature.Verify(manifest, signature, UpdateInstaller.PublicKey, release, current), directory);
+            string signatureFile = Path.Combine(directory, "update-manifest.sig");
+            PrivateFiles.Write(signatureFile, new byte[signature.Length]);
+            try
+            {
+                await UpdateInstaller.Prepare(staged, paths, target, current, CancellationToken.None);
+                throw new InvalidDataException("Prepared an update with an invalid signature.");
+            }
+            catch (UsageException error) when (error.Code == "update_signature") { }
+            Suite.Check(!Directory.Exists(Path.Combine(directory, "Helper")) && !File.Exists(Path.Combine(directory, "install.json")));
+            PrivateFiles.Write(signatureFile, signature);
             string job = await UpdateInstaller.Prepare(staged, paths, target, current, CancellationToken.None);
-            var plan = Json.Read<WindowsUpdatePlan>(File.ReadAllBytes(job)) with { ParentPid = monitor.Id, ParentStarted = monitor.StartTime.ToUniversalTime().Ticks };
+            byte[] prepared = File.ReadAllBytes(job);
+            bool rejected = false;
+            try { await UpdateInstaller.Prepare(staged, paths, target, current, CancellationToken.None); }
+            catch (IOException) { rejected = true; }
+            Suite.Check(rejected && File.ReadAllBytes(job).SequenceEqual(prepared));
+            var plan = Json.Read<WindowsUpdatePlan>(prepared);
+            using var preparingProcess = Process.GetCurrentProcess();
+            Suite.Check(plan.ParentPid == preparingProcess.Id && plan.ParentStarted == preparingProcess.StartTime.ToUniversalTime().Ticks);
+            plan = plan with { ParentPid = monitor.Id, ParentStarted = monitor.StartTime.ToUniversalTime().Ticks };
             PrivateFiles.Write(job, Json.Bytes(plan));
-            helper = UpdateInstaller.LaunchHelper(job);
-            await Until(() => UpdateInstaller.ReadResult(Path.Combine(directory, "installer-ready.json")) is { Success: true }, "helper ready");
+            using var handoff = UpdateInstaller.Helper.Start(job);
+            helper = Process.GetProcessById(handoff.ProcessId);
+            await Until(handoff.IsReady, "helper ready");
             Suite.Check(!helper.HasExited && !monitor.HasExited);
+            handoff.Detach();
             monitor.Kill(); await monitor.WaitForExitAsync(); // Release the real old executable and its lease.
             using var timeout = new CancellationTokenSource(TimeSpan.FromMinutes(3)); await helper.WaitForExitAsync(timeout.Token);
             var result = UpdateInstaller.ReadResult(UpdateInstaller.ResultPath(paths));

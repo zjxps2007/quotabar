@@ -21,6 +21,8 @@ try {
     }
     $proxyLicenses = New-Item -ItemType Directory -Force -Path (Join-Path $bundle 'licenses\libcurl')
     Copy-Item -LiteralPath (Join-Path $RepoRoot 'windows\assets\Proxy-LICENSE') -Destination (Join-Path $proxyLicenses.FullName 'LICENSE')
+    $zipLicenses = New-Item -ItemType Directory -Force -Path (Join-Path $bundle 'licenses\ZIP')
+    Copy-Item -LiteralPath (Join-Path $RepoRoot 'windows\assets\Zip-LICENSE') -Destination (Join-Path $zipLicenses.FullName 'LICENSE')
     $arrowLicense = New-Item -ItemType Directory -Force -Path (Join-Path $bundle 'licenses\Windows Forms')
     Copy-Item -LiteralPath (Join-Path $RepoRoot 'windows\assets\WinForms-LICENSE') -Destination (Join-Path $arrowLicense.FullName 'LICENSE')
     $frameworks = (Get-Content -LiteralPath (Join-Path $bundle 'QuotaBar.Monitor.runtimeconfig.json') -Raw | ConvertFrom-Json).runtimeOptions.includedFrameworks

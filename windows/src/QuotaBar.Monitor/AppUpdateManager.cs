@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using QuotaBar.Core;
 using QuotaBar.Windows;
 
@@ -77,26 +76,25 @@ internal sealed class AppUpdateManager : IDisposable
     private async Task Apply(bool force, CancellationToken token)
     {
         if (disposed || staged == null || !UpdatePolicy.BeginHandoff(policy, force)) return;
-        Process? helper = null; bool handedOff = false, paused = false;
+        UpdateInstaller.Helper? helper = null; bool handedOff = false, paused = false;
         try
         {
             Set(State with { Phase = UpdatePhase.Installing, Progress = null });
             var payload = staged;
-            job ??= await Task.Run(() => UpdateInstaller.Prepare(payload, paths, AppContext.BaseDirectory, Brand.Version, token), token);
+            job ??= await UpdateInstaller.Prepare(payload, paths, AppContext.BaseDirectory, Brand.Version, token);
             token.ThrowIfCancellationRequested();
             if (!Allowed(force)) { Set(State with { Phase = UpdatePhase.Ready }); return; }
             paused = true; await prepareExit(); token.ThrowIfCancellationRequested();
             if (!Allowed(force)) { Set(State with { Phase = UpdatePhase.Ready }); return; }
-            helper = UpdateInstaller.LaunchHelper(job);
+            helper = UpdateInstaller.Helper.Start(job);
             bool ready = false;
             for (int attempt = 0; attempt < 200; attempt++)
             {
-                token.ThrowIfCancellationRequested(); if (helper.HasExited) throw new IOException("Update helper exited.");
-                var result = UpdateInstaller.ReadResult(Path.Combine(staged.Directory, "installer-ready.json"));
-                if (result is { Success: true } && result.Version == staged.Update.Release.Version) { ready = true; break; }
+                token.ThrowIfCancellationRequested();
+                if (helper.IsReady()) { ready = true; break; }
                 await Task.Delay(100, token);
             }
-            if (!ready || helper.HasExited) throw new IOException("Update helper did not become ready.");
+            if (!ready || !helper.IsReady()) throw new IOException("Update helper did not become ready.");
             if (!Allowed(force)) { Set(State with { Phase = UpdatePhase.Ready }); return; }
             handedOff = true;
             await exit(); // Drains credential rotations and closes Dashboard before releasing the instance lease.
@@ -106,8 +104,7 @@ internal sealed class AppUpdateManager : IDisposable
         {
             if (helper != null)
             {
-                if (!handedOff && !helper.HasExited)
-                { try { helper.Kill(); await helper.WaitForExitAsync(); } catch (InvalidOperationException) { } }
+                if (handedOff) helper.Detach();
                 helper.Dispose();
             }
             if (paused && !handedOff) resume();
@@ -142,12 +139,7 @@ internal sealed class AppUpdateManager : IDisposable
         if (staged == null) return;
         try
         {
-            if (Guid.TryParse(Path.GetFileName(staged.Directory), out var transaction))
-            {
-                var replacement = new UpdateReplacement(AppContext.BaseDirectory, transaction);
-                if (!Directory.Exists(replacement.Backup) && Directory.Exists(replacement.Incoming)) Directory.Delete(replacement.Incoming, true);
-            }
-            Directory.Delete(staged.Directory, true);
+            UpdateInstaller.Discard(paths, AppContext.BaseDirectory, staged.Directory);
         }
         catch (IOException) { } catch (UnauthorizedAccessException) { }
         staged = null; job = null;

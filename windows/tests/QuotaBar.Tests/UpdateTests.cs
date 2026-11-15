@@ -139,10 +139,15 @@ internal static class UpdateTests
             Zip("QuotaBar-Windows-x64/version.txt", "QuotaBar-Windows-x64/Dashboard/component.txt");
             UpdateInstaller.OverlayZip(archive, incoming, CancellationToken.None);
             Suite.Check(File.ReadAllText(Path.Combine(incoming, "user.txt")) == "preserved" && File.ReadAllText(Path.Combine(incoming, "version.txt")) == "new");
-            foreach (string name in new[] { "../escape", "QuotaBar-Windows-x64/../../escape", "QuotaBar-Windows-x64/C:/escape", "QuotaBar-Windows-x64/dir./escape" })
+            foreach (string name in new[] { "../escape", "QuotaBar-Windows-x64/../../escape", "QuotaBar-Windows-x64/C:/escape", "QuotaBar-Windows-x64/dir./escape", "QuotaBar-Windows-x64//escape", "QuotaBar-Windows-x64/CON.txt" })
             { Zip(name); Suite.Throws<IOException>(() => UpdateInstaller.OverlayZip(archive, incoming, CancellationToken.None)); }
             Zip("QuotaBar-Windows-x64/file", "QuotaBar-Windows-x64/FILE");
             Suite.Throws<IOException>(() => UpdateInstaller.OverlayZip(archive, incoming, CancellationToken.None));
+            Zip("QuotaBar-Windows-x64/exact", "QuotaBar-Windows-x64/exact");
+            Suite.Throws<IOException>(() => UpdateInstaller.OverlayZip(archive, incoming, CancellationToken.None));
+            var cancelled = new CancellationToken(canceled: true);
+            Suite.Throws<OperationCanceledException>(() => UpdateInstaller.CopyTree(target, Path.Combine(root, "cancelled"), cancelled));
+            Suite.Check(!Directory.Exists(Path.Combine(root, "cancelled")));
             Suite.Check(!File.Exists(Path.Combine(root, "escape")));
         }
         finally { Directory.Delete(root, true); }

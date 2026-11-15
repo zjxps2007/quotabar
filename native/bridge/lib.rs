@@ -36,6 +36,8 @@ mod storage;
 mod update_monitor;
 mod vault;
 #[cfg(windows)]
+mod windows_installer;
+#[cfg(windows)]
 mod windows_login;
 #[cfg(windows)]
 mod windows_operation;

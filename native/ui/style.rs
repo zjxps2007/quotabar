@@ -925,6 +925,9 @@ pub fn checkbox(ui: &mut Ui, checked: &mut bool, title: &str, size: f32, p: Pale
         WidgetInfo::selected(WidgetType::Checkbox, ui.is_enabled(), *checked, title)
     });
     let box_rect = Rect::from_center_size(pos2(row.left() + 6.5, row.center().y), Vec2::splat(13.));
+    // SwiftUI aligns the small AppKit switch cell just below the text row's center.
+    #[cfg(target_os = "macos")]
+    let box_rect = box_rect.translate(vec2(0., 1.));
     #[cfg(target_os = "macos")]
     if crate::mac::draw_checkbox(ui, box_rect, *checked, response.is_pointer_button_down_on()) {
         if response.has_focus() {

@@ -3,7 +3,7 @@ use crate::files::{
     ensure_private_directory, invalid, read_file, reject_links, wide, write_private,
 };
 use crate::instance::acquire_lease;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::{
     ffi::OsString,
     fs, io,
@@ -29,12 +29,17 @@ use windows_sys::Win32::{
 const UNINSTALL: &str = r"Software\Microsoft\Windows\CurrentVersion\Uninstall\QuotaBar.Windows_is1";
 const RETRY: Duration = Duration::from_millis(200);
 
-#[derive(Deserialize)]
+mod installer;
+mod package;
+pub use installer::{Installer, PreparationError, acknowledge, clean_completed, discard, prepare};
+pub use package::{copy_tree, overlay_zip};
+
+#[derive(Deserialize, Serialize)]
 struct Staged {
     update: Verified,
     directory: PathBuf,
 }
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct Plan {
     staged: Staged,
@@ -75,7 +80,8 @@ fn reg_status(status: u32) -> io::Result<()> {
         Err(io::Error::from_raw_os_error(status as i32))
     }
 }
-fn installed(target: &Path) -> io::Result<bool> {
+pub fn installed(target: &Path) -> io::Result<bool> {
+    let target: PathBuf = std::path::absolute(target)?.components().collect();
     let key = wide_string(UNINSTALL);
     let value = wide_string("InstallLocation");
     let mut bytes = 0;
@@ -110,7 +116,7 @@ fn installed(target: &Path) -> io::Result<bool> {
         let name = PathBuf::from(OsString::from_wide(&buffer[..end]));
         Ok(same(
             &std::path::absolute(name)?.components().collect::<PathBuf>(),
-            target,
+            &target,
         ))
     }
 }
@@ -259,22 +265,16 @@ impl Replacement {
     }
 }
 
-fn copy_tree(source: &Path, destination: &Path) -> io::Result<()> {
-    reject_links(source)?;
-    reject_links(destination)?;
-    fs::create_dir(destination)?;
-    for entry in fs::read_dir(source)? {
-        let entry = entry?;
-        let path = entry.path();
-        let target = destination.join(entry.file_name());
-        reject_links(&path)?;
-        if entry.file_type()?.is_dir() {
-            copy_tree(&path, &target)?;
-        } else {
-            fs::copy(&path, &target)?;
-        }
+fn process_started(handle: HANDLE) -> io::Result<i64> {
+    let [mut created, mut exited, mut kernel, mut user] = [FILETIME::default(); 4];
+    if unsafe { GetProcessTimes(handle, &mut created, &mut exited, &mut kernel, &mut user) } == 0 {
+        return Err(io::Error::last_os_error());
     }
-    Ok(())
+    let file_ticks = (i64::from(created.dwHighDateTime) << 32) | i64::from(created.dwLowDateTime);
+    // Windows FILETIME starts in 1601. The on-disk .NET plan uses ticks since year 1.
+    file_ticks
+        .checked_add(504_911_232_000_000_000)
+        .ok_or_else(|| invalid("Invalid process creation time"))
 }
 
 fn wait_parent(pid: u32, started: i64) -> io::Result<()> {
@@ -293,22 +293,7 @@ fn wait_parent(pid: u32, started: i64) -> io::Result<()> {
             };
         }
         let process = OwnedHandle::from_raw_handle(raw);
-        let mut created = FILETIME::default();
-        let mut exited = FILETIME::default();
-        let mut kernel = FILETIME::default();
-        let mut user = FILETIME::default();
-        if GetProcessTimes(
-            process.as_raw_handle(),
-            &mut created,
-            &mut exited,
-            &mut kernel,
-            &mut user,
-        ) == 0
-        {
-            return Err(io::Error::last_os_error());
-        }
-        let file_ticks = ((created.dwHighDateTime as i64) << 32) | created.dwLowDateTime as i64;
-        if file_ticks.checked_add(504_911_232_000_000_000) != Some(started) {
+        if process_started(process.as_raw_handle())? != started {
             return Ok(());
         }
         if WaitForSingleObject(process.as_raw_handle(), 120_000) != WAIT_OBJECT_0 {
@@ -429,7 +414,11 @@ pub fn apply(job: &Path) -> io::Result<()> {
         lock = Some(acquire_lease(&plan.data_root, Duration::from_secs(30))?);
         validate_version(&plan.target, &plan.current_version)?;
         if plan.installer {
-            copy_tree(&plan.target, &replacement.backup)?;
+            copy_tree(
+                &plan.target,
+                &replacement.backup,
+                &std::sync::atomic::AtomicBool::new(false),
+            )?;
             changed = true;
             plan.install()?;
         } else {
