@@ -1,5 +1,6 @@
 import Foundation
 import UsageCore
+import CQuotaBar
 
 @MainActor
 final class AppUpdateManager {
@@ -11,13 +12,9 @@ final class AppUpdateManager {
     private let exit: () -> Void
     private var task: Task<Void, Never>?
     private var timer: Timer?
-    private var lastAttempt: Date?
+    private let policy = qb_update_policy_new()!
     private var staged: StagedUpdate?
     private var job: URL?
-    private var blockedVersion: String?
-    private var enabled = false
-    private var canInstall = false
-    private var suspended = false
     private var state = AppUpdateState() { didSet { onState(state) } }
     private var currentVersion: String { Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "dev" }
 
@@ -26,34 +23,36 @@ final class AppUpdateManager {
         self.onState = onState; self.prepareExit = prepareExit; self.resume = resume; self.exit = exit
         if let data = try? Data(contentsOf: MacUpdateInstaller.resultURL), data.count < 4096,
            let previous = try? JSONDecoder().decode(UpdateInstallResult.self, from: data), !previous.success {
-            blockedVersion = previous.version
+            qb_update_block(policy, previous.version)
             state = AppUpdateState(phase: .failed, version: previous.version, message: previous.message)
         }
     }
 
+    deinit { qb_update_policy_free(policy) }
+
     func configure(enabled: Bool, canInstall: Bool, suspended: Bool = false) {
-        let stop = (self.enabled && !enabled) || (!self.suspended && suspended)
-        self.enabled = enabled; self.canInstall = canInstall; self.suspended = suspended
+        let action = qb_update_configure(policy, enabled ? 1 : 0, canInstall ? 1 : 0, suspended ? 1 : 0)
         onState(state)
-        if !enabled || suspended {
-            timer?.invalidate(); timer = nil
-            if stop, state.phase != .installing { task?.cancel() }
-        }
-        if enabled, !suspended, canInstall, staged != nil, task == nil { install(force: false) }
+        if action == QBUpdateCancel { task?.cancel() }
+        if action == QBUpdateInstall { install(force: false) }
         else { schedule() }
     }
 
     func check(manual: Bool = true, install: Bool = false) {
-        guard task == nil, !suspended else { return }
+        guard qb_update_begin_check(policy, manual ? 1 : 0) != 0 else { return }
         timer?.invalidate(); timer = nil
-        if manual { blockedVersion = nil }
         task = Task { [weak self] in
             guard let self else { return }
-            defer { self.task = nil; self.schedule() }
+            var cancelled = false
+            defer {
+                self.task = nil
+                qb_update_finish(self.policy, cancelled ? 1 : 0)
+                self.schedule()
+            }
             do {
                 self.discardPreparedUpdate()
                 self.state = AppUpdateState(phase: .checking)
-                self.lastAttempt = Date()
+                qb_update_attempted(self.policy, Date().timeIntervalSince1970)
                 #if arch(arm64)
                 let platform: ReleasePlatform = .macOSArm64
                 #else
@@ -63,15 +62,16 @@ final class AppUpdateManager {
                     self.state = AppUpdateState(phase: .idle, message: "공개된 정식 릴리즈가 없습니다.", checkedAt: Date()); return
                 }
                 try Task.checkCancellation()
-                guard release.isNewer(than: self.currentVersion) else {
+                let offer = qb_update_offer(self.policy, self.currentVersion, release.version)
+                if offer == QBUpdateCurrent {
                     self.state = AppUpdateState(phase: .current, version: self.currentVersion, checkedAt: Date()); return
                 }
-                guard release.version != self.blockedVersion else {
+                if offer == QBUpdateBlocked {
                     self.state = AppUpdateState(phase: .failed, version: release.version,
                         message: "이 버전의 자동 설치에 실패했습니다. ‘업데이트 확인’으로 다시 시도할 수 있습니다.", checkedAt: Date()); return
                 }
                 self.state = AppUpdateState(phase: .available, version: release.version, checkedAt: Date())
-                guard self.enabled || install else { return }
+                guard qb_update_should_download(self.policy, install ? 1 : 0) != 0 else { return }
                 guard release.asset != nil else {
                     self.state.message = "이 Mac에 맞는 업데이트 파일이 아직 없습니다."; return
                 }
@@ -86,14 +86,15 @@ final class AppUpdateManager {
                         }
                     }
                 self.staged = payload
+                qb_update_staged(self.policy, release.version)
                 try Task.checkCancellation()
                 self.state = AppUpdateState(phase: .ready, version: release.version, checkedAt: Date())
-                if install || (self.enabled && self.canInstall) { await self.apply(force: install) }
+                await self.apply(force: install)
             } catch is CancellationError {
-                self.lastAttempt = nil; self.discardPreparedUpdate(); self.state = AppUpdateState()
+                cancelled = true; self.discardPreparedUpdate(); self.state = AppUpdateState()
             } catch {
                 if Task.isCancelled {
-                    self.lastAttempt = nil; self.discardPreparedUpdate(); self.state = AppUpdateState(); return
+                    cancelled = true; self.discardPreparedUpdate(); self.state = AppUpdateState(); return
                 }
                 self.state = AppUpdateState(phase: .failed, version: self.state.version,
                     message: (error as? ProviderError)?.message ?? "자동 업데이트를 완료하지 못했습니다. 현재 앱을 유지합니다.", checkedAt: Date())
@@ -102,11 +103,13 @@ final class AppUpdateManager {
     }
 
     func install(force: Bool) {
-        guard task == nil, let staged, force || staged.update.release.version != blockedVersion else { return }
+        guard qb_update_begin_install(policy, force ? 1 : 0) != 0 else { return }
         task = Task { [weak self] in
             guard let self else { return }
             await self.apply(force: force)
-            self.task = nil; self.schedule()
+            self.task = nil
+            qb_update_finish(self.policy, 0)
+            self.schedule()
         }
     }
 
@@ -116,7 +119,8 @@ final class AppUpdateManager {
     }
 
     private func apply(force: Bool) async {
-        guard let staged, !suspended, force || (enabled && canInstall) else { return }
+        let requested: Int32 = force ? 1 : 0
+        guard let staged, qb_update_begin_handoff(policy, requested) != 0 else { return }
         var helper: MacUpdateInstaller.Helper?
         var paused = false
         do {
@@ -126,10 +130,10 @@ final class AppUpdateManager {
                 job = try await Task.detached { try MacUpdateInstaller.prepare(staged, target: target, currentVersion: version) }.value
             }
             try Task.checkCancellation()
-            guard !suspended, force || (enabled && canInstall) else { state.phase = .ready; return }
+            guard qb_update_may_install(policy, requested) != 0 else { state.phase = .ready; return }
             paused = true; try await prepareExit()
             try Task.checkCancellation()
-            guard !suspended, force || (enabled && canInstall) else { resume(); state.phase = .ready; return }
+            guard qb_update_may_install(policy, requested) != 0 else { resume(); state.phase = .ready; return }
             let process = try MacUpdateInstaller.Helper(job: job!); helper = process
             var acknowledged = false
             for _ in 0..<200 {
@@ -138,7 +142,7 @@ final class AppUpdateManager {
                 try await Task.sleep(for: .milliseconds(100))
             }
             guard acknowledged, try process.isReady() else { throw CocoaError(.executableLoad) }
-            guard !suspended, force || (enabled && canInstall) else {
+            guard qb_update_may_install(policy, requested) != 0 else {
                 process.finish(terminate: true); resume(); state.phase = .ready; return
             }
             process.finish(terminate: false)
@@ -146,7 +150,7 @@ final class AppUpdateManager {
         } catch {
             helper?.finish(terminate: true)
             if paused { resume() }
-            blockedVersion = staged.update.release.version
+            qb_update_block(policy, staged.update.release.version)
             state = AppUpdateState(phase: .failed, version: staged.update.release.version,
                 message: "업데이트 설치를 시작하지 못했습니다. 현재 앱을 유지합니다.", checkedAt: Date())
         }
@@ -154,9 +158,8 @@ final class AppUpdateManager {
 
     private func schedule() {
         timer?.invalidate(); timer = nil
-        guard enabled, !suspended, task == nil,
-              staged == nil || staged?.update.release.version == blockedVersion else { return }
-        let delay = max(15, (lastAttempt?.addingTimeInterval(24 * 60 * 60).timeIntervalSinceNow) ?? 15)
+        let delay = qb_update_delay(policy, Date().timeIntervalSince1970)
+        guard delay > 0 else { return }
         timer = Timer.scheduledTimer(withTimeInterval: delay, repeats: false) { [weak self] _ in
             MainActor.assumeIsolated { self?.check(manual: false) }
         }

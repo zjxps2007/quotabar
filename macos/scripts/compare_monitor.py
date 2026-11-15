@@ -3,6 +3,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import plistlib
 import runpy
 import shutil
 import subprocess
@@ -61,6 +62,7 @@ def dashboard_probe():
     output = Path(os.environ["QUOTABAR_TEST_REFRESH_RESULT"])
     sample = Path(os.environ["QUOTABAR_TEST_SAMPLE"])
     checkpoints = []
+    updates = []
 
     def command(name, *values):
         wire["send"](outgoing, {name: {f"_{i}": v for i, v in enumerate(values)}})
@@ -68,6 +70,32 @@ def dashboard_probe():
     def set_usage(used):
         saved = json.loads(sample.read_bytes())
         post_statusline(os.environ["QUOTABAR_TEST_STATUSLINE"], sample, saved["generation"], used, os.environ)
+
+    def check_update(name, status, tag, phase, version=None, message=None):
+        home = output.parent
+        response = {"tag_name": tag, "draft": False, "prerelease": False, "assets": [],
+                    "html_url": f"https://github.com/zjxps2007/quotabar/releases/tag/{tag}"} if tag else {}
+        tmp = home / "release-response.tmp"
+        write_json(tmp, {"status": status, "body": response})
+        tmp.replace(home / "release-response.json")
+        command("checkAppUpdate")
+        deadline = time.monotonic() + 8
+        last = None
+        while time.monotonic() < deadline:
+            try:
+                event = wire["receive"](incoming, deadline)
+            except TimeoutError:
+                break
+            if "state" not in event:
+                continue
+            last = event["state"]["_0"].get("appUpdate", {})
+            if (last.get("phase"), last.get("version"), last.get("message")) != (phase, version, message):
+                continue
+            assert last.get("checkedAt") is not None, last
+            updates.append({"step": name, "phase": phase, "version": "installed" if phase == "current" else version,
+                            "message": message, "http": status})
+            return
+        raise AssertionError((name, last))
 
     def expect(name, remaining, enabled, failed, members=IDS, marker=None):
         deadline = time.monotonic() + 8
@@ -113,9 +141,23 @@ def dashboard_probe():
         expect("enable missing login", 88, IDS, IDS[1:])
         command("remove", IDS[5])
         expect("remove and clear error", 88, IDS[:5], IDS[1:5], members=IDS[:5])
-        write_json(output, {"checkpoints": checkpoints})
+        with (Path(os.environ["QUOTABAR_TEST_STATUSLINE"]).parents[1] / "Info.plist").open("rb") as info:
+            installed = plistlib.load(info)["CFBundleShortVersionString"]
+        offered = "2147483646.0.0"
+        check_update("no published release", 404, None, "idle", message="공개된 정식 릴리즈가 없습니다.")
+        check_update("installed version is current", 200, "v0.0.1", "current", installed)
+        check_update("manual check with automatic updates off", 200, "v" + offered, "available", offered)
+        command("automaticUpdates", True)
+        check_update("automatic update without a platform asset", 200, "v" + offered, "available", offered,
+                     "이 Mac에 맞는 업데이트 파일이 아직 없습니다.")
+        command("automaticUpdates", False)
+        check_update("rate-limited feed", 429, None, "failed", message="업데이트 확인 요청이 제한되었습니다. 잠시 후 다시 시도하세요.")
+        check_update("retry after rate limit", 200, "v" + offered, "available", offered)
+        requests = (output.parent / "release-requests.log").read_text().splitlines()
+        assert requests == [str(s["http"]) for s in updates], requests
+        write_json(output, {"checkpoints": checkpoints, "updates": updates})
     except Exception:
-        write_json(output, {"checkpoints": checkpoints, "error": traceback.format_exc()})
+        write_json(output, {"checkpoints": checkpoints, "updates": updates, "error": traceback.format_exc()})
     finally:
         command("quit")
     try:
@@ -139,6 +181,7 @@ print(URL(fileURLWithPath: CommandLine.arguments[1]).standardizedFileURL.resolvi
     for side, executable in (("original", reference), ("rust", dashboard.MONITOR)):
         home = (work / f"{side}-monitor-home").resolve()
         home.mkdir()
+        (home / "release-requests.log").touch()
         cli = home / "Claude fixture"
         cli.mkdir()
         result, diagnostics = home / "result.json", home / "diagnostics.jsonl"
@@ -175,8 +218,9 @@ print(URL(fileURLWithPath: CommandLine.arguments[1]).standardizedFileURL.resolvi
             results[side] = {**observed, "runningAtLaunch": 3, "queuedAtLaunch": 2, "persistedAccounts": IDS[:5]}
         except (OSError, ValueError, AssertionError, StopIteration, subprocess.SubprocessError) as exc:
             details = json.loads(result.read_text()) if result.exists() else {}
-            results[side] = {**details, "error": str(exc)}
+            requests = (home / "release-requests.log").read_text().splitlines()
+            results[side] = {**details, "releaseResponses": requests, "error": str(exc)}
     matched = "error" not in results["original"] and results["original"] == results["rust"]
     write_json(dashboard.REPORT / "monitor-refresh.json", {"matched": matched, **results})
-    print("Packaged non-demo account refresh:", "PASS" if matched else results, flush=True)
+    print("Packaged non-demo account refresh and update checks:", "PASS" if matched else results, flush=True)
     return matched

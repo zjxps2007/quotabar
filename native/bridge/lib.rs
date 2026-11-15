@@ -31,6 +31,7 @@ mod provider_query;
 mod releases;
 mod schedule;
 mod storage;
+mod update_monitor;
 mod vault;
 #[cfg(windows)]
 mod windows_login;

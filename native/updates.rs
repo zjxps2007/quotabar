@@ -13,6 +13,7 @@ use std::{
 
 #[cfg(target_os = "macos")]
 pub mod macos;
+pub mod monitor;
 #[cfg(windows)]
 pub mod windows;
 

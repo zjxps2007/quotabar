@@ -39,10 +39,11 @@ $updateMonitor = [Diagnostics.Process]::Start($probe)
 try {
     if (-not $updateMonitor.WaitForExit(15000)) { $updateMonitor.Kill(); throw 'Packaged update check timed out.' }
     $update = Get-Content -LiteralPath $updateResult -Raw | ConvertFrom-Json
-    if ($updateMonitor.ExitCode -ne 0 -or -not $update.passed -or $update.monitorPid -ne $updateMonitor.Id -or -not $update.manualCheckWhileAutomaticUpdatesDisabled) {
+    if ($updateMonitor.ExitCode -ne 0 -or -not $update.passed -or $update.monitorPid -ne $updateMonitor.Id -or -not $update.manualCheckWhileAutomaticUpdatesDisabled -or $update.updateChecks.Count -ne 6) {
         throw "Packaged manual update check failed: $($update | ConvertTo-Json -Compress)"
     }
     $data | Add-Member -NotePropertyName manualCheckWhileAutomaticUpdatesDisabled -NotePropertyValue $true
+    $data | Add-Member -NotePropertyName updateChecks -NotePropertyValue $update.updateChecks
 } finally { $updateMonitor.Dispose() }
 # The prototype owns no user data. Verify kernel cleanup after an abrupt monitor exit.
 $start = [Diagnostics.ProcessStartInfo]::new($exe)
