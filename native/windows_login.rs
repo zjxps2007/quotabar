@@ -131,7 +131,7 @@ pub fn login(
         if timeout.is_some_and(|t| start.elapsed() >= t) {
             return Err(LoginError::Timeout);
         }
-        if let Ok(file) = files::open_owned_credential(&auth)
+        if let Ok(file) = files::windows::open_login_credential(&auth)
             && let Ok(bytes) = files::read_bounded(file, MAX_SIZE)
         {
             let bytes = Zeroizing::new(bytes);

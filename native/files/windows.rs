@@ -283,6 +283,14 @@ pub(crate) fn attributes(descriptor: &Local) -> SECURITY_ATTRIBUTES {
 }
 
 pub(crate) fn open_owned_credential(path: &Path) -> io::Result<File> {
+    open_credential(path, false)
+}
+
+pub(crate) fn open_login_credential(path: &Path) -> io::Result<File> {
+    open_credential(path, true)
+}
+
+fn open_credential(path: &Path, created_by_cli: bool) -> io::Result<File> {
     use windows_sys::Win32::Foundation::GENERIC_READ;
     let path = wide_file_path(path)?;
     unsafe {
@@ -310,15 +318,27 @@ pub(crate) fn open_owned_credential(path: &Path) -> io::Result<File> {
         {
             return Err(invalid("Unexpected credential file type or link count"));
         }
-        TokenSid::user()?.check_owner(&handle, SE_FILE_OBJECT)?;
+        if let Err(error) = TokenSid::user()?.check_owner(&handle, SE_FILE_OBJECT) {
+            if !created_by_cli || error.kind() != io::ErrorKind::PermissionDenied {
+                return Err(error);
+            }
+            // The CLI inherits our token. Under elevation its default file owner
+            // can differ from TokenUser. Only accept this in our private login home.
+            TokenSid::owner()?.check_owner(&handle, SE_FILE_OBJECT)?;
+        }
         Ok(File::from(handle))
     }
 }
 
 pub fn ensure_private_directory(path: &Path) -> io::Result<()> {
     reject_links(path)?;
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
+    if let Some(parent) = path.parent()
+        && !parent.as_os_str().is_empty()
+        && !parent.try_exists()?
+    {
+        // Create missing parents with the same user owner and ACL. Using the
+        // process default here can otherwise leave a fresh app root owned by Administrators.
+        ensure_private_directory(parent)?;
     }
     let user = TokenSid::user()?;
     let sd = user.descriptor(true)?;
