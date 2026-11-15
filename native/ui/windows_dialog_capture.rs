@@ -129,7 +129,7 @@ impl DialogFrame {
         let bytes = buffer.slice(..).get_mapped_range();
         let mut pixels = Vec::with_capacity(width as usize * height as usize);
         for row in bytes.chunks_exact(stride as usize) {
-            for rgba in row[..row_bytes as usize].chunks_exact(4) {
+            for rgba in row[..row_bytes as usize].as_chunks::<4>().0 {
                 let (red, blue) = if bgra {
                     (rgba[2], rgba[0])
                 } else {

@@ -36,6 +36,15 @@ fn sheet_picker_label(ui: &mut Ui, title: &str, p: Palette) {
     label(ui, title, 13., false, p.ink);
 }
 
+#[cfg(windows)]
+fn gap_after_single_line(ui: &mut Ui, drawn_height: f32, vertical_padding: f32, gap: f32) {
+    // WPF stacks the natural line boxes before rounding the final window to pixels.
+    // The selector and editor have already rounded their own font layout.
+    let correction = crate::windows_text::line_height(13.)
+        .map_or(0., |line| line + vertical_padding - drawn_height);
+    ui.add_space(gap + correction);
+}
+
 fn full_button(ui: &mut Ui, title: &str, primary: bool, p: Palette) -> bool {
     let fill = if primary { p.accent } else { p.card };
     let ink = if primary { p.on } else { p.ink };
@@ -601,7 +610,7 @@ impl Dashboard {
         );
         ui.add_space(20.);
         let prev = c.provider;
-        ui.add_enabled_ui(!locked && c.replacing.is_none(), |ui| {
+        let _picker = ui.add_enabled_ui(!locked && c.replacing.is_none(), |ui| {
             if MAC {
                 if let Some(s) = ui
                     .horizontal(|ui| {
@@ -647,6 +656,9 @@ impl Dashboard {
                 c.focus_alias = !ui.memory(|m| m.has_focus(Id::new("connect-path")));
             }
         }
+        #[cfg(windows)]
+        gap_after_single_line(ui, _picker.response.rect.height(), 14., 20.);
+        #[cfg(target_os = "macos")]
         ui.add_space(20.);
         if MAC && c.provider == "Codex" && c.replacing.is_none() {
             ui.add_enabled_ui(!locked, |ui| {
@@ -767,8 +779,9 @@ impl Dashboard {
                             crate::windows_text::line_height(13.).unwrap_or(17.) + 34.,
                         ));
                         let field = ui.add(editor);
+                        let height = field.rect.height();
                         crate::accessibility::text_value(ui, field, &mut c.path, "경로");
-                        ui.add_space(10.);
+                        gap_after_single_line(ui, height, 34., 10.);
                         full(ui, "찾아보기", false)
                     }
                 })
