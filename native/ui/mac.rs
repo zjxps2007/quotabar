@@ -159,25 +159,22 @@ pub fn menu_preview(
     }
 }
 
-pub fn symbol(
-    painter: &eframe::egui::Painter,
-    bounds: eframe::egui::Rect,
+fn symbol_texture(
+    ctx: &Context,
     name: &str,
     points: f32,
     semibold: bool,
-    tint: eframe::egui::Color32,
-) -> bool {
-    use eframe::egui::{Id, Pos2, Rect, TextureHandle, pos2};
+) -> Option<eframe::egui::TextureHandle> {
+    use eframe::egui::{Id, TextureHandle};
     use objc2_app_kit::{
         NSFontWeightRegular, NSFontWeightSemibold, NSImage, NSImageSymbolConfiguration,
     };
 
-    let ctx = painter.ctx();
     let scale = ctx.pixels_per_point();
     let pixels = (points * scale).round().max(1.) as u32;
     let id = Id::new(("appkit-symbol", name, pixels, semibold));
     let cached = ctx.data(|d| d.get_temp::<Option<TextureHandle>>(id));
-    let texture = cached.unwrap_or_else(|| {
+    cached.unwrap_or_else(|| {
         let load = || {
             let base = NSImage::imageWithSystemSymbolName_accessibilityDescription(
                 &NSString::from_str(name),
@@ -200,9 +197,43 @@ pub fn symbol(
         let texture = load();
         ctx.data_mut(|d| d.insert_temp(id, texture.clone()));
         texture
-    });
-    let Some(texture) = texture else { return false };
-    let size = texture.size_vec2() / scale;
+    })
+}
+
+pub fn intrinsic_symbol(
+    ui: &mut eframe::egui::Ui,
+    name: &str,
+    points: f32,
+    tint: eframe::egui::Color32,
+) -> bool {
+    use eframe::egui::{Pos2, Rect, Sense, pos2};
+    let Some(texture) = symbol_texture(ui.ctx(), name, points, false) else {
+        return false;
+    };
+    let size = texture.size_vec2() / ui.ctx().pixels_per_point();
+    let (rect, _) = ui.allocate_exact_size(size, Sense::hover());
+    ui.painter().image(
+        texture.id(),
+        rect,
+        Rect::from_min_max(Pos2::ZERO, pos2(1., 1.)),
+        tint,
+    );
+    true
+}
+
+pub fn symbol(
+    painter: &eframe::egui::Painter,
+    bounds: eframe::egui::Rect,
+    name: &str,
+    points: f32,
+    semibold: bool,
+    tint: eframe::egui::Color32,
+) -> bool {
+    use eframe::egui::{Pos2, Rect, pos2};
+    let Some(texture) = symbol_texture(painter.ctx(), name, points, semibold) else {
+        return false;
+    };
+    let size = texture.size_vec2() / painter.ctx().pixels_per_point();
     let fit = (bounds.width() / size.x)
         .min(bounds.height() / size.y)
         .min(1.);

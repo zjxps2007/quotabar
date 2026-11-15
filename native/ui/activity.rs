@@ -106,11 +106,10 @@ impl Dashboard {
         let anchor = ui
             .horizontal(|ui| {
                 ui.vertical(|ui| {
-                    label(ui, "사용 활동", 15., true, p.ink);
-                    ui.add_space(4.);
-                    caption(
+                    crate::dashboard::section_title(
                         ui,
-                        format!(
+                        "사용 활동",
+                        &format!(
                             "최근 26주 · 이 {}의 {} 로그",
                             if MAC { "Mac" } else { "PC" },
                             providers.join(" / ")
@@ -133,7 +132,7 @@ impl Dashboard {
             anchor.scroll_to_me(Some(Align::Min));
             self.scroll_activity = false;
         }
-        ui.add_space(16.);
+        ui.add_space(if MAC { 24. } else { 16. });
         let status = if !self.state.flag("scanLocalLogs", "scanLocalLogs") {
             Some("로컬 통계가 꺼져 있습니다. 설정에서 켤 수 있습니다.")
         } else if self.state.report.is_null() || (MAC && self.state.report["scannedAt"].is_null()) {

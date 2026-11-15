@@ -894,7 +894,7 @@ pub fn named_toggle(
     let height =
         crate::windows_text::natural_size(ui, s, 11., false).map_or(16., |size| size.y.max(16.));
     #[cfg(not(windows))]
-    let height = 19.;
+    let height = 15.;
     let (r, mut response) =
         ui.allocate_exact_size(vec2(ui.available_width(), height), Sense::click());
     button_pressed(ui, &mut response);
@@ -905,10 +905,15 @@ pub fn named_toggle(
         r.left_center(),
         Align2::LEFT_CENTER,
         s,
-        FontId::proportional(11.),
+        FontId::proportional(if cfg!(target_os = "macos") { 10. } else { 11. }),
         p.ink,
     );
-    let t = Rect::from_center_size(r.right_center() - vec2(14., 0.), vec2(28., 16.));
+    let size = if cfg!(target_os = "macos") {
+        vec2(26., 15.)
+    } else {
+        vec2(28., 16.)
+    };
+    let t = Rect::from_center_size(r.right_center() - vec2(size.x * 0.5, 0.), size);
     painter.rect_filled(t, 8, if value { tint } else { p.track });
     painter.circle_filled(
         pos2(
@@ -1006,18 +1011,21 @@ pub fn mark(ui: &mut Ui, size: f32, p: Palette) {
         );
     }
 }
+#[cfg(target_os = "macos")]
+pub fn system_symbol_name(name: &str) -> &'static str {
+    match name {
+        "dashboard" => "square.grid.2x2",
+        "accounts" => "person.2",
+        "settings" => "slider.horizontal.3",
+        "attention" => "exclamationmark.circle",
+        "bolt" => "bolt",
+        _ => "chart.bar",
+    }
+}
 pub fn glyph(painter: &Painter, r: Rect, name: &str, c: Color32, _selected: bool) {
     #[cfg(target_os = "macos")]
     {
-        let symbol = match name {
-            "dashboard" => "square.grid.2x2",
-            "accounts" => "person.2",
-            "settings" => "slider.horizontal.3",
-            "attention" => "exclamationmark.circle",
-            "bolt" => "bolt",
-            _ => "chart.bar",
-        };
-        if crate::mac::symbol(painter, r, symbol, 13., _selected, c) {
+        if crate::mac::symbol(painter, r, system_symbol_name(name), 13., _selected, c) {
             return;
         }
     }

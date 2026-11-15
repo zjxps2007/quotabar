@@ -7,6 +7,7 @@ permissions:
   contents: read
 jobs:
   windows-updater:
+    if: github.ref != 'refs/heads/codex/rust-native' || !contains(github.event.head_commit.message, '[macos-only]')
     runs-on: windows-2025
     timeout-minutes: 25
     steps:
@@ -62,6 +63,7 @@ jobs:
             artifacts/tests.log
             artifacts/macos-dashboard/
   windows:
+    if: github.ref != 'refs/heads/codex/rust-native' || !contains(github.event.head_commit.message, '[macos-only]')
     runs-on: windows-2025
     timeout-minutes: 35
     defaults:

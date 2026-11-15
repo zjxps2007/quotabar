@@ -159,6 +159,9 @@ impl Dashboard {
                 };
                 ui.horizontal(|ui| {
                     ui.vertical(|ui| {
+                        #[cfg(target_os = "macos")]
+                        ui.set_min_height(crate::mac_text::system_line_height(ui, 25.) + 5.
+                            + crate::mac_text::system_line_height(ui, 12.));
                         system_label(ui, title, 25., true, p.ink);
                         ui.add_space(5.);
                         system_label(ui, subtitle, if MAC { 12. } else { 11. }, false, p.muted);
@@ -186,8 +189,9 @@ impl Dashboard {
                         ui.spacing_mut().interact_size.y = 0.;
                         ui.horizontal(|ui| {
                             ui.spacing_mut().item_spacing.x = 7.;
-                            let (icon, _) = ui.allocate_exact_size(vec2(16., 12.), Sense::hover());
-                            crate::mac::symbol(ui.painter(), icon, "eye", 10., false, p.muted);
+                            if !crate::mac::intrinsic_symbol(ui, "eye", 10., p.muted) {
+                                ui.allocate_exact_size(vec2(16., 13.), Sense::hover());
+                            }
                             system_label(ui, note, 10., false, p.muted);
                         });
                     }
@@ -318,8 +322,17 @@ impl Dashboard {
                         ui.set_width(content_width);
                         ui.spacing_mut().interact_size.y = 0.;
                         ui.horizontal(|ui| {
-                            caption(ui, title, p);
+                            system_label(ui, title, 11., false, p.muted);
                             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                                #[cfg(target_os = "macos")]
+                                if crate::mac::intrinsic_symbol(
+                                    ui,
+                                    system_symbol_name(symbol),
+                                    13.,
+                                    color,
+                                ) {
+                                    return;
+                                }
                                 let (r, _) =
                                     ui.allocate_exact_size(Vec2::splat(14.), Sense::hover());
                                 glyph(ui.painter(), r, symbol, color, false);
@@ -333,6 +346,22 @@ impl Dashboard {
                         #[cfg(windows)]
                         label(ui, value, 28., true, p.ink);
                         ui.add_space(12.);
+                        #[cfg(target_os = "macos")]
+                        {
+                            let width = crate::mac_text::natural_size(ui, &sub, 10., false)
+                                .map_or(0., |size| size.x);
+                            let size = if width > ui.available_width() {
+                                10. * (ui.available_width() / width).max(0.7)
+                            } else {
+                                10.
+                            };
+                            if crate::mac_text::system_label(ui, &sub, size, false, p.tertiary)
+                                .is_none()
+                            {
+                                ui.add(Label::new(rich(sub, size, false, p.tertiary)).truncate());
+                            }
+                        }
+                        #[cfg(windows)]
                         ui.add(Label::new(rich(sub, 10., false, p.tertiary)).truncate());
                     })
                 });
@@ -385,10 +414,9 @@ impl Dashboard {
         }
         ui.horizontal(|ui| {
             ui.vertical(|ui| {
-                label(ui, "구독 현황", 15., true, p.ink);
-                ui.add_space(4.);
-                caption(
+                section_title(
                     ui,
+                    "구독 현황",
                     if MAC {
                         "계정별 잔여량 · 상단바에 표시할 계정을 선택하세요"
                     } else {
@@ -478,7 +506,7 @@ impl Dashboard {
                     p.tint(a.provider)
                 };
                 ui.horizontal(|ui| {
-                    caption(ui, text(w, "title", ""), p);
+                    system_label(ui, text(w, "title", ""), 11., false, p.muted);
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         label(
                             ui,
@@ -576,7 +604,7 @@ impl Dashboard {
                     || "스냅샷 대기 중".into(),
                     |date| format!("마지막 데이터 {}", crate::platform::quota_time(date, false)),
                 );
-                label(ui, observed, 10., false, p.tertiary);
+                system_label(ui, &observed, 10., false, p.tertiary);
                 if a.error.is_some() {
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         label(ui, "이전 값", 10., false, p.tertiary)
@@ -605,6 +633,9 @@ impl Dashboard {
                 label(ui, val, 10., false, p.muted);
             }
         }
+        #[cfg(target_os = "macos")]
+        spaced_divider(ui, surface_fill(p.card, p.ink, 0.12), 17., 17.);
+        #[cfg(windows)]
         divider(ui, p);
         let tray_label = if MAC {
             "상단바에 표시"
@@ -614,10 +645,10 @@ impl Dashboard {
         let name = a.control_label(tray_label);
         #[cfg(target_os = "macos")]
         let switch = {
-            let label_width = crate::mac_text::natural_size(ui, tray_label, 11., false)
+            let label_width = crate::mac_text::natural_size(ui, tray_label, 10., false)
                 .map_or(54., |size| size.x.ceil());
             ui.allocate_ui_with_layout(
-                vec2(label_width + 36., 16.),
+                vec2(label_width + 8. + 26., 15.),
                 Layout::left_to_right(Align::Center),
                 |ui| named_toggle(ui, tray_label, &name, a.tray, p.tint(a.provider), p),
             )
@@ -641,6 +672,11 @@ impl Dashboard {
             self.wire.action("menuBarVisibility", json!([a.id, tray]));
         }
     }
+}
+pub fn section_title(ui: &mut Ui, title: &str, subtitle: &str, p: Palette) {
+    system_label(ui, title, 15., true, p.ink);
+    ui.add_space(4.);
+    system_label(ui, subtitle, if MAC { 10. } else { 11. }, false, p.muted);
 }
 pub fn columns(width: f32, min: f32, gap: f32) -> usize {
     ((width + gap) / (min + gap)).floor().max(1.) as usize
