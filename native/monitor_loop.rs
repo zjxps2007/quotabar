@@ -1,4 +1,5 @@
 //! Windows monitor dispatch, system broadcasts and one-shot refresh/update timers.
+use crate::dashboard::windows::host::Host;
 use std::{
     cell::Cell,
     io,
@@ -16,6 +17,7 @@ use windows_sys::{
 
 const CLASS: *const u16 = w!("QuotaBar.Native.MonitorLoop");
 const WAKE: u32 = WM_APP + 37;
+const DASHBOARD: u32 = WM_APP + 38;
 static REGISTERED: OnceLock<Result<u16, i32>> = OnceLock::new();
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -28,10 +30,12 @@ pub enum Event {
     Resume,
     PowerStatus,
     Display,
+    Dashboard,
 }
 
 pub struct MonitorLoop {
     window: HWND,
+    pub dashboard: Host,
     callback: Box<dyn Fn(Event)>,
     timers: [Cell<usize>; 2],
     next_timer: Cell<usize>,
@@ -77,6 +81,7 @@ impl MonitorLoop {
             }
             let state = Box::new(Self {
                 window,
+                dashboard: Host::new(window as isize),
                 callback: Box::new(callback),
                 timers: Default::default(),
                 next_timer: Cell::new(1),
@@ -110,6 +115,9 @@ impl MonitorLoop {
     pub fn wake(window: isize) -> bool {
         window != 0 && unsafe { PostMessageW(window as HWND, WAKE, 0, 0) != 0 }
     }
+    pub(crate) fn dashboard_input(window: isize) -> bool {
+        window != 0 && unsafe { PostMessageW(window as HWND, DASHBOARD, 0, 0) != 0 }
+    }
     pub fn quit(&self) {
         unsafe {
             PostQuitMessage(0);
@@ -140,6 +148,7 @@ impl MonitorLoop {
 
 impl Drop for MonitorLoop {
     fn drop(&mut self) {
+        self.dashboard.shutdown();
         unsafe {
             SetWindowLongPtrW(self.window, GWLP_USERDATA, 0);
             DestroyWindow(self.window);
@@ -159,6 +168,7 @@ unsafe extern "system" fn window_proc(
         {
             let event = match message {
                 WAKE => Some(Event::Work),
+                DASHBOARD => Some(Event::Dashboard),
                 WM_TIMER => {
                     if let Some(index) = state
                         .timers

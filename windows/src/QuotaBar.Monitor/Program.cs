@@ -187,6 +187,7 @@ internal sealed class MonitorContext : IDisposable
         try
         {
             var pids = new List<int>();
+            var startupRoutes = new List<string>();
             var captures = new List<string>();
             TrayMenuProbe.SaveSamples(Path.GetDirectoryName(path)!);
             var trayMenu = await TrayMenuProbe.Run(tray, menu, () => sample, value => sample = value,
@@ -201,7 +202,17 @@ internal sealed class MonitorContext : IDisposable
             }
             for (int i = 0; i < 2; i++)
             {
-                dashboard.Show(); await Until(() => dashboard.Ready, 10000, "starting the Dashboard helper"); pids.Add(dashboard.Pid!.Value);
+                string requested = i == 0 ? "accounts" : "settings";
+                if (route == requested) requested = requested == "accounts" ? "settings" : "accounts";
+                dashboard.Show();
+                int pid = dashboard.Pid ?? throw new IOException("Dashboard did not start.");
+                dashboard.Show(requested);
+                await Until(() => dashboard.Ready && route == requested, 10000, "opening the last route requested before ready");
+                startupRoutes.Add(route);
+                dashboard.Show("dashboard");
+                await Until(() => route == "dashboard", 10000, "navigating the running helper");
+                if (dashboard.Pid != pid) throw new IOException("Navigation replaced the running Dashboard.");
+                pids.Add(pid);
                 string theme = i == 0 ? "light" : "dark";
                 sample = sample with { Settings = sample.Settings with { Appearance = theme } };
                 foreach (string target in new[] { "dashboard", "activity", "accounts", "settings", "connect", "connect-claude" })
@@ -227,7 +238,7 @@ internal sealed class MonitorContext : IDisposable
             var traySummary = TraySummary.From(sample);
             if (!tray.Visible || traySummary.Text != "16" || traySummary.UseLogo || !tray.Text.Contains("16%"))
                 throw new InvalidOperationException("Numeric tray did not survive Dashboard close.");
-            File.WriteAllBytes(path, Json.Bytes(new { passed = true, captures, trayMenu, dashboardPids = pids, dashboardRunning = dashboard.IsRunning,
+            File.WriteAllBytes(path, Json.Bytes(new { passed = true, captures, trayMenu, dashboardPids = pids, startupRoutes, dashboardRunning = dashboard.IsRunning,
                 trayText = traySummary.Text, trayVisibleAfterDashboardClose = tray.Visible, trayPixelSize = tray.PixelSize,
                 monitorPid = current.Id, privateBytes = current.PrivateMemorySize64, workingSet = current.WorkingSet64,
                 wpfLoadedInMonitor = AppDomain.CurrentDomain.GetAssemblies().Any(a => a.GetName().Name == "PresentationFramework"),

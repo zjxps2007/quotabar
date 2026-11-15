@@ -14,6 +14,8 @@ use windows_sys::Win32::{
     System::{JobObjects::*, Pipes::CreatePipe, Threading::*},
 };
 
+pub mod host;
+
 const CLOSE: &[u8] = br#"{"version":1,"type":"close","requestId":null,"payload":true}"#;
 fn check(ok: i32) -> io::Result<()> {
     if ok != 0 {
