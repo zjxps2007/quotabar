@@ -195,28 +195,35 @@ impl State {
         if let Some(path) = self.raw["defaultPaths"][p.to_ascii_lowercase()].as_str() {
             return path.to_owned();
         }
-        if !MAC {
-            return if p == "Claude" {
+        #[cfg(not(target_os = "macos"))]
+        {
+            if p == "Claude" {
                 "Claude 설정 폴더"
             } else {
                 "로그인 JSON 파일"
             }
-            .into();
+            .into()
         }
-        let home = std::path::PathBuf::from(
-            std::env::var_os(if MAC { "HOME" } else { "USERPROFILE" }).unwrap_or_default(),
-        );
-        let path = match p {
-            "Claude" => std::env::var_os("CLAUDE_CONFIG_DIR")
-                .map(Into::into)
-                .unwrap_or_else(|| home.join(".claude")),
-            "Gemini" => home.join(".gemini").join("oauth_creds.json"),
-            _ => std::env::var_os("CODEX_HOME")
-                .map(Into::into)
-                .unwrap_or_else(|| home.join(".codex"))
-                .join("auth.json"),
-        };
-        path.to_string_lossy().into_owned()
+        #[cfg(target_os = "macos")]
+        {
+            use objc2_foundation::{NSFileManager, NSHomeDirectory};
+            let home = NSFileManager::defaultManager()
+                .homeDirectoryForCurrentUser()
+                .path()
+                .unwrap_or_else(|| NSHomeDirectory());
+            let home = std::path::PathBuf::from(home.to_string());
+            let path = match p {
+                "Claude" => std::env::var_os("CLAUDE_CONFIG_DIR")
+                    .map(Into::into)
+                    .unwrap_or_else(|| home.join(".claude")),
+                "Gemini" => home.join(".gemini").join("oauth_creds.json"),
+                _ => std::env::var_os("CODEX_HOME")
+                    .map(Into::into)
+                    .unwrap_or_else(|| home.join(".codex"))
+                    .join("auth.json"),
+            };
+            path.to_string_lossy().into_owned()
+        }
     }
 }
 #[cfg(test)]

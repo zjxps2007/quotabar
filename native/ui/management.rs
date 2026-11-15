@@ -495,7 +495,7 @@ impl Dashboard {
             }
         };
         p.frame(20).show(ui,|ui|{ui.set_width(ui.available_width());settings_title(ui,"화면 및 표시","menubar.dock.rectangle",p);ui.add_space(18.);
-            label(ui,"화면 모드",if MAC {13.} else {12.},false,p.ink);ui.add_space(if MAC {18.} else {12.});
+            label(ui,"화면 모드",if MAC {13.} else {12.},false,p.ink);ui.add_space(if MAC {18. - 1. / ui.ctx().pixels_per_point()} else {12.});
             if let Some(v)=segments(ui,&[("system","시스템 설정 따르기"),("light","라이트"),("dark","다크")],self.state.setting("appearance","system"),p,420.){
                 self.preference("appearance","appearance",json!(v));}
             section_divider(ui);let dock=self.state.flag("showTaskbarIcon","showDockIcon");

@@ -12,8 +12,28 @@ use std::time::{Duration, Instant};
 #[cfg(target_os = "macos")]
 fn sheet_field_caption(ui: &mut Ui, title: &str, p: Palette) {
     let caption = label(ui, title, 10., true, p.ink);
-    let line = crate::mac_text::system_line_height(ui, 10.);
+    // The small form row reserves a full line around its smaller caption ink.
+    let control_size = objc2_app_kit::NSFont::smallSystemFontSize() as f32;
+    let line = crate::mac_text::natural_size(ui, title, control_size, true)
+        .map_or(caption.rect.height(), |size| size.y);
     ui.add_space(8. + (line - caption.rect.height()).max(0.));
+}
+
+fn sheet_picker_label(ui: &mut Ui, title: &str, p: Palette) {
+    #[cfg(target_os = "macos")]
+    if let Some(size) = crate::mac_text::natural_size(ui, title, 13., false) {
+        let scale = ui.ctx().pixels_per_point();
+        let width = (size.x * scale).ceil() / scale;
+        ui.allocate_ui_with_layout(
+            vec2(width, 22.),
+            Layout::left_to_right(Align::Center),
+            |ui| {
+                label(ui, title, 13., false, p.ink);
+            },
+        );
+        return;
+    }
+    label(ui, title, 13., false, p.ink);
 }
 
 fn full_button(ui: &mut Ui, title: &str, primary: bool, p: Palette) -> bool {
@@ -516,8 +536,7 @@ impl Dashboard {
             if MAC {
                 if let Some(s) = ui
                     .horizontal(|ui| {
-                        ui.set_row_height(22.);
-                        label(ui, "Provider", 13., false, p.ink);
+                        sheet_picker_label(ui, "Provider", p);
                         segments(
                             ui,
                             &[
@@ -564,8 +583,7 @@ impl Dashboard {
             ui.add_enabled_ui(!locked, |ui| {
                 if let Some(s) = ui
                     .horizontal(|ui| {
-                        ui.set_row_height(22.);
-                        label(ui, "연결 방법", 13., false, p.ink);
+                        sheet_picker_label(ui, "연결 방법", p);
                         segments(
                             ui,
                             &[("browser", "브라우저 로그인"), ("file", "파일 가져오기")],
