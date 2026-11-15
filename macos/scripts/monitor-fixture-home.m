@@ -30,10 +30,18 @@ static const struct { const void *replacement, *original; } interposeHome = {
     NSString *endpoint = @"https://api.github.com/repos/zjxps2007/quotabar/releases/latest";
     NSString *url = self.request.URL.absoluteString;
     BOOL release = [url isEqual:endpoint];
-    NSString *file = release ? @"release-response.json" : @"provider-responses.json";
+    BOOL asset = [url hasPrefix:@"https://github.com/zjxps2007/quotabar/releases/download/"];
+    NSString *file = release ? @"release-response.json" : asset ? @"asset-responses.json" : @"provider-responses.json";
     NSData *source = [NSData dataWithContentsOfFile:[fixtureHome() stringByAppendingPathComponent:file]];
     NSDictionary *fixture = source ? [NSJSONSerialization JSONObjectWithData:source options:0 error:NULL] : nil;
-    if (!release) {
+    if (release || asset) {
+        if (asset) fixture = fixture[url];
+        NSString *agent = [self.request valueForHTTPHeaderField:@"User-Agent"];
+        BOOL expected = release ? [agent hasPrefix:@"QuotaBar/"] && [[self.request valueForHTTPHeaderField:@"Accept"] isEqual:@"application/vnd.github+json"]
+                                : [agent isEqual:@"QuotaBar-Updater"];
+        if (!expected || ![self.request.HTTPMethod isEqual:@"GET"] || [self.request valueForHTTPHeaderField:@"Authorization"] ||
+            [self.request valueForHTTPHeaderField:@"Cookie"]) fixture = nil;
+    } else {
         fixture = fixture[url];
         NSString *bearer = [@"Bearer " stringByAppendingString:fixture[@"token"] ?: @""];
         if (![self.request.HTTPMethod isEqual:fixture[@"method"]] ||
@@ -46,7 +54,7 @@ static const struct { const void *replacement, *original; } interposeHome = {
         [self.client URLProtocol:self didFailWithError:[NSError errorWithDomain:NSURLErrorDomain code:NSURLErrorBadURL userInfo:nil]];
         return;
     }
-    NSString *log = [fixtureHome() stringByAppendingPathComponent:(release ? @"release-requests.log" : @"provider-requests.log")];
+    NSString *log = [fixtureHome() stringByAppendingPathComponent:(release ? @"release-requests.log" : asset ? @"asset-requests.log" : @"provider-requests.log")];
     NSString *line = release ? [fixture[@"status"] stringValue] : [NSString stringWithFormat:@"%@ %@", fixture[@"name"], fixture[@"status"]];
     @synchronized (QuotaBarFixtureRelease.class) {
         NSFileHandle *handle = [NSFileHandle fileHandleForWritingAtPath:log];
@@ -54,12 +62,16 @@ static const struct { const void *replacement, *original; } interposeHome = {
         [handle writeData:[[line stringByAppendingString:@"\n"] dataUsingEncoding:NSUTF8StringEncoding]];
         [handle closeFile];
     }
-    NSData *body = [NSJSONSerialization dataWithJSONObject:fixture[@"body"] options:0 error:NULL];
+    NSData *body = asset ? [NSData dataWithContentsOfFile:[[fixtureHome() stringByAppendingPathComponent:@"update-test"] stringByAppendingPathComponent:fixture[@"file"]]]
+                         : [NSJSONSerialization dataWithJSONObject:fixture[@"body"] options:0 error:NULL];
     NSHTTPURLResponse *response = [[NSHTTPURLResponse alloc] initWithURL:self.request.URL
         statusCode:[fixture[@"status"] integerValue] HTTPVersion:@"HTTP/1.1"
-        headerFields:@{@"Content-Type": @"application/json", @"Content-Length": [@(body.length) stringValue]}];
+        headerFields:@{@"Content-Type": asset ? @"application/octet-stream" : @"application/json", @"Content-Length": [@(body.length) stringValue]}];
     [self.client URLProtocol:self didReceiveResponse:response cacheStoragePolicy:NSURLCacheStorageNotAllowed];
-    [self.client URLProtocol:self didLoadData:body];
+    // Exercise more than one data-delegate callback without using the network.
+    for (NSUInteger offset = 0; offset < body.length; offset += 8192) {
+        [self.client URLProtocol:self didLoadData:[body subdataWithRange:NSMakeRange(offset, MIN(8192, body.length-offset))]];
+    }
     [self.client URLProtocolDidFinishLoading:self];
 }
 - (void)stopLoading {}

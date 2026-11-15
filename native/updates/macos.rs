@@ -15,6 +15,7 @@ use std::{
 use unicode_normalization::UnicodeNormalization;
 use uuid::Uuid;
 
+pub mod download;
 mod installer;
 pub use installer::{Installer, acknowledge_launch, discard, prepare};
 

@@ -9,11 +9,106 @@ use std::{
     sync::atomic::Ordering,
 };
 
+fn release_platform(index: i32) -> Option<Platform> {
+    [
+        Platform::MacArm64,
+        Platform::MacX64,
+        Platform::WindowsInstaller,
+        Platform::WindowsPortable,
+    ]
+    .get(index as usize)
+    .copied()
+}
+
 #[cfg(target_os = "macos")]
 mod mac_installer {
     use super::*;
     use std::{ffi::OsStr, os::unix::ffi::OsStrExt};
-    use updates::macos::{self, Installer};
+    use updates::macos::{self, Installer, download};
+
+    fn transfer_result<T: serde::Serialize>(
+        value: Result<T, download::Error>,
+        out: *mut *mut c_char,
+    ) -> i32 {
+        use download::Error;
+        match value {
+            Ok(result) => match serde_json::to_vec(&result)
+                .ok()
+                .and_then(|v| CString::new(v).ok())
+            {
+                Some(json) => {
+                    unsafe { *out = json.into_raw() };
+                    0
+                }
+                None => -1017,
+            },
+            Err(Error::Development) => 1,
+            Err(Error::RateLimited) => 2,
+            Err(Error::InvalidFeed) => 3,
+            Err(Error::Download) => 4,
+            Err(Error::Signature) => 5,
+            Err(Error::Cancelled) => 6,
+            Err(Error::Network(code)) => code,
+            Err(Error::File(error)) => error.raw_os_error().map_or(7, |code| 1000 + code),
+        }
+    }
+
+    #[unsafe(no_mangle)]
+    pub unsafe extern "C" fn qb_mac_release_latest(
+        platform: i32,
+        current: *const c_char,
+        cancel: *const CancelHandle,
+        out: *mut *mut c_char,
+    ) -> i32 {
+        if current.is_null() || out.is_null() || cancel.is_null() {
+            return -1017;
+        }
+        unsafe { *out = ptr::null_mut() };
+        let Ok(current) = (unsafe { CStr::from_ptr(current) }).to_str() else {
+            return 1;
+        };
+        let Some(platform) = release_platform(platform) else {
+            return 3;
+        };
+        let cancel = unsafe { &*cancel };
+        transfer_result(download::latest(platform, current, &cancel.0), out)
+    }
+
+    #[unsafe(no_mangle)]
+    pub unsafe extern "C" fn qb_mac_release_stage(
+        metadata: *const u8,
+        length: usize,
+        directory: *const c_char,
+        cancel: *const CancelHandle,
+        context: *mut std::ffi::c_void,
+        progress: extern "C" fn(*mut std::ffi::c_void, i32),
+        out: *mut *mut c_char,
+    ) -> i32 {
+        if metadata.is_null() || length > updates::MAX_FEED || out.is_null() || cancel.is_null() {
+            return -1017;
+        }
+        unsafe { *out = ptr::null_mut() };
+        let Some(directory) = (unsafe { file_path(directory) }) else {
+            return -1000;
+        };
+        let Ok(plan) = serde_json::from_slice::<Verification>(unsafe {
+            slice::from_raw_parts(metadata, length)
+        }) else {
+            return 5;
+        };
+        let cancel = unsafe { &*cancel };
+        transfer_result(
+            download::stage(
+                &plan.release,
+                &plan.current_version,
+                &plan.public_key,
+                directory,
+                &cancel.0,
+                |value| progress(context, value),
+            ),
+            out,
+        )
+    }
 
     // Swift supplies fileSystemRepresentation for the duration of the call.
     unsafe fn file_path<'a>(path: *const c_char) -> Option<&'a Path> {
@@ -109,14 +204,7 @@ pub unsafe extern "C" fn qb_release_feed(
     if data.is_null() || length > updates::MAX_FEED {
         return ptr::null_mut();
     }
-    let Some(platform) = [
-        Platform::MacArm64,
-        Platform::MacX64,
-        Platform::WindowsInstaller,
-        Platform::WindowsPortable,
-    ]
-    .get(platform as usize)
-    .copied() else {
+    let Some(platform) = release_platform(platform) else {
         return ptr::null_mut();
     };
     let bytes = unsafe { slice::from_raw_parts(data, length) };

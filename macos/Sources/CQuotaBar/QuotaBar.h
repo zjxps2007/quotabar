@@ -86,6 +86,12 @@ void qb_cancel_free(QBCancel *);
 void qb_cancel_set(const QBCancel *);
 int32_t qb_release_version(const uint8_t *, size_t, int32_t components[3]);
 char *qb_release_feed(int32_t platform, const uint8_t *, size_t);
+/* Both calls run on a worker. Release returned JSON with qb_string_free.
+   0 success, 1..5 public release errors, 6 cancelled, 7 I/O, 1000+errno POSIX,
+   negative numbers are Foundation URL error codes. */
+int32_t qb_mac_release_latest(int32_t platform, const char *current, const QBCancel *, char **json);
+int32_t qb_mac_release_stage(const uint8_t *metadata, size_t length, const char *directory,
+                             const QBCancel *, void *context, void (*progress)(void *, int32_t), char **json);
 int32_t qb_release_verify(const uint8_t *metadata, size_t metadataLength, const uint8_t *manifest, size_t manifestLength, const uint8_t *signature, size_t signatureLength);
 int32_t qb_release_file(const char *path, const uint8_t *asset, size_t length, const QBCancel *);
 /* Releases no arguments. Success returns 0 and an owned UTF-8 JSON string.

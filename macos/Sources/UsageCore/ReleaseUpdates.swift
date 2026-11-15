@@ -90,52 +90,10 @@ public enum UpdateSignature {
     }
 }
 
-/// A separate, unauthenticated session never sends provider credentials or cookies.
-public final class ReleaseClient: @unchecked Sendable {
-    private let session: URLSession
-    private let redirects = ReleaseRedirectPolicy()
-
-    public init() {
-        let configuration = URLSessionConfiguration.ephemeral
-        configuration.httpCookieStorage = nil
-        configuration.urlCredentialStorage = nil
-        configuration.urlCache = nil
-        configuration.timeoutIntervalForRequest = 20
-        configuration.timeoutIntervalForResource = 30
-        session = URLSession(configuration: configuration)
-    }
-
-    deinit { session.invalidateAndCancel() }
-
+/// The native transfer runs independently of provider sessions and their credentials.
+public final class ReleaseClient: Sendable {
+    public init() {}
     public func latest(platform: ReleasePlatform, currentVersion: String) async throws -> AppRelease? {
-        guard ReleaseVersion(currentVersion) != nil else {
-            throw ProviderError("development_build", "배포 앱에서 업데이트를 확인하세요.")
-        }
-        var request = URLRequest(url: ReleaseFeed.endpoint)
-        request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
-        request.setValue("QuotaBar/\(currentVersion)", forHTTPHeaderField: "User-Agent")
-        let (bytes, response) = try await session.bytes(for: request, delegate: redirects)
-        guard let response = response as? HTTPURLResponse else { throw URLError(.badServerResponse) }
-        if response.statusCode == 404 { return nil }
-        if response.statusCode == 403 || response.statusCode == 429 {
-            throw ProviderError("update_rate_limit", "업데이트 확인 요청이 제한되었습니다. 잠시 후 다시 시도하세요.")
-        }
-        guard response.statusCode == 200, response.expectedContentLength <= ReleaseFeed.maximumResponseBytes else {
-            throw URLError(.badServerResponse)
-        }
-        var data = Data()
-        for try await byte in bytes {
-            guard data.count < ReleaseFeed.maximumResponseBytes else { throw URLError(.dataLengthExceedsMaximum) }
-            data.append(byte)
-        }
-        try Task.checkCancellation()
-        return try ReleaseFeed.parse(data, platform: platform)
-    }
-}
-
-private final class ReleaseRedirectPolicy: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
-    func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
-                    newRequest request: URLRequest, completionHandler: @escaping (URLRequest?) -> Void) {
-        completionHandler(nil)
+        try await NativeRelease.latest(platform, current: currentVersion)
     }
 }

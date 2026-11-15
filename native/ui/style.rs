@@ -282,16 +282,24 @@ pub fn mac_field(
     p: Palette,
 ) -> Response {
     let background = ui.painter().add(Shape::Noop);
+    // Rounded AppKit fields inset the editable line and its placeholder by
+    // 11 points. The field editor's text baseline sits above the placeholder.
+    let field_margin = Margin {
+        left: 11,
+        right: 11,
+        top: 0,
+        bottom: if text.is_empty() { 0 } else { 2 },
+    };
     let field = ui.add(
         TextEdit::singleline(text)
             .id(Id::new(id))
             .hint_text(rich(hint, 13., false, p.placeholder))
             .font(FontId::proportional(13.))
             .frame(false)
-            .margin(Margin::symmetric(10, 0))
+            .margin(field_margin)
             .vertical_align(Align::Center)
             .min_size(vec2(0., 22.))
-            .desired_width((width - 20.).max(0.)),
+            .desired_width((width - field_margin.sum().x).max(0.)),
     );
     // A rounded Dark Aqua editor has a raised bezel within its layout bounds.
     let (bezel, fill, edge) = if p.dark {
@@ -917,6 +925,23 @@ pub fn checkbox(ui: &mut Ui, checked: &mut bool, title: &str, size: f32, p: Pale
         WidgetInfo::selected(WidgetType::Checkbox, ui.is_enabled(), *checked, title)
     });
     let box_rect = Rect::from_center_size(pos2(row.left() + 6.5, row.center().y), Vec2::splat(13.));
+    #[cfg(target_os = "macos")]
+    if crate::mac::draw_checkbox(ui, box_rect, *checked, response.is_pointer_button_down_on()) {
+        if response.has_focus() {
+            ui.painter().rect_stroke(
+                box_rect.expand(2.),
+                4,
+                Stroke::new(2.0_f32, p.focus_ring),
+                StrokeKind::Outside,
+            );
+        }
+        ui.painter().galley(
+            pos2(row.left() + 19., row.center().y - content.y / 2. - 1.),
+            text,
+            p.ink,
+        );
+        return response;
+    }
     let edge = if response.has_focus() {
         Stroke::new(2.0_f32, p.ink)
     } else {

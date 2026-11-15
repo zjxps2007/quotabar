@@ -12,6 +12,7 @@ import time
 import traceback
 from uuid import UUID
 import monitor_providers
+import monitor_update_download
 
 HERE = Path(__file__).resolve().parent
 IDS = [str(UUID(int=i)).upper() for i in range(1, 7)]
@@ -72,6 +73,7 @@ def dashboard_probe():
     checkpoints = []
     updates = []
     providers = []
+    transfers = []
 
     def command(name, *values):
         wire["send"](outgoing, {name: {f"_{i}": v for i, v in enumerate(values)}})
@@ -165,9 +167,12 @@ def dashboard_probe():
         requests = (output.parent / "release-requests.log").read_text().splitlines()
         assert requests == [str(s["http"]) for s in updates], requests
         traffic = monitor_providers.exercise(wire, incoming, outgoing, output.parent, providers)
-        write_json(output, {"checkpoints": checkpoints, "updates": updates, "providers": providers, "providerRequests": traffic})
+        monitor_update_download.exercise(wire, incoming, command, output.parent, transfers)
+        write_json(output, {"checkpoints": checkpoints, "updates": updates, "providers": providers,
+                            "providerRequests": traffic, "updateDownloads": transfers})
     except Exception:
-        write_json(output, {"checkpoints": checkpoints, "updates": updates, "providers": providers, "error": traceback.format_exc()})
+        write_json(output, {"checkpoints": checkpoints, "updates": updates, "providers": providers,
+                            "updateDownloads": transfers, "error": traceback.format_exc()})
     finally:
         command("quit")
     try:
@@ -254,6 +259,7 @@ print(FileManager.default.homeDirectoryForCurrentUser.path)
 print(URL(fileURLWithPath: CommandLine.arguments[1]).standardizedFileURL.resolvingSymlinksInPath().path)
 """)
     subprocess.run(["swiftc", source, "-o", probe], check=True)
+    signed_update = monitor_update_download.signed_fixture(work)
     results = {}
     for side, executable in (("original", reference), ("rust", dashboard.MONITOR)):
         home = (work / f"{side}-monitor-home").resolve()
@@ -278,6 +284,7 @@ print(URL(fileURLWithPath: CommandLine.arguments[1]).standardizedFileURL.resolvi
             env["QUOTABAR_TEST_SAMPLE"] = str(sample)
             bundle = home / "QuotaBar.app"
             shutil.copytree(executable.parents[2], bundle, symlinks=True)
+            monitor_update_download.install_fixture(signed_update, home, bundle)
             client = bundle / "Contents/Helpers/QuotaBar Dashboard.app/Contents/MacOS/QuotaBar"
             client.unlink()
             client.write_text(f"#!{sys.executable}\nimport sys\nsys.path.insert(0, {str(HERE)!r})\n"

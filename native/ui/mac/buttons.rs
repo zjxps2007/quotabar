@@ -203,6 +203,29 @@ pub fn draw_segments(
     }
 }
 
+pub fn draw_checkbox(ui: &Ui, bounds: Rect, checked: bool, pressed: bool) -> bool {
+    let image = control_image(
+        ui,
+        "AppKit checkbox",
+        Id::new((checked, pressed)),
+        bounds.size(),
+        |main| {
+            let button = unsafe {
+                NSButton::checkboxWithTitle_target_action(&NSString::new(), None, None, main)
+            };
+            button.setState(isize::from(checked));
+            button.setHighlighted(pressed);
+            button.into_super()
+        },
+    );
+    if let Some(image) = image {
+        image.paint(ui, bounds);
+        true
+    } else {
+        false
+    }
+}
+
 fn popup_button(
     main: MainThreadMarker,
     labels: &[impl AsRef<str>],
