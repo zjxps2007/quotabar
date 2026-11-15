@@ -14,6 +14,9 @@ try {
     [IO.File]::WriteAllText($publicPath, $key.ExportSubjectPublicKeyInfoPem())
     [IO.File]::WriteAllText($versionPath, '{"version":"0.1.0","build":6}')
     & "$PSScriptRoot\package.ps1" -OutputFolder 'Updater-Old' -UpdateFixture
+    # The managed compatibility tests use the FFI adapter. It is not part of either application ZIP.
+    & cargo build --locked --release --manifest-path (Join-Path $RepoRoot 'Cargo.toml') --package quotabar-native
+    if ($LASTEXITCODE) { throw 'Update test adapter build failed.' }
     Invoke-Dotnet @('build', (Join-Path $RepoRoot 'windows\tests\QuotaBar.Tests\QuotaBar.Tests.csproj'), '-c', 'Release', '--nologo', '-m:1', '-nodeReuse:false', '-p:UseSharedCompilation=false')
     $probePath = Join-Path $RepoRoot 'artifacts\update-manager-probe.json'
     $probeInfo = [Diagnostics.ProcessStartInfo]::new((Join-Path $RepoRoot 'artifacts\Updater-Old\QuotaBar.Monitor.exe'))

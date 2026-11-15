@@ -98,18 +98,28 @@ impl MonitorLoop {
     }
 
     pub fn run(&self) -> io::Result<()> {
+        while self.pump(true)? {}
+        Ok(())
+    }
+
+    /// Dispatch one OS message. A nonblocking pump is also used by the real-window probe.
+    pub fn pump(&self, wait: bool) -> io::Result<bool> {
         unsafe {
             let mut message = MSG::default();
-            loop {
+            if wait {
                 match GetMessageW(&mut message, null_mut(), 0, 0) {
                     -1 => return Err(io::Error::last_os_error()),
-                    0 => return Ok(()),
-                    _ => {
-                        TranslateMessage(&message);
-                        DispatchMessageW(&message);
-                    }
+                    0 => return Ok(false),
+                    _ => {}
                 }
+            } else if PeekMessageW(&mut message, null_mut(), 0, 0, PM_REMOVE) == 0 {
+                return Ok(true);
+            } else if message.message == WM_QUIT {
+                return Ok(false);
             }
+            TranslateMessage(&message);
+            DispatchMessageW(&message);
+            Ok(true)
         }
     }
 

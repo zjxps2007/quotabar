@@ -65,10 +65,10 @@ fn clip_utf16(text: &str, max: usize) -> String {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WindowsSummary {
-    text: String,
-    use_logo: bool,
-    warning: bool,
-    tooltip: String,
+    pub(crate) text: String,
+    pub(crate) use_logo: bool,
+    pub(crate) warning: bool,
+    pub(crate) tooltip: String,
 }
 pub fn windows(state: &State) -> WindowsSummary {
     let visible: Vec<_> = state

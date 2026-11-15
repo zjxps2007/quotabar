@@ -6,7 +6,11 @@ fn main() {
         std::env::set_current_dir("../..").expect("Locate the shared application resources");
     }
     let root = std::env::current_dir().expect("Locate the repository");
-    for watched in ["shared/version.json", "windows/assets/QuotaBar.ico"] {
+    for watched in [
+        "shared/version.json",
+        "windows/assets/QuotaBar.ico",
+        "windows/src/QuotaBar.Monitor/app.manifest",
+    ] {
         println!("cargo:rerun-if-changed={}", root.join(watched).display());
     }
     let metadata: serde_json::Value =
@@ -53,23 +57,28 @@ fn main() {
         let mut resource = WindowsResource::new();
         resource
             .set_icon("windows/assets/QuotaBar.ico")
-            .set(
-                "OriginalFilename",
-                if dashboard {
-                    "QuotaBar.Dashboard.exe"
-                } else {
-                    "QuotaBar.StatusLine.exe"
-                },
-            )
             .set("FileDescription", "QuotaBar")
             .set("ProductName", "QuotaBar")
             .set("FileVersion", version)
             .set("ProductVersion", &revision)
             .set_version_info(VersionInfo::FILEVERSION, number)
             .set_version_info(VersionInfo::PRODUCTVERSION, number);
-        resource
-            .compile()
-            .expect("Could not compile QuotaBar's Windows resources");
+        if dashboard {
+            resource
+                .set("OriginalFilename", "QuotaBar.Dashboard.exe")
+                .compile_for("quotabar-dashboard")
+                .unwrap();
+        } else {
+            resource
+                .set("OriginalFilename", "QuotaBar.StatusLine.exe")
+                .compile_for("quotabar-statusline")
+                .unwrap();
+            resource
+                .set("OriginalFilename", "QuotaBar.Monitor.exe")
+                .set_manifest_file("windows/src/QuotaBar.Monitor/app.manifest")
+                .compile_for("quotabar-monitor")
+                .unwrap();
+        }
     }
 }
 

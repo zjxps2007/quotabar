@@ -185,6 +185,12 @@ fn read(
     Ok(result)
 }
 
+pub(crate) fn display(bytes: &[u8]) -> Result<serde_json::Value, Error> {
+    let fields: Fields = serde_json::from_slice(bytes)?;
+    let value = snapshot(fields)?.ok_or_else(|| malformed("Missing quota windows"))?;
+    Ok(serde_json::to_value(value)?)
+}
+
 pub fn load(root: &Path, accounts: &HashSet<String>) -> Result<Vec<u8>, Error> {
     let path = root.join("snapshots.json");
     files::reject_links(&path)?;

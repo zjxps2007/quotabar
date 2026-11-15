@@ -42,4 +42,6 @@ pub mod windows_format;
 #[cfg(windows)]
 pub mod windows_login;
 #[cfg(windows)]
+pub mod windows_monitor;
+#[cfg(windows)]
 pub mod windows_settings;

@@ -10,10 +10,10 @@ $compiler = & "$PSScriptRoot\get-inno.ps1"
 $stage = Join-Path $repo ('artifacts\windows\installer-' + [Guid]::NewGuid().ToString('N'))
 [IO.Compression.ZipFile]::ExtractToDirectory($PackagePath, $stage)
 $payload = Join-Path $stage 'QuotaBar-Windows-x64'
-foreach ($relative in @('QuotaBar.Monitor.exe','quotabar_native.dll','Dashboard\QuotaBar.Dashboard.exe','StatusLine\QuotaBar.StatusLine.exe','LICENSE','NOTICE')) {
+foreach ($relative in @('QuotaBar.Monitor.exe','Dashboard\QuotaBar.Dashboard.exe','StatusLine\QuotaBar.StatusLine.exe','LICENSE','NOTICE')) {
     if (-not (Test-Path -LiteralPath (Join-Path $payload $relative))) { throw "Package file missing: $relative" }
 }
-$productVersion = [Diagnostics.FileVersionInfo]::GetVersionInfo((Join-Path $payload 'QuotaBar.Monitor.dll')).ProductVersion
+$productVersion = [Diagnostics.FileVersionInfo]::GetVersionInfo((Join-Path $payload 'QuotaBar.Monitor.exe')).ProductVersion
 if ($productVersion -notmatch ('^' + [Regex]::Escape($version) + '\+([a-f0-9]{40})$')) { throw 'Package version or source revision mismatch.' }
 $applicationCommit = $matches[1]
 foreach ($relative in @('Dashboard\QuotaBar.Dashboard.exe','StatusLine\QuotaBar.StatusLine.exe')) {

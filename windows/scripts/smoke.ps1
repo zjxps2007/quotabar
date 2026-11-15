@@ -27,12 +27,34 @@ if (-not $finished) {
         Where-Object LastWriteTimeUtc -ge $started | Sort-Object LastWriteTimeUtc)
     throw "Packaged UI probe timed out after 120 seconds. Saved $($captured.Count) PNGs. Last capture: $($captured.Name | Select-Object -Last 1)"
 }
-if ($process.ExitCode -ne 0) { throw "Packaged app exited with code $($process.ExitCode)." }
+if ($process.ExitCode -ne 0) { throw "Packaged app exited with code $($process.ExitCode). $(Get-Content -LiteralPath $result -Raw -ErrorAction SilentlyContinue)" }
 $data = Get-Content -LiteralPath $result -Raw | ConvertFrom-Json
 if (-not $data.passed -or $data.monitorPid -ne $process.Id -or $data.dashboardRunning -or $data.wpfLoadedInMonitor -or $data.windowsFormsLoadedInMonitor -ne $false) { throw "Packaged probe failed: $($data | ConvertTo-Json -Compress)" }
-$runtime = Get-Content -LiteralPath (Join-Path $ApplicationDirectory 'QuotaBar.Monitor.runtimeconfig.json') -Raw | ConvertFrom-Json
-$frameworks = @($runtime.runtimeOptions.includedFrameworks | ForEach-Object name)
-if ($frameworks -notcontains 'Microsoft.NETCore.App' -or $frameworks -contains 'Microsoft.WindowsDesktop.App') { throw 'Unexpected desktop UI runtime in the monitor package.' }
+$runtimeFiles = @(Get-ChildItem -LiteralPath $ApplicationDirectory -File -Recurse | Where-Object {
+    $_.Name -match '^(coreclr|clrjit|hostfxr|hostpolicy|quotabar_native)\.dll$|\.runtimeconfig\.json$'
+})
+if ($runtimeFiles.Count -or $data.clrLoadedInMonitor -ne $false) { throw 'Managed runtime or FFI adapter in the Windows application.' }
+$nativePrograms = @('QuotaBar.Monitor.exe', 'Dashboard\QuotaBar.Dashboard.exe', 'StatusLine\QuotaBar.StatusLine.exe')
+foreach ($relative in $nativePrograms) {
+    $stream = [IO.File]::OpenRead((Join-Path $ApplicationDirectory $relative))
+    try {
+        $pe = [System.Reflection.PortableExecutable.PEReader]::new($stream)
+        try {
+            if ($pe.PEHeaders.CoffHeader.Machine -ne 'Amd64' -or $pe.PEHeaders.PEHeader.CorHeaderTableDirectory.Size -ne 0) { throw "Expected a native x64 program: $relative" }
+        } finally { $pe.Dispose() }
+    } finally { $stream.Dispose() }
+}
+foreach ($relative in $nativePrograms) {
+    $marker = [IO.Path]::ChangeExtension((Join-Path $ApplicationDirectory $relative), '.dll')
+    $stream = [IO.File]::OpenRead($marker)
+    try {
+        $pe = [System.Reflection.PortableExecutable.PEReader]::new($stream)
+        try {
+            $metadata = [System.Reflection.Metadata.PEReaderExtensions]::GetMetadataReader($pe)
+            if ($metadata.MethodDefinitions.Count -ne 0) { throw "Expected a version-only updater marker: $relative" }
+        } finally { $pe.Dispose() }
+    } finally { $stream.Dispose() }
+}
 $updateResult = Join-Path $RepoRoot 'artifacts\windows\packaged-update-probe.json'
 $probe.Arguments = '--update-manager-probe "' + $updateResult + '"'
 $updateMonitor = [Diagnostics.Process]::Start($probe)
@@ -45,7 +67,7 @@ try {
     $data | Add-Member -NotePropertyName manualCheckWhileAutomaticUpdatesDisabled -NotePropertyValue $true
     $data | Add-Member -NotePropertyName updateChecks -NotePropertyValue $update.updateChecks
 } finally { $updateMonitor.Dispose() }
-# The prototype owns no user data. Verify kernel cleanup after an abrupt monitor exit.
+# Demo mode uses synthetic accounts. Inspect both processes before testing parent crash cleanup.
 $start = [Diagnostics.ProcessStartInfo]::new($exe)
 $start.UseShellExecute = $false
 $start.CreateNoWindow = $true
@@ -61,6 +83,10 @@ try {
     } while (-not $child -and [DateTime]::UtcNow -lt $deadline)
     if (-not $child) { throw 'No Dashboard child found.' }
     $childId = [int]$child.ProcessId
+    foreach ($idToCheck in @($monitor.Id,$childId)) {
+        $modules = @((Get-Process -Id $idToCheck -Module -ErrorAction Stop).ModuleName)
+        if ($modules -contains 'coreclr.dll' -or $modules -contains 'clr.dll' -or $modules -contains 'hostfxr.dll') { throw "CLR loaded in application PID $idToCheck" }
+    }
     $monitor.Kill()
     $monitor.WaitForExit()
     $deadline = [DateTime]::UtcNow.AddSeconds(5)
@@ -68,7 +94,8 @@ try {
     if (Get-Process -Id $childId -ErrorAction SilentlyContinue) { throw 'Dashboard survived its parent.' }
     $data | Add-Member -NotePropertyName parentCrashCleanup -NotePropertyValue $true
     $data | Add-Member -NotePropertyName selfContained -NotePropertyValue $true
-    $data | Add-Member -NotePropertyName includedFrameworks -NotePropertyValue $frameworks
+    $data | Add-Member -NotePropertyName nativeExecutables -NotePropertyValue $nativePrograms
+    $data | Add-Member -NotePropertyName includedFrameworks -NotePropertyValue @()
     $data | ConvertTo-Json | Set-Content -LiteralPath $result -Encoding utf8
     $data | ConvertTo-Json
 } finally { if (-not $monitor.HasExited) { $monitor.Kill() }; $monitor.Dispose() }

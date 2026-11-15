@@ -240,7 +240,7 @@ suite.Cleanup(); return suite.Failed == 0 ? 0 : 1;
 
 public static class Fixtures
 {
-    public static string Helper => Environment.GetEnvironmentVariable("QUOTABAR_TEST_HELPER") ?? Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../../src/QuotaBar.Monitor/bin/Release/net10.0-windows/StatusLine/QuotaBar.StatusLine.exe"));
+    public static string Helper => Environment.GetEnvironmentVariable("QUOTABAR_TEST_HELPER") ?? Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../../../artifacts/windows/native-Release/StatusLine/QuotaBar.StatusLine.exe"));
     public static byte[] Auth(string account = "workspace", string user = "user", string access = "fixture-access") => Json.Bytes(new {
         tokens = new { access_token = access, refresh_token = "fixture-refresh", account_id = account }, chatgpt_user_id = user, expires_at = DateTimeOffset.UtcNow.AddHours(1).ToUnixTimeSeconds() });
 }

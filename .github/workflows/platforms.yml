@@ -136,6 +136,10 @@ jobs:
           $comparison = 'artifacts/windows/dashboard-comparison'
           New-Item -Type Directory -Force $comparison | Out-Null
           $test = 'windows/tests/QuotaBar.Tests/bin/Release/net10.0-windows/QuotaBar.Tests.exe'
+          cargo build --locked --release --example windows-resident-contract
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          & target/release/examples/windows-resident-contract.exe $app 'artifacts/QuotaBar-Windows-x64' (Join-Path $comparison 'resident.json')
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
           & $test --compare-claude $app
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
           & $test --compare-settings $app

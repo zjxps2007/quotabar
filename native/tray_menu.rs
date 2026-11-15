@@ -243,7 +243,7 @@ impl Layout {
 }
 pub struct Menu {
     window: HWND,
-    callback: Callback,
+    callback: Box<dyn Fn(i32)>,
     layout: RefCell<Layout>,
     selected: Cell<Option<usize>>,
     first_row: Cell<usize>,
@@ -257,6 +257,9 @@ pub struct Menu {
 }
 impl Menu {
     pub fn new(callback: Callback) -> io::Result<Box<Self>> {
+        Self::with_callback(move |action| callback(action))
+    }
+    pub fn with_callback(callback: impl Fn(i32) + 'static) -> io::Result<Box<Self>> {
         crate::tray_icon::start()?;
         unsafe {
             let module = GetModuleHandleW(null());
@@ -323,7 +326,7 @@ impl Menu {
             }
             let menu = Box::new(Self {
                 window,
-                callback,
+                callback: Box::new(callback),
                 layout: RefCell::new(Layout::new(&Value::Null)),
                 selected: Cell::new(None),
                 first_row: Cell::new(0),

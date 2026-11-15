@@ -32,7 +32,7 @@ pub type MenuCallback = extern "C" fn(i32, i32);
 
 pub struct NotificationIcon {
     window: HWND,
-    callback: MenuCallback,
+    callback: Box<dyn Fn(i32, i32)>,
     display: RefCell<Display>,
 }
 
@@ -83,6 +83,9 @@ impl Display {
 
 impl NotificationIcon {
     pub fn create(callback: MenuCallback) -> io::Result<Box<Self>> {
+        Self::with_callback(move |x, y| callback(x, y))
+    }
+    pub fn with_callback(callback: impl Fn(i32, i32) + 'static) -> io::Result<Box<Self>> {
         unsafe {
             let instance = GetModuleHandleW(null());
             let class = WINDOW_CLASS.get_or_init(|| {
@@ -123,7 +126,7 @@ impl NotificationIcon {
             }
             let host = Box::new(Self {
                 window,
-                callback,
+                callback: Box::new(callback),
                 display: RefCell::new(Display::default()),
             });
             SetWindowLongPtrW(window, GWLP_USERDATA, (&*host as *const Self) as isize);
@@ -218,9 +221,8 @@ unsafe extern "system" fn window_proc(
                     if !modern || (point.x == -1 && point.y == -1) {
                         GetCursorPos(&mut point);
                     }
-                    let callback = state.callback;
                     SetForegroundWindow(window);
-                    callback(point.x, point.y);
+                    (state.callback)(point.x, point.y);
                     PostMessageW(window, WM_NULL, 0, 0);
                 }
                 return 0;
