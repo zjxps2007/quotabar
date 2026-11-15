@@ -21,6 +21,15 @@ static void captureRegion(NSWindow *root, NSRect target, BOOL popover, NSURL *ou
     BOOL includeSheet = root.attachedSheet != nil;
     CGRect region = CGRectMake(round((NSMinX(target)-NSMinX(frame))*scale), round((NSMaxY(frame)-NSMaxY(target))*scale),
                                round(NSWidth(target)*scale), round(NSHeight(target)*scale));
+    NSScreen *screen = root.screen ?: NSScreen.mainScreen;
+    CGDirectDisplayID displayID = [screen.deviceDescription[@"NSScreenNumber"] unsignedIntValue];
+    CGRect displayRegion = CGRectMake(NSMinX(target) - NSMinX(screen.frame), NSMaxY(screen.frame) - NSMaxY(target),
+                                      NSWidth(target), NSHeight(target));
+    if (popover && (!screen || !NSContainsRect(screen.frame, target))) {
+        done(@{@"error": @"popover extends outside desktop", @"view": NSStringFromRect(target),
+               @"display": NSStringFromRect(screen.frame)});
+        return;
+    }
     [SCShareableContent getCurrentProcessShareableContentWithCompletionHandler:^(SCShareableContent *content, NSError *error) {
         if (error) { done(@{@"error": error.localizedDescription}); return; }
         for (SCWindow *item in content.windows) {
@@ -35,21 +44,20 @@ static void captureRegion(NSWindow *root, NSRect target, BOOL popover, NSURL *ou
             config.includeChildWindows = includeSheet;
             config.colorSpaceName = kCGColorSpaceSRGB;
             if (popover) {
-                // A status item and its popover can share a WindowServer group.
-                // Filter to this process's one popover and capture its on-screen
-                // region at native scale, even when the status item spans a display.
-                CGRect onScreen = CGRectMake(item.frame.origin.x + region.origin.x/scale,
-                                             item.frame.origin.y + region.origin.y/scale,
-                                             region.size.width/scale, region.size.height/scale);
+                // A popover can share a WindowServer group with the status bar.
+                // Use the view's actual screen coordinates for the display crop.
+                SCDisplay *matched = nil;
                 for (SCDisplay *display in content.displays) {
-                    if (!CGRectContainsPoint(display.frame, CGPointMake(CGRectGetMidX(onScreen), CGRectGetMidY(onScreen)))) continue;
-                    filter = [[SCContentFilter alloc] initWithDisplay:display includingWindows:@[item]];
-                    config.sourceRect = CGRectOffset(onScreen, -display.frame.origin.x, -display.frame.origin.y);
-                    config.width = lround(region.size.width);
-                    config.height = lround(region.size.height);
-                    crop.origin = CGPointZero;
-                    break;
+                    if (display.displayID == displayID) { matched = display; break; }
                 }
+                if (!matched) { done(@{@"error": @"popover display not available"}); return; }
+                // currentProcessShareableContent contains only this isolated
+                // fixture. Include its related popover and status-item surfaces.
+                filter = [[SCContentFilter alloc] initWithDisplay:matched includingWindows:content.windows];
+                config.sourceRect = displayRegion;
+                config.width = lround(region.size.width);
+                config.height = lround(region.size.height);
+                crop.origin = CGPointZero;
             }
             [SCScreenshotManager captureImageWithFilter:filter configuration:config completionHandler:^(CGImageRef frame, NSError *failed) {
                 if (!frame) { done(@{@"error": failed.localizedDescription ?: @"no window frame"}); return; }
@@ -61,6 +69,19 @@ static void captureRegion(NSWindow *root, NSRect target, BOOL popover, NSURL *ou
                 if (!visible) { done(@{@"error": @"could not extract window region"}); return; }
                 NSBitmapImageRep *rep = [[NSBitmapImageRep alloc] initWithCGImage:visible];
                 CGImageRelease(visible);
+                NSInteger w = rep.pixelsWide, h = rep.pixelsHigh;
+                // The corners may be rounded. The middle of every edge must
+                // contain the window, including the rightmost buttons.
+                NSPoint edges[] = {{2, h/2}, {w-3, h/2}, {w/2, 2}, {w/2, h-3}};
+                for (size_t i = 0; i < sizeof(edges)/sizeof(edges[0]); i++) {
+                    NSColor *sample = [rep colorAtX:edges[i].x y:edges[i].y];
+                    if (!sample || sample.alphaComponent < 0.9) {
+                        done(@{@"error": @"window capture has a clipped edge", @"view": NSStringFromRect(target),
+                               @"region": NSStringFromRect(displayRegion), @"window": NSStringFromRect(item.frame),
+                               @"edge": NSStringFromPoint(edges[i])});
+                        return;
+                    }
+                }
                 for (int x = 1; x <= 3; ++x) for (int y = 1; y <= 3; ++y) {
                     NSColor *sample = [rep colorAtX:x*rep.pixelsWide/4 y:y*rep.pixelsHigh/4];
                     if (!sample || sample.alphaComponent < 0.9) {
@@ -80,12 +101,33 @@ static void captureRegion(NSWindow *root, NSRect target, BOOL popover, NSURL *ou
     }];
 }
 
+static NSDictionary *rectangle(NSRect r) {
+    return @{@"x": @(NSMinX(r)), @"y": @(NSMinY(r)), @"width": @(NSWidth(r)), @"height": @(NSHeight(r))};
+}
+
 int QBTestCaptureView(void *rawView, const char *filename) {
     NSView *view = (__bridge NSView *)rawView;
     NSWindow *window = view.window;
     if (!window || !NSThread.isMainThread) return 0;
     NSRect target = [window convertRectToScreen:[view convertRect:view.bounds toView:nil]];
+    NSRect anchored = target;
+    // The test status item can be at the very edge of a small CI display.
+    // Move the real popup onto the display without resizing or redrawing its content.
+    NSScreen *screen = window.screen ?: NSScreen.mainScreen;
+    if (!screen) return 0;
+    NSRect safe = NSInsetRect(screen.visibleFrame, 8, 8);
+    CGFloat x = NSMidX(safe) - NSWidth(target)/2;
+    CGFloat y = MAX(NSMinY(safe), MIN(NSMinY(target), NSMaxY(safe) - NSHeight(target)));
+    [window setFrameOrigin:NSMakePoint(NSMinX(window.frame) + x - NSMinX(target),
+                                       NSMinY(window.frame) + y - NSMinY(target))];
+    [NSRunLoop.mainRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.25]];
+    target = [window convertRectToScreen:[view convertRect:view.bounds toView:nil]];
     NSURL *file = [NSURL fileURLWithFileSystemRepresentation:filename isDirectory:NO relativeToURL:nil];
+    NSDictionary *position = @{@"display": rectangle(screen.frame), @"anchored": rectangle(anchored),
+                               @"captured": rectangle(target), @"scale": @(window.backingScaleFactor),
+                               @"anchoredFullyOnScreen": @(NSContainsRect(screen.frame, anchored))};
+    NSURL *geometry = [[file URLByDeletingPathExtension] URLByAppendingPathExtension:@"geometry.json"];
+    [[NSJSONSerialization dataWithJSONObject:position options:0 error:NULL] writeToURL:geometry atomically:YES];
     __block NSDictionary *result;
     captureRegion(window, target, YES, file, ^(NSDictionary *value) {
         dispatch_async(dispatch_get_main_queue(), ^{ result = value; });
@@ -244,7 +286,7 @@ static void selectAccountItem(NSDictionary *request, void (^reply)(NSDictionary 
     observer = [center addObserverForName:NSMenuDidBeginTrackingNotification object:nil queue:nil usingBlock:^(NSNotification *notice) {
         NSMenu *menu = notice.object;
         if (![menu itemWithTitle:@"새로고침"] || ![menu itemWithTitle:@"계정 삭제…"]) return;
-        [center removeObserver:observer];
+        [NSNotificationCenter.defaultCenter removeObserver:observer];
         observer = nil;
         CFRunLoopPerformBlock(CFRunLoopGetMain(), (__bridge CFStringRef)NSEventTrackingRunLoopMode, ^{
             [menu update];

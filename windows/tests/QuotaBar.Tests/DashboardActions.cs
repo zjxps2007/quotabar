@@ -65,7 +65,7 @@ internal static partial class DashboardActions
                 Press(window, "필터 초기화");
                 var claude = sample.Settings.Accounts.Single(a => a.Provider == Provider.Claude);
                 var query = SearchBox();
-                Suite.Check(query.Current.Value == "");
+                Wait(() => query.Current.Value == "" ? window : null, "초기화 후 빈 검색어");
                 query.SetValue("작업");
                 Wait(() => window.FindFirst(TreeScope.Descendants, new PropertyCondition(AutomationElement.NameProperty, "1 계정")), "검색 결과 수");
                 Press(window, "새로고침");
