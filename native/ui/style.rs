@@ -113,7 +113,7 @@ impl Palette {
         };
         let gray = |d, l| Color32::from_gray(if dark { d } else { l });
         #[cfg(target_os = "macos")]
-        let (ink, muted, tertiary, placeholder, focus_ring, window_background) = {
+        let (ink, muted, tertiary, placeholder, focus_ring) = {
             use block2::StackBlock;
             use objc2::MainThreadMarker;
             use objc2_app_kit::{NSApplication, NSColor};
@@ -128,9 +128,7 @@ impl Palette {
                 let primary = gray(220, 39);
                 let secondary = gray(151, 128);
                 let tertiary = gray(84, 189);
-                let background = gray(30, 236);
-                let colors =
-                    Cell::new((primary, secondary, tertiary, tertiary, primary, background));
+                let colors = Cell::new((primary, secondary, tertiary, tertiary, primary));
                 appearance.performAsCurrentDrawingAppearance(&StackBlock::new(|| {
                     colors.set((
                         mac_color(&NSColor::labelColor(), primary),
@@ -138,7 +136,6 @@ impl Palette {
                         mac_color(&NSColor::tertiaryLabelColor(), tertiary),
                         mac_color(&NSColor::placeholderTextColor(), tertiary),
                         mac_color(&NSColor::keyboardFocusIndicatorColor(), primary),
-                        mac_color(&NSColor::windowBackgroundColor(), background),
                     ));
                 }));
                 let colors = colors.get();
@@ -159,7 +156,8 @@ impl Palette {
             #[cfg(target_os = "macos")]
             focus_ring,
             #[cfg(target_os = "macos")]
-            window_background,
+            // The exposed SwiftUI sheet surface in Dark Aqua and Aqua.
+            window_background: gray(30, 236),
             card,
             bg: gray(14, 245),
             rail: gray(19, 255),

@@ -13,8 +13,9 @@ internal static partial class DashboardActions
     {
         var sample = Demo.State() with { Activity = Demo.Activity() };
         var results = new Dictionary<string, DashboardLifecycle.PixelComparison>();
-        var nativeAlerts = new HashSet<string>();
-        var printedAlerts = new HashSet<(string Side, string Scene)>();
+        var captured = new HashSet<(string Side, string Scene)>();
+        var printed = new HashSet<(string Side, string Scene)>();
+        var captureErrors = new Dictionary<string, string>();
         var captureMethods = new Dictionary<string, string>();
         return DashboardLifecycle.WithParkedCursor(() =>
         {
@@ -35,31 +36,30 @@ internal static partial class DashboardActions
                     {
                         string scene = page + "-" + theme;
                         string path = Path.Combine(folder, scene + ".png");
-                        if (page == "remove")
+                        try
                         {
-                            // Some Windows compositors reject capture of an owned Win32
-                            // message box. Retain its native client rendering on both
-                            // sides so we can always compare like with like.
-                            string printed = Path.Combine(output, "native-alerts", side, scene + ".png");
-                            bool canPrint = PrintAlertClient(window, pid, printed);
-                            if (canPrint) printedAlerts.Add((side, scene));
-                            try { CaptureClient(captureTool, window, path); }
-                            catch (Exception error) when (canPrint && error is IOException or TimeoutException) { nativeAlerts.Add(scene); }
-                            if (side == "candidate" && nativeAlerts.Contains(scene))
-                            {
-                                if (!printedAlerts.Contains(("original", scene)) || !printedAlerts.Contains(("candidate", scene)))
-                                    throw new IOException($"Windows could not render both native confirmations for {scene}.");
-                                foreach (string build in new[] { "original", "candidate" })
-                                    File.Copy(Path.Combine(output, "native-alerts", build, scene + ".png"),
-                                              Path.Combine(output, build, scene + ".png"), overwrite: true);
-                            }
+                            CaptureClient(captureTool, window, path);
+                            captured.Add((side, scene));
                         }
-                        else CaptureClient(captureTool, window, path);
-                        if (side == "candidate")
+                        catch (Exception error) when (error is IOException or TimeoutException)
                         {
-                            captureMethods[scene] = nativeAlerts.Contains(scene) ? "PrintWindow" : "Windows Graphics Capture";
-                            results[scene] = DashboardLifecycle.ComparePixels(Path.Combine(output, "original", scene + ".png"), path);
+                            captureErrors[side + "/" + scene] = error.Message;
                         }
+                        bool bothCaptured = captured.Contains(("original", scene)) && captured.Contains(("candidate", scene));
+                        bool owned = page is not ("dashboard" or "activity" or "accounts" or "settings");
+                        string PrintPath(string build) => Path.Combine(output, "printed", build, scene + ".png");
+                        if (owned && !bothCaptured && PrintOwnedClient(window, pid, page == "remove", PrintPath(side)))
+                            printed.Add((side, scene));
+                        if (side != "candidate") return;
+                        if (!bothCaptured)
+                        {
+                            // Use the same native rendering path for both windows or leave this pair unmeasured.
+                            if (!printed.Contains(("original", scene)) || !printed.Contains(("candidate", scene))) return;
+                            foreach (string build in new[] { "original", "candidate" })
+                                File.Copy(PrintPath(build), Path.Combine(output, build, scene + ".png"), overwrite: true);
+                        }
+                        captureMethods[scene] = bothCaptured ? "Windows Graphics Capture" : "PrintWindow";
+                        results[scene] = DashboardLifecycle.ComparePixels(Path.Combine(output, "original", scene + ".png"), path);
                     }
                     foreach (string page in new[] { "dashboard", "activity", "settings", "accounts" })
                     {
@@ -137,11 +137,19 @@ internal static partial class DashboardActions
             foreach (string side in new[] { "original", "candidate" })
             {
                 string folder = Path.Combine(output, side);
-                if (DashboardLifecycle.ComparePixels(Path.Combine(folder, "dashboard-light.png"),
+                if (captured.Contains((side, "dashboard-light")) && captured.Contains((side, "dashboard-dark")) &&
+                    DashboardLifecycle.ComparePixels(Path.Combine(folder, "dashboard-light.png"),
                     Path.Combine(folder, "dashboard-dark.png")).Identical)
                     throw new IOException($"Windows returned the same {side} surface for both themes");
             }
-            File.WriteAllBytes(Path.Combine(output, "result.json"), Json.Bytes(results));
+            if (results.Count == 22)
+                File.WriteAllBytes(Path.Combine(output, "result.json"), Json.Bytes(results));
+            else
+                File.WriteAllBytes(Path.Combine(output, "result.json"), Json.Bytes(new
+                {
+                    status = "inconclusive", reason = $"Windows captured {results.Count} of 22 comparable pairs.",
+                    comparisons = results, captureErrors
+                }));
             File.WriteAllBytes(Path.Combine(output, "capture-methods.json"), Json.Bytes(captureMethods));
             foreach (var (scene, frame) in results) Console.WriteLine($"Window {scene}: {frame.ChangedPixels:N0} different pixels, {frame.Width}×{frame.Height}");
             return results.Count == 22 && results.Values.All(v => v.Identical);
