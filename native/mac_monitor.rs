@@ -38,6 +38,7 @@ define_class!(
         #[unsafe(method(applicationDidFinishLaunching:))]
         fn launched(&self, _: &NSNotification) {
             self.notify(Event::Launch);
+            crate::updates::macos::acknowledge_launch();
         }
         #[unsafe(method(applicationShouldTerminateAfterLastWindowClosed:))]
         fn close_window(&self, _: &NSApplication) -> bool {

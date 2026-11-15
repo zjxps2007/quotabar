@@ -23,6 +23,13 @@ typedef struct QBLogin QBLogin;
 typedef struct QBFrameDecoder QBFrameDecoder;
 typedef struct QBDashboard QBDashboard;
 int32_t qb_mac_monitor_run(void *context, void (*event)(void *, int32_t));
+typedef struct QBMacInstaller QBMacInstaller;
+int32_t qb_mac_update_prepare(const uint8_t *plan, size_t length);
+void qb_mac_update_discard(const char *stage, const char *target);
+QBMacInstaller *qb_mac_update_launch(const char *job);
+/* A live helper returns 0 while waiting and 1 once the intended version is ready. */
+int32_t qb_mac_update_ready(QBMacInstaller *);
+void qb_mac_update_finish(QBMacInstaller *, int32_t terminate);
 QBFrameDecoder *qb_frame_decoder_new(void);
 QBFrameDecoder *qb_frame_decoder_copy(const QBFrameDecoder *);
 void qb_frame_decoder_free(QBFrameDecoder *);

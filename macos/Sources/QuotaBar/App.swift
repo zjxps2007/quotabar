@@ -28,7 +28,6 @@ final class MonitorApplication {
             DispatchQueue.main.async { [weak self] in self?.publishing = false; self?.publish() }
         }
         if !loginLaunch && !CommandLine.arguments.contains("--menu-bar-only") { dashboard.show(route: nil) }
-        MacUpdateInstaller.acknowledgeIfRequested()
         record("ui-launched")
         if CommandLine.arguments.contains("--memory-probe"), CommandLine.arguments.contains("--diagnostics") { probe() }
     }

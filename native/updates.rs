@@ -121,6 +121,7 @@ fn verified_stage(
     platform: Platform,
     current: &str,
     stage: &Path,
+    key: &str,
 ) -> io::Result<()> {
     use crate::files::read_file;
     let manifest = stage.join("update-manifest.json");
@@ -135,7 +136,7 @@ fn verified_stage(
         current,
         &read_file(&manifest, MAX_MANIFEST)?,
         &read_file(&signature, 128)?,
-        PUBLIC_KEY,
+        key,
     )?;
     if checked != *update {
         return Err(invalid("Staged update mismatch"));

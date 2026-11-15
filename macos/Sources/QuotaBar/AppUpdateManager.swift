@@ -117,7 +117,7 @@ final class AppUpdateManager {
 
     private func apply(force: Bool) async {
         guard let staged, !suspended, force || (enabled && canInstall) else { return }
-        var helper: Process?
+        var helper: MacUpdateInstaller.Helper?
         var paused = false
         do {
             state.phase = .installing
@@ -130,24 +130,21 @@ final class AppUpdateManager {
             paused = true; try await prepareExit()
             try Task.checkCancellation()
             guard !suspended, force || (enabled && canInstall) else { resume(); state.phase = .ready; return }
-            let process = try MacUpdateInstaller.launchHelper(job: job!); helper = process
-            let ready = staged.directory.appendingPathComponent("installer-ready.json")
+            let process = try MacUpdateInstaller.Helper(job: job!); helper = process
             var acknowledged = false
             for _ in 0..<200 {
                 try Task.checkCancellation()
-                guard process.isRunning else { throw CocoaError(.executableLoad) }
-                if let data = try? Data(contentsOf: ready), data.count < 1024,
-                   let result = try? JSONDecoder().decode(UpdateInstallResult.self, from: data), result.success,
-                   result.version == staged.update.release.version { acknowledged = true; break }
+                if try process.isReady() { acknowledged = true; break }
                 try await Task.sleep(for: .milliseconds(100))
             }
-            guard acknowledged, process.isRunning else { throw CocoaError(.executableLoad) }
+            guard acknowledged, try process.isReady() else { throw CocoaError(.executableLoad) }
             guard !suspended, force || (enabled && canInstall) else {
-                process.terminate(); resume(); state.phase = .ready; return
+                process.finish(terminate: true); resume(); state.phase = .ready; return
             }
+            process.finish(terminate: false)
             exit()
         } catch {
-            if let helper, helper.isRunning { helper.terminate() }
+            helper?.finish(terminate: true)
             if paused { resume() }
             blockedVersion = staged.update.release.version
             state = AppUpdateState(phase: .failed, version: staged.update.release.version,
@@ -168,12 +165,7 @@ final class AppUpdateManager {
 
     private func discardPreparedUpdate() {
         guard let staged else { return }
-        if let transaction = UUID(uuidString: staged.directory.lastPathComponent),
-           let replacement = try? UpdateReplacement(target: Bundle.main.bundleURL, transaction: transaction),
-           !FileManager.default.fileExists(atPath: replacement.backup.path) {
-            try? FileManager.default.removeItem(at: replacement.incoming)
-        }
-        try? FileManager.default.removeItem(at: staged.directory)
+        MacUpdateInstaller.discard(staged)
         self.staged = nil; job = nil
     }
 }

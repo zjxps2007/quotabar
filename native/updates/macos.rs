@@ -1,7 +1,7 @@
 use super::{InstallResult, PUBLIC_KEY, Platform, Verified, verified_stage};
 use crate::files::{invalid, read_file, write_private};
 use crate::instance::acquire_lease;
-use objc2_foundation::{NSBundle, NSString, NSURL};
+use objc2_foundation::{NSBundle, NSHomeDirectory, NSString, NSURL};
 use serde::Deserialize;
 use std::{
     ffi::{CString, OsStr, OsString},
@@ -14,6 +14,9 @@ use std::{
 };
 use unicode_normalization::UnicodeNormalization;
 use uuid::Uuid;
+
+mod installer;
+pub use installer::{Installer, acknowledge_launch, discard, prepare};
 
 #[derive(Deserialize)]
 struct Staged {
@@ -106,7 +109,7 @@ fn run(program: &mut Command) -> io::Result<()> {
     Ok(())
 }
 
-fn validate_bundle(bundle: &Path, update: &Verified) -> io::Result<()> {
+fn validate_bundle(bundle: &Path, update: &Verified, public_key: &str) -> io::Result<()> {
     if bundle_field(bundle, "CFBundleIdentifier")? != "com.aiusage.lite"
         || bundle_field(bundle, "CFBundleShortVersionString")? != update.release.version
         || bundle_field(bundle, "CFBundleVersion")? != update.build.to_string()
@@ -128,7 +131,7 @@ fn validate_bundle(bundle: &Path, update: &Verified) -> io::Result<()> {
         })
         .and_then(|u| u.path())
         .ok_or_else(|| invalid("Missing update public key"))?;
-    if fs::read_to_string(key.to_string())?.trim() != PUBLIC_KEY.trim() {
+    if fs::read_to_string(key.to_string())?.trim() != public_key.trim() {
         return Err(invalid("Update public key mismatch"));
     }
     run(Command::new("/usr/bin/codesign")
@@ -219,40 +222,58 @@ fn open_app(path: &Path, transaction: Option<&str>) -> io::Result<()> {
     run(&mut open)
 }
 
-pub fn apply(job: &Path) -> io::Result<()> {
-    let root = std::env::home_dir()
-        .ok_or_else(|| invalid("Missing home directory"))?
-        .join("Library/Application Support/AIUsage Lite");
-    let updates = root.join("Updates");
-    let stage = job.parent().ok_or_else(|| invalid("Invalid job path"))?;
-    if job.file_name() != Some(OsStr::new("install.json"))
-        || !same_location(
-            stage
-                .parent()
-                .ok_or_else(|| invalid("Missing updates root"))?,
-            &updates,
-        )?
-        || !is_resolved(job)?
-    {
-        return Err(invalid("Unexpected update job location"));
+fn data_root() -> PathBuf {
+    PathBuf::from(NSHomeDirectory().to_string()).join("Library/Application Support/AIUsage Lite")
+}
+
+fn platform() -> Platform {
+    if cfg!(target_arch = "aarch64") {
+        Platform::MacArm64
+    } else {
+        Platform::MacX64
+    }
+}
+
+fn transaction_for(updates: &Path, stage: &Path) -> io::Result<String> {
+    let parent = stage
+        .parent()
+        .ok_or_else(|| invalid("Missing updates root"))?;
+    if !same_location(parent, updates)? || !is_resolved(stage)? {
+        return Err(invalid("Unexpected update directory"));
     }
     let info = fs::metadata(stage)?;
-    if info.uid() != unsafe { libc::getuid() } || info.mode() & 0o077 != 0 {
+    if !info.is_dir() || info.uid() != unsafe { libc::getuid() } || info.mode() & 0o077 != 0 {
         return Err(invalid("Update directory is not private"));
     }
-    let transaction = stage
+    Ok(stage
         .file_name()
         .and_then(OsStr::to_str)
         .and_then(|s| Uuid::parse_str(s).ok())
         .ok_or_else(|| invalid("Invalid update transaction ID"))?
         .hyphenated()
         .to_string()
-        .to_ascii_uppercase();
+        .to_ascii_uppercase())
+}
+
+fn read_plan(job: &Path, updates: &Path) -> io::Result<(Plan, PathBuf, String)> {
+    let stage = job.parent().ok_or_else(|| invalid("Invalid job path"))?;
+    if job.file_name() != Some(OsStr::new("install.json")) || !is_resolved(job)? {
+        return Err(invalid("Unexpected update job location"));
+    }
+    let transaction = transaction_for(updates, stage)?;
     let plan: Plan = serde_json::from_slice(&read_file(job, 64 * 1024)?)?;
+    if !same_location(&local_url(&plan.staged.directory)?, stage)? {
+        return Err(invalid("Unexpected staged update location"));
+    }
+    Ok((plan, stage.to_owned(), transaction))
+}
+
+pub fn apply(job: &Path) -> io::Result<()> {
+    let root = data_root();
+    let updates = root.join("Updates");
+    let (plan, stage, transaction) = read_plan(job, &updates)?;
     let target = local_url(&plan.target)?;
-    if !same_location(&local_url(&plan.staged.directory)?, stage)?
-        || bundle_field(&target, "CFBundleIdentifier")? != "com.aiusage.lite"
-    {
+    if bundle_field(&target, "CFBundleIdentifier")? != "com.aiusage.lite" {
         return Err(invalid("Unexpected update target"));
     }
     let paths = Replacement::new(target, &transaction)?;
@@ -268,13 +289,14 @@ pub fn apply(job: &Path) -> io::Result<()> {
     let mut lease = None;
     let mut committed = false;
     let attempt = (|| {
-        let platform = if cfg!(target_arch = "aarch64") {
-            Platform::MacArm64
-        } else {
-            Platform::MacX64
-        };
-        verified_stage(update, platform, &plan.current_version, stage)?;
-        validate_bundle(&paths.incoming, update)?;
+        verified_stage(
+            update,
+            platform(),
+            &plan.current_version,
+            &stage,
+            PUBLIC_KEY,
+        )?;
+        validate_bundle(&paths.incoming, update, PUBLIC_KEY)?;
         write_private(&stage.join("installer-ready.json"), &result(true, "ready")?)?;
         lease = Some(acquire_lease(&root, Duration::from_secs(120))?);
         if bundle_field(&paths.target, "CFBundleShortVersionString")? != plan.current_version {

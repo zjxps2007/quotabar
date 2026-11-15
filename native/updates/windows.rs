@@ -343,6 +343,7 @@ impl Plan {
             self.platform(),
             &self.current_version,
             &self.staged.directory,
+            super::PUBLIC_KEY,
         )
     }
     fn start(&self, acknowledgement: Option<Uuid>) -> io::Result<()> {

@@ -9,6 +9,58 @@ use std::{
     sync::atomic::Ordering,
 };
 
+#[cfg(target_os = "macos")]
+mod mac_installer {
+    use super::*;
+    use std::{ffi::OsStr, os::unix::ffi::OsStrExt};
+    use updates::macos::{self, Installer};
+
+    // Swift supplies fileSystemRepresentation for the duration of the call.
+    unsafe fn file_path<'a>(path: *const c_char) -> Option<&'a Path> {
+        (!path.is_null()).then(|| {
+            Path::new(OsStr::from_bytes(
+                unsafe { CStr::from_ptr(path) }.to_bytes(),
+            ))
+        })
+    }
+
+    #[unsafe(no_mangle)]
+    pub unsafe extern "C" fn qb_mac_update_prepare(plan: *const u8, length: usize) -> i32 {
+        if plan.is_null() || length > 64 * 1024 {
+            return -1;
+        }
+        macos::prepare(unsafe { slice::from_raw_parts(plan, length) }).map_or(-1, |()| 0)
+    }
+
+    #[unsafe(no_mangle)]
+    pub unsafe extern "C" fn qb_mac_update_discard(stage: *const c_char, target: *const c_char) {
+        if let (Some(stage), Some(target)) = unsafe { (file_path(stage), file_path(target)) } {
+            let _ = macos::discard(stage, target);
+        }
+    }
+
+    #[unsafe(no_mangle)]
+    pub unsafe extern "C" fn qb_mac_update_launch(job: *const c_char) -> *mut Installer {
+        unsafe { file_path(job) }
+            .and_then(|path| Installer::launch(path).ok())
+            .map_or(ptr::null_mut(), |child| Box::into_raw(Box::new(child)))
+    }
+
+    #[unsafe(no_mangle)]
+    pub unsafe extern "C" fn qb_mac_update_ready(child: *mut Installer) -> i32 {
+        unsafe { child.as_mut() }
+            .and_then(|c| c.ready().ok())
+            .map_or(-1, i32::from)
+    }
+
+    #[unsafe(no_mangle)]
+    pub unsafe extern "C" fn qb_mac_update_finish(child: *mut Installer, terminate: i32) {
+        if !child.is_null() {
+            unsafe { Box::from_raw(child) }.finish(terminate != 0);
+        }
+    }
+}
+
 /// # Safety
 /// Both arguments are NUL-terminated UTF-8 strings.
 #[cfg(windows)]
