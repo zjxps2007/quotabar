@@ -24,6 +24,7 @@ jobs:
     timeout-minutes: 35
     steps:
       - uses: actions/checkout@v7
+        id: source
         with:
           persist-credentials: false
           fetch-depth: 0
@@ -35,10 +36,13 @@ jobs:
         run: python3 -m unittest discover -s scripts/tests -v
       - name: Build and package application and Dashboard helper
         id: package
+        if: ${{ !cancelled() && steps.source.outcome == 'success' }}
         run: bash macos/scripts/package.sh
       - name: Packaged Claude callback
+        if: ${{ !cancelled() && steps.package.outcome == 'success' }}
         run: python3 scripts/check-statusline.py
       - name: Packaged Rust dashboard on AppKit
+        if: ${{ !cancelled() && steps.package.outcome == 'success' }}
         run: python3 macos/scripts/check-dashboard.py
       - uses: actions/upload-artifact@v7
         with:

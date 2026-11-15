@@ -10,67 +10,7 @@ fn bold() -> FontFamily {
 
 #[cfg(target_os = "macos")]
 fn system_face(_: &SystemSource, title: &str, weight: Weight) -> Option<FontData> {
-    use core_text::font;
-    // A Core Text family can contain descriptors without a file URL. Resolve
-    // the selected face directly and skip inaccessible fonts on this Mac.
-    let semibold = weight == Weight::SEMIBOLD;
-    let face = match title {
-        ".AppleSystemUIFont" => font::new_ui_font_for_language(
-            if semibold {
-                font::kCTFontEmphasizedSystemFontType
-            } else {
-                font::kCTFontSystemFontType
-            },
-            13.0,
-            None,
-        ),
-        "Apple SD Gothic Neo" => font::new_from_name(
-            if semibold {
-                "AppleSDGothicNeo-SemiBold"
-            } else {
-                "AppleSDGothicNeo-Regular"
-            },
-            13.0,
-        )
-        .ok()?,
-        _ => font::new_from_name(title, 13.0).ok()?,
-    };
-    fn read_face(face: &font::CTFont) -> Option<FontData> {
-        let bytes = std::fs::read(face.url()?.to_path()?).ok()?;
-        let index = if let Some(count) = ttf_parser::fonts_in_collection(&bytes) {
-            let postscript = face.postscript_name();
-            (0..count).find(|&index| {
-                ttf_parser::Face::parse(&bytes, index).is_ok_and(|f| {
-                    f.names().into_iter().any(|name| {
-                        name.name_id == ttf_parser::name_id::POST_SCRIPT_NAME
-                            && name.to_string().as_deref() == Some(postscript.as_str())
-                    })
-                })
-            })?
-        } else {
-            ttf_parser::Face::parse(&bytes, 0).ok()?;
-            0
-        };
-        let mut data = FontData::from_owned(bytes);
-        data.index = index;
-        Some(data)
-    }
-    read_face(&face).or_else(|| {
-        if title != ".AppleSystemUIFont" {
-            return None;
-        }
-        read_face(
-            &font::new_from_name(
-                if semibold {
-                    "HelveticaNeue-Medium"
-                } else {
-                    "HelveticaNeue"
-                },
-                13.0,
-            )
-            .ok()?,
-        )
-    })
+    crate::mac_fonts::load(title, weight == Weight::SEMIBOLD)
 }
 
 #[cfg(not(target_os = "macos"))]

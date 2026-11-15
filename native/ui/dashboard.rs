@@ -7,7 +7,7 @@ use serde_json::{Value, json};
 use std::collections::HashSet;
 
 impl Dashboard {
-    pub fn workspace(&mut self, ctx: &Context, p: Palette) {
+    pub fn workspace(&mut self, ctx: &Context, p: Palette, titlebar: i8) {
         if !MAC {
             // Both panels sit on the WPF root grid's background at fractional DPI.
             ctx.layer_painter(LayerId::background())
@@ -20,12 +20,12 @@ impl Dashboard {
             .frame(Frame::new().fill(p.rail).inner_margin(Margin {
                 left: 18,
                 right: if MAC { 18 } else { 19 },
-                top: 34,
+                top: 34 + titlebar,
                 bottom: 20,
             }))
             .show(ctx, |ui| {
                 let side = ui.max_rect();
-                let top = side.top() - 34.;
+                let top = side.top() - 34. - f32::from(titlebar);
                 let bottom = side.bottom() + 20.;
                 if MAC {
                     ui.painter().vline(
@@ -133,7 +133,7 @@ impl Dashboard {
                 });
             });
         CentralPanel::default().frame(Frame::new().fill(p.bg)).show(ctx, |ui| {
-            Frame::new().inner_margin(Margin { left: 28, right: 28, top: 32, bottom: 22 }).show(ui, |ui| {
+            Frame::new().inner_margin(Margin { left: 28, right: 28, top: 32 + titlebar, bottom: 22 }).show(ui, |ui| {
                 ui.set_width(ui.available_width());
                 let (title, subtitle) = match self.route.as_str() {
                     "accounts" => ("Providers & Accounts", "계정 연결과 로그인, 모니터링 상태를 관리하세요."),

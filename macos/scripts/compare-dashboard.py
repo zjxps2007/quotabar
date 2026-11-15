@@ -56,10 +56,10 @@ def build_reference(work):
     # segmented control at its user-selected provider without changing its view.
     views = src / "Views.swift"
     template = views.read_text()
-    original = "@ViewState private var provider = ProviderKind.codex"
+    original = ".onAppear { if let target = store.loginTarget { alias = target.name } }"
     if template.count(original) != 1:
         raise ValueError("Unexpected reference connection view")
-    views.write_text(template.replace(original, '@ViewState private var provider = ProviderKind(rawValue: ProcessInfo.processInfo.environment["QUOTABAR_REFERENCE_PROVIDER"] ?? "") ?? .codex'))
+    views.write_text(template.replace(original, '.onAppear { if let target = store.loginTarget { alias = target.name }; if let selected = ProcessInfo.processInfo.environment["QUOTABAR_REFERENCE_PROVIDER"].flatMap(ProviderKind.init(rawValue:)) { provider = selected } }'))
     subprocess.run(["bash", work / "macos/scripts/build.sh"], cwd=work, check=True)
     return work / "artifacts/QuotaBar.app/Contents/MacOS/QuotaBar"
 
@@ -111,7 +111,8 @@ def main():
     with tempfile.TemporaryDirectory() as tmp:
         work = Path(tmp)
         app = build_reference(work)
-        actions_match = dashboard_actions.compare(dashboard, work, app, json.loads((report / "fixture-light.json").read_text()))
+        library = dashboard_actions.build_driver(work)
+        actions_match = dashboard_actions.compare(dashboard, work, app, json.loads((report / "fixture-light.json").read_text()), library)
         for theme in dashboard.THEMES:
             fixture = report / f"fixture-{theme}.json"
             for route in dashboard.ROUTES:
@@ -129,8 +130,9 @@ def main():
                     print(f"{name}: {error}", flush=True)
                 save_results()
         compare_popovers(work, app, originals, results, save_results)
+        windows_match = dashboard_actions.compare_windows(dashboard, work, app, library)
     save_results()
-    return 0 if actions_match and all(record["identical"] for record in results.values()) else 1
+    return 0 if actions_match and windows_match and all(record["identical"] for record in results.values()) else 1
 
 
 if __name__ == "__main__":

@@ -476,16 +476,22 @@ impl Dashboard {
         let prev = c.provider;
         ui.add_enabled_ui(!locked && c.replacing.is_none(), |ui| {
             if MAC {
-                if let Some(s) = segments(
-                    ui,
-                    &[
-                        ("Codex", "Codex"),
-                        ("Claude", "Claude"),
-                        ("Gemini", "Gemini"),
-                    ],
-                    c.provider,
-                    p,
-                ) {
+                if let Some(s) = ui
+                    .horizontal(|ui| {
+                        label(ui, "Provider", 13., false, p.ink);
+                        segments(
+                            ui,
+                            &[
+                                ("Codex", "Codex"),
+                                ("Claude", "Claude"),
+                                ("Gemini", "Gemini"),
+                            ],
+                            c.provider,
+                            p,
+                        )
+                    })
+                    .inner
+                {
                     c.provider = provider(s);
                 }
             } else {
@@ -512,12 +518,18 @@ impl Dashboard {
         ui.add_space(20.);
         if MAC && c.provider == "Codex" && c.replacing.is_none() {
             ui.add_enabled_ui(!locked, |ui| {
-                if let Some(s) = segments(
-                    ui,
-                    &[("browser", "브라우저 로그인"), ("file", "파일 가져오기")],
-                    if c.browser { "browser" } else { "file" },
-                    p,
-                ) {
+                if let Some(s) = ui
+                    .horizontal(|ui| {
+                        label(ui, "연결 방법", 13., false, p.ink);
+                        segments(
+                            ui,
+                            &[("browser", "브라우저 로그인"), ("file", "파일 가져오기")],
+                            if c.browser { "browser" } else { "file" },
+                            p,
+                        )
+                    })
+                    .inner
+                {
                     c.browser = s == "browser";
                     c.error = None;
                 }

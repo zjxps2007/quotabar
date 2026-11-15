@@ -65,6 +65,17 @@ private struct Raster {
     let height: Int
     let pixels: [UInt8]
 
+    var hasVisibleDetails: Bool {
+        var first: (Int, Int, Int)?
+        for i in stride(from: 0, to: pixels.count, by: 4) where pixels[i + 3] >= 128 {
+            let rgb = (Int(pixels[i]), Int(pixels[i + 1]), Int(pixels[i + 2]))
+            if let first {
+                if abs(first.0 - rgb.0) + abs(first.1 - rgb.1) + abs(first.2 - rgb.2) > 48 { return true }
+            } else { first = rgb }
+        }
+        return false
+    }
+
     init(_ url: URL) throws {
         guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
               let bitmap = CGImageSourceCreateImageAtIndex(source, 0, nil) else { throw CocoaError(.fileReadCorruptFile) }
@@ -97,7 +108,10 @@ func compareReference(original: URL, candidate: URL, output: URL) throws {
             error += distance
         }
     }
+    let originalVisible = lhs.hasVisibleDetails, candidateVisible = rhs.hasVisibleDetails
     let result: [String: Any] = ["originalWidth": lhs.width, "originalHeight": lhs.height, "width": rhs.width, "height": rhs.height,
-                                 "changedPixels": changed, "meanChannelError": Double(error) / Double(4 * (w * h + outside)), "identical": changed == 0]
+                                 "originalHasContent": originalVisible, "candidateHasContent": candidateVisible, "changedPixels": changed,
+                                 "meanChannelError": Double(error) / Double(4 * (w * h + outside)),
+                                 "identical": originalVisible && candidateVisible && changed == 0]
     try JSONSerialization.data(withJSONObject: result).write(to: output)
 }

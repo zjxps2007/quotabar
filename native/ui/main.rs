@@ -7,6 +7,8 @@ mod dashboard;
 mod dialogs;
 #[cfg(target_os = "macos")]
 mod mac;
+#[cfg(target_os = "macos")]
+mod mac_fonts;
 mod management;
 mod model;
 mod platform;
@@ -255,7 +257,11 @@ impl eframe::App for Dashboard {
         {
             self.refresh();
         }
-        self.workspace(ctx, colors);
+        #[cfg(target_os = "macos")]
+        let titlebar = platform::dashboard_titlebar_height(frame);
+        #[cfg(not(target_os = "macos"))]
+        let titlebar = 0;
+        self.workspace(ctx, colors, titlebar);
         self.show_dialog(ctx, frame, colors);
         if !self.capture_dialog
             && let Some(image) = self.capture.as_mut().and_then(|c| c.image(ctx))

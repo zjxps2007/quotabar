@@ -298,6 +298,23 @@ pub fn dialog_owner(frame: &eframe::Frame, title: &str, open: bool) {
     }
 }
 #[cfg(target_os = "macos")]
+pub fn dashboard_titlebar_height(frame: &eframe::Frame) -> i8 {
+    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+    let Some(RawWindowHandle::AppKit(handle)) = frame.window_handle().ok().map(|h| h.as_raw())
+    else {
+        return 0;
+    };
+    let view = unsafe { handle.ns_view.cast::<objc2_app_kit::NSView>().as_ref() };
+    let Some(window) = view.window() else {
+        return 0;
+    };
+    let layout = window.contentLayoutRect();
+    (view.bounds().size.height - (layout.origin.y + layout.size.height))
+        .round()
+        .clamp(0., 80.) as i8
+}
+
+#[cfg(target_os = "macos")]
 pub fn restore_window(cc: &eframe::CreationContext<'_>) {
     use objc2_app_kit::NSView;
     use objc2_foundation::NSString;

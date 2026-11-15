@@ -450,16 +450,17 @@ impl Status {
             .iter()
             .zip(&headers)
             .map(|(a, h)| account_height(a, h.height))
-            .sum();
+            .sum::<f64>()
+            + 14. * accounts.len().saturating_sub(1) as f64;
         let demo = v["demo"] == true;
-        let pre = 18. + 24. + 14. + if demo { 29. } else { 0. };
-        let list_top = pre + if accounts.is_empty() { 0. } else { 23. };
+        let pre = 18. + 24. + 14. + if demo { 27. } else { 0. };
+        let list_top = pre + if accounts.is_empty() { 0. } else { 27. };
         let list_size = if accounts.is_empty() {
-            34.
+            15.
         } else {
             list_height.min(430.)
         };
-        let height = list_top + list_size + 14. + 24. + 18.;
+        let height = list_top + list_size + 14. + 20. + 18.;
         let root = NSView::initWithFrame(NSView::alloc(m), rect(0., 0., 330., height));
         let view = View {
             native: &root,
@@ -517,7 +518,7 @@ impl Status {
             );
         }
         if accounts.is_empty() {
-            view.label(text(&v, "empty"), [18., pre, 294., 34.], 12., false, true);
+            view.label(text(&v, "empty"), [18., pre, 294., 16.], 12., false, true);
         } else {
             view.label("남은 사용량", [18., pre, 294., 16.], 11., true, false);
             let distance_from_top = panel.contentViewController().and_then(|ctl| {
@@ -546,7 +547,7 @@ impl Status {
             let mut y = 0.;
             for (a, header) in accounts.iter().zip(&headers) {
                 list.account(a, header, y, dark);
-                y += account_height(a, header.height);
+                y += account_height(a, header.height) + 14.;
             }
             scroll.setDocumentView(Some(&content));
             let clip = scroll.contentView();
@@ -559,17 +560,17 @@ impl Status {
         let footer = list_top + list_size + 14.;
         view.button(
             "Dashboard 열기",
-            [18., footer, 108., 24.],
+            [18., footer, 89., 20.],
             DASHBOARD,
             &self.menus.target,
         );
         view.button(
             "설정…",
-            [130., footer, 60., 24.],
+            [115., footer, 42., 20.],
             SETTINGS,
             &self.menus.target,
         );
-        view.button("종료", [254., footer, 58., 24.], QUIT, &self.menus.target);
+        view.button("종료", [278., footer, 34., 20.], QUIT, &self.menus.target);
         let ctl = NSViewController::new(m);
         ctl.setView(&root);
         panel.setContentViewController(Some(&ctl));
@@ -617,16 +618,15 @@ impl AccountHeader {
 }
 fn account_height(a: &Value, header: f64) -> f64 {
     header
-        + 16.
         + if periods(a).is_empty() {
-            23.
+            21.
         } else {
             periods(a)
                 .iter()
-                .map(|w| if w["resetAt"].is_null() { 36. } else { 51. })
+                .map(|w| if w["resetAt"].is_null() { 32. } else { 50. })
                 .sum()
         }
-        + if a["error"] == true { 23. } else { 0. }
+        + if a["error"] == true { 21. } else { 0. }
         + 15.
 }
 struct View<'a> {
@@ -690,7 +690,13 @@ impl View<'_> {
                 b.setImagePosition(NSCellImagePosition::ImageOnly);
             }
         } else {
-            b.setFont(Some(&NSFont::systemFontOfSize(11.)));
+            b.setBordered(false);
+            b.setFont(Some(&NSFont::systemFontOfSize(10.)));
+            b.setWantsLayer(true);
+            if let Some(layer) = b.layer() {
+                layer.setCornerRadius(5.);
+                layer.setBackgroundColor(Some(&NSColor::separatorColor().CGColor()));
+            }
         }
         self.native.addSubview(&b);
     }
@@ -840,9 +846,9 @@ impl View<'_> {
                 };
                 self.label(&reset, [0., top + 29., 294., 14.], 9., false, true)
                     .setTextColor(Some(&NSColor::tertiaryLabelColor()));
-                top += 15.;
+                top += 18.;
             }
-            top += 36.;
+            top += 32.;
         }
         if a["error"] == true {
             self.label(
@@ -856,7 +862,7 @@ impl View<'_> {
         }
         self.bar(
             0.,
-            y + account_height(a, header.height) - 8.,
+            y + account_height(a, header.height) - 1.,
             294.,
             1.,
             &NSColor::separatorColor(),

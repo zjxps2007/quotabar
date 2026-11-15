@@ -599,6 +599,7 @@ impl Dashboard {
         });
     }
 }
+#[cfg(target_os = "macos")]
 pub fn segments<'a>(
     ui: &mut Ui,
     items: &[(&'a str, &str)],
@@ -606,9 +607,70 @@ pub fn segments<'a>(
     p: Palette,
 ) -> Option<&'a str> {
     let mut change = None;
-    #[cfg(target_os = "macos")]
-    let width = (ui.available_width().min(420.) - 6.) / items.len() as f32;
-    #[cfg(windows)]
+    let (bounds, _) = ui.allocate_exact_size(vec2(ui.available_width(), 22.), Sense::hover());
+    let field = if p.dark {
+        Color32::from_gray(52)
+    } else {
+        Color32::from_gray(241)
+    };
+    ui.painter().rect(
+        bounds,
+        5.,
+        field,
+        Stroke::new(1.0_f32, p.line),
+        StrokeKind::Inside,
+    );
+    let width = bounds.width() / items.len() as f32;
+    for (index, &(key, title)) in items.iter().enumerate() {
+        let cell = Rect::from_min_size(
+            bounds.min + vec2(index as f32 * width, 0.),
+            vec2(width, bounds.height()),
+        );
+        let response = ui.interact(cell, ui.auto_id_with(key), Sense::click());
+        let selected = key == current;
+        response.widget_info(|| {
+            WidgetInfo::selected(WidgetType::RadioButton, ui.is_enabled(), selected, title)
+        });
+        if selected {
+            let fill = if p.dark {
+                Color32::from_gray(88)
+            } else {
+                p.card
+            };
+            ui.painter().rect(
+                cell,
+                5.,
+                fill,
+                Stroke::new(1.0_f32, p.line),
+                StrokeKind::Inside,
+            );
+        }
+        if response.has_focus() {
+            ui.painter()
+                .rect_stroke(cell, 5., Stroke::new(1.0_f32, p.muted), StrokeKind::Inside);
+        }
+        ui.painter().text(
+            cell.center(),
+            Align2::CENTER_CENTER,
+            title,
+            FontId::proportional(13.),
+            p.ink,
+        );
+        if response.clicked() {
+            change = Some(key);
+        }
+    }
+    change
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn segments<'a>(
+    ui: &mut Ui,
+    items: &[(&'a str, &str)],
+    current: &str,
+    p: Palette,
+) -> Option<&'a str> {
+    let mut change = None;
     let width = {
         let max_label = items
             .iter()

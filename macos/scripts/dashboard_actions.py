@@ -2,6 +2,8 @@
 import json
 import os
 from pathlib import Path
+import shutil
+import select
 import subprocess
 import time
 from uuid import UUID
@@ -44,6 +46,8 @@ def exercise(dashboard, executable, folder, library, fixture, observed):
     folder.mkdir()
     env = {**os.environ, **dashboard.fixture_environment(), "HOME": str(folder),
            "DYLD_INSERT_LIBRARIES": str(library), "QUOTABAR_TEST_UI_DIRECTORY": str(folder)}
+    if executable != dashboard.APP:
+        env["QUOTABAR_TEST_REFERENCE_INPUT"] = "1"
     with subprocess.Popen([executable, "--dashboard-helper"], stdin=subprocess.PIPE,
                           stdout=subprocess.PIPE, bufsize=0, env=env) as app:
         controls = Controls(folder, app)
@@ -79,14 +83,19 @@ def exercise(dashboard, executable, folder, library, fixture, observed):
             menu("Dashboard 열기", "route", "dashboard")
             send({"show": {"route": "accounts"}})
             route("accounts")
+            time.sleep(0.35)
             controls.request("press", "계정 연결")
             controls.request("sheet", expected={"sheet": True})
             observed.append({"connectionSheet": "opened"})
             controls.request("press", "Claude")
-            controls.request("enabled", "연결", {"enabled": False})
+            time.sleep(0.35)
+            controls.request("attempt", "연결")
+            deadline = time.monotonic() + 0.6
+            while time.monotonic() < deadline and select.select([app.stdout], [], [], max(0, deadline-time.monotonic()))[0]:
+                if "connect" in dashboard.receive(app.stdout, deadline):
+                    raise ValueError("Claude submitted without consent")
             controls.request("press", consent)
-            controls.request("enabled", "연결", {"enabled": True})
-            observed.append({"claudeConsentEnablesSubmit": True})
+            time.sleep(0.25)
             controls.request("press", "연결")
             request = command("connect")
             request_id = request.pop("id")
@@ -94,9 +103,10 @@ def exercise(dashboard, executable, folder, library, fixture, observed):
             expected = {"provider": "claude", "path": env["CLAUDE_CONFIG_DIR"], "alias": ""}
             if request != expected:
                 raise ValueError(f"Invalid Claude connection command {request}")
+            observed.append({"claudeConsentEnablesSubmit": True})
             observed.append({"connect": request})
             send({"reply": {"id": request_id, "error": "검증용 연결 오류"}})
-            controls.request("enabled", "연결", {"enabled": True})
+            time.sleep(0.35)
             controls.request("sheet", expected={"sheet": True})
             controls.request("press", "취소")
             controls.request("sheet", expected={"sheet": False})
@@ -111,10 +121,97 @@ def exercise(dashboard, executable, folder, library, fixture, observed):
                 app.kill()
 
 
-def compare(dashboard, work, original, fixture):
+def build_driver(work):
     library = work / "dashboard-ui-driver.dylib"
-    subprocess.run(["xcrun", "clang", "-fobjc-arc", "-fblocks", "-dynamiclib", "-framework", "AppKit",
+    subprocess.run(["xcrun", "clang", "-mmacosx-version-min=14.4", "-fobjc-arc", "-fblocks", "-dynamiclib",
+                    "-framework", "AppKit", "-framework", "ScreenCaptureKit", "-framework", "CoreGraphics",
                     Path(__file__).with_name("dashboard-ui-driver.m"), "-o", library], check=True)
+    return library
+
+
+def capture_windows(dashboard, program, folder, library, fixture, output, theme):
+    folder.mkdir()
+    env = {**os.environ, **dashboard.fixture_environment(), "DYLD_INSERT_LIBRARIES": str(library),
+           "QUOTABAR_TEST_UI_DIRECTORY": str(folder)}
+    if program != dashboard.APP:
+        env["QUOTABAR_TEST_REFERENCE_INPUT"] = "1"
+    observed = {}
+    with subprocess.Popen([program, "--dashboard-helper", "--demo"], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                          env=env, bufsize=0) as app:
+        controls = Controls(folder, app)
+
+        def show(route):
+            dashboard.send(app.stdin, {"show": {"route": route}})
+            value = dashboard.wait_for(app.stdout, "route")
+            if value.get("_0") != route:
+                raise ValueError(f"Expected route {route}, got {value}")
+
+        def capture(route, sheet=False):
+            time.sleep(0.7)  # Allow the AppKit sheet/route transition to finish before capturing.
+            try:
+                observed[route] = controls.request("snapshot", "sheet" if sheet else "dashboard")
+                shutil.copyfile(folder / "frame.png", output / f"{route}-{theme}.png")
+            except (ValueError, OSError) as error:
+                observed[route] = {"error": str(error)}
+
+        try:
+            dashboard.wait_for(app.stdout, "ready")
+            dashboard.send(app.stdin, {"state": {"_0": fixture}})
+            for route in ("accounts", "dashboard", "settings"):
+                show(route)
+                if route == "accounts":
+                    controls.request("size")
+                capture(route)
+            show("accounts")
+            time.sleep(0.35)
+            controls.request("press", "계정 연결")
+            controls.request("sheet", expected={"sheet": True})
+            capture("connect", sheet=True)
+            for name in ("Claude", "Gemini"):
+                controls.request("press", name)
+                capture(f"connect-{name.lower()}", sheet=True)
+            controls.request("press", "취소")
+            controls.request("sheet", expected={"sheet": False})
+        except (OSError, ValueError, KeyError, RuntimeError, EOFError, subprocess.SubprocessError) as error:
+            observed["error"] = str(error)
+        finally:
+            if app.poll() is None:
+                try:
+                    dashboard.send(app.stdin, {"close": {}})
+                    app.wait(timeout=4)
+                except (OSError, subprocess.TimeoutExpired):
+                    app.kill()
+    return observed
+
+
+def compare_windows(dashboard, work, original, library):
+    dest = dashboard.REPORT / "windows"
+    results = {"original": {}, "rust": {}, "comparisons": {}}
+    for side, program in (("original", original), ("rust", dashboard.APP)):
+        output = dest / side
+        output.mkdir(parents=True, exist_ok=True)
+        for theme in dashboard.THEMES:
+            fixture = json.loads((dashboard.REPORT / f"fixture-{theme}.json").read_text())
+            results[side][theme] = capture_windows(dashboard, program, work / f"windows-{side}-{theme}",
+                                                  library, fixture, output, theme)
+    for theme in dashboard.THEMES:
+        for route in dashboard.ROUTES:
+            name = f"{route}-{theme}"
+            lhs, rhs = (dest / side / f"{name}.png" for side in ("original", "rust"))
+            if not lhs.is_file() or not rhs.is_file():
+                results["comparisons"][name] = {"identical": False, "error": "Missing window capture"}
+                continue
+            result = work / "visible-pixels.json"
+            try:
+                subprocess.run([original, "--pixels", lhs, rhs, result, "--reference-ui"], check=True, timeout=20)
+                results["comparisons"][name] = json.loads(result.read_text())
+            except (OSError, ValueError, subprocess.SubprocessError) as error:
+                results["comparisons"][name] = {"identical": False, "error": str(error)}
+    (dest / "comparison.json").write_text(json.dumps(results, ensure_ascii=False, indent=2))
+    return all(row["identical"] for row in results["comparisons"].values())
+
+
+def compare(dashboard, work, original, fixture, library):
     fixture = {**fixture, "settings": {**fixture["settings"], "scanLocalLogs": False}}
     results = {}
     for side, program in (("original", original), ("rust", dashboard.APP)):
