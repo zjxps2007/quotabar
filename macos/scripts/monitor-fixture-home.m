@@ -16,9 +16,8 @@ static const struct { const void *replacement, *original; } interposeHome = {
     (const void *)fixtureHome, (const void *)NSHomeDirectory
 };
 
-// Serve the actual ReleaseClient's HTTPS requests from the fixture home, including
-// error statuses. Neither the original monitor nor the Rust monitor needs a release
-// or a network connection to exercise manual checks in its normal process.
+// Serve scripted HTTPS responses in both unmodified monitor processes. Only
+// fixture requests are accepted; the traces record operation names and statuses.
 @interface QuotaBarFixtureRelease : NSURLProtocol
 @end
 @implementation QuotaBarFixtureRelease
@@ -29,17 +28,32 @@ static const struct { const void *replacement, *original; } interposeHome = {
 + (NSURLRequest *)canonicalRequestForRequest:(NSURLRequest *)request { return request; }
 - (void)startLoading {
     NSString *endpoint = @"https://api.github.com/repos/zjxps2007/quotabar/releases/latest";
-    NSData *source = [NSData dataWithContentsOfFile:[fixtureHome() stringByAppendingPathComponent:@"release-response.json"]];
+    NSString *url = self.request.URL.absoluteString;
+    BOOL release = [url isEqual:endpoint];
+    NSString *file = release ? @"release-response.json" : @"provider-responses.json";
+    NSData *source = [NSData dataWithContentsOfFile:[fixtureHome() stringByAppendingPathComponent:file]];
     NSDictionary *fixture = source ? [NSJSONSerialization JSONObjectWithData:source options:0 error:NULL] : nil;
-    if (![self.request.URL.absoluteString isEqualToString:endpoint] || ![fixture[@"status"] isKindOfClass:NSNumber.class]) {
+    if (!release) {
+        fixture = fixture[url];
+        NSString *bearer = [@"Bearer " stringByAppendingString:fixture[@"token"] ?: @""];
+        if (![self.request.HTTPMethod isEqual:fixture[@"method"]] ||
+            ![[self.request valueForHTTPHeaderField:@"Authorization"] isEqual:bearer] ||
+            (fixture[@"account"] && ![[self.request valueForHTTPHeaderField:@"ChatGPT-Account-Id"] isEqual:fixture[@"account"]])) {
+            fixture = nil;
+        }
+    }
+    if (![fixture[@"status"] isKindOfClass:NSNumber.class]) {
         [self.client URLProtocol:self didFailWithError:[NSError errorWithDomain:NSURLErrorDomain code:NSURLErrorBadURL userInfo:nil]];
         return;
     }
-    NSString *log = [fixtureHome() stringByAppendingPathComponent:@"release-requests.log"];
-    NSFileHandle *handle = [NSFileHandle fileHandleForWritingAtPath:log];
-    [handle seekToEndOfFile];
-    [handle writeData:[[NSString stringWithFormat:@"%@\n", fixture[@"status"]] dataUsingEncoding:NSUTF8StringEncoding]];
-    [handle closeFile];
+    NSString *log = [fixtureHome() stringByAppendingPathComponent:(release ? @"release-requests.log" : @"provider-requests.log")];
+    NSString *line = release ? [fixture[@"status"] stringValue] : [NSString stringWithFormat:@"%@ %@", fixture[@"name"], fixture[@"status"]];
+    @synchronized (QuotaBarFixtureRelease.class) {
+        NSFileHandle *handle = [NSFileHandle fileHandleForWritingAtPath:log];
+        [handle seekToEndOfFile];
+        [handle writeData:[[line stringByAppendingString:@"\n"] dataUsingEncoding:NSUTF8StringEncoding]];
+        [handle closeFile];
+    }
     NSData *body = [NSJSONSerialization dataWithJSONObject:fixture[@"body"] options:0 error:NULL];
     NSHTTPURLResponse *response = [[NSHTTPURLResponse alloc] initWithURL:self.request.URL
         statusCode:[fixture[@"status"] integerValue] HTTPVersion:@"HTTP/1.1"

@@ -7,12 +7,9 @@ use objc2::{
     DefinedClass, MainThreadMarker, MainThreadOnly, define_class, msg_send, rc::Retained, sel,
 };
 use objc2_app_kit::{
-    NSAppearanceCustomization, NSBorderType, NSClipView, NSControlSize, NSScrollView, NSScroller,
-    NSScrollerStyle, NSView, NSViewBoundsDidChangeNotification,
+    NSAppearanceCustomization, NSControlSize, NSScroller, NSScrollerPart, NSScrollerStyle, NSView,
 };
-use objc2_foundation::{
-    NSNotification, NSNotificationCenter, NSObjectProtocol, NSPoint, NSRect, NSSize,
-};
+use objc2_foundation::{NSObject, NSObjectProtocol, NSPoint, NSRect, NSSize};
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use std::{
     cell::{Cell, RefCell},
@@ -21,29 +18,31 @@ use std::{
 
 struct Binding {
     ctx: Context,
-    area: Cell<Option<(Id, f32)>>,
+    area: Cell<Option<(Id, f32, f32)>>,
 }
 
 define_class!(
-    #[unsafe(super=NSView)]
+    #[unsafe(super=NSObject)]
     #[thread_kind=MainThreadOnly]
     #[ivars=Binding]
-    #[name="QuotaBarScrollerDocument"]
-    struct Document;
-    unsafe impl NSObjectProtocol for Document {}
-    impl Document {
-        #[unsafe(method(isFlipped))]
-        fn flipped(&self) -> bool { true }
-
-        #[unsafe(method(clipMoved:))]
-        fn clip_moved(&self, notification: &NSNotification) {
+    #[name="QuotaBarDashboardScrollerTarget"]
+    struct Target;
+    unsafe impl NSObjectProtocol for Target {}
+    impl Target {
+        #[unsafe(method(scrollDashboard:))]
+        fn scroll_dashboard(&self, bar: &NSScroller) {
             let binding = self.ivars();
-            let Some((id, zoom)) = binding.area.get() else { return };
-            let Some(clip) = notification.object().and_then(|view| view.downcast::<NSClipView>().ok()) else { return };
+            let Some((id, page, range)) = binding.area.get() else { return };
             if let Some(mut state) = scroll_area::State::load(&binding.ctx, id) {
-                let offset = clip.bounds().origin.y as f32 / zoom;
-                if (state.offset.y - offset).abs() < 0.001 { return; }
-                state.offset.y = offset;
+                let offset = match bar.hitPart() {
+                    NSScrollerPart::IncrementPage => state.offset.y + page,
+                    NSScrollerPart::DecrementPage => state.offset.y - page,
+                    NSScrollerPart::Knob | NSScrollerPart::KnobSlot | NSScrollerPart::NoPart =>
+                        bar.doubleValue() as f32 * range,
+                    _ => return,
+                };
+                state.offset.y = offset.clamp(0., range);
+                bar.setDoubleValue(f64::from(state.offset.y / range));
                 state.store(&binding.ctx, id);
                 binding.ctx.request_repaint();
             }
@@ -52,9 +51,8 @@ define_class!(
 );
 
 pub struct NativeScroller {
-    holder: Retained<NSView>,
-    scroll: Retained<NSScrollView>,
-    doc: Retained<Document>,
+    bar: Retained<NSScroller>,
+    target: Retained<Target>,
     capture: RefCell<Option<(Id, TextureHandle)>>,
 }
 
@@ -65,43 +63,36 @@ impl NativeScroller {
             return None;
         };
         let parent = unsafe { handle.ns_view.cast::<NSView>().as_ref() };
-        let holder = NSView::initWithFrame(NSView::alloc(main), NSRect::ZERO);
-        holder.setWantsLayer(true);
-        holder.setClipsToBounds(true);
-        holder.setHidden(true);
-        parent.addSubview(&holder);
-        let scroll = NSScrollView::initWithFrame(NSScrollView::alloc(main), NSRect::ZERO);
-        scroll.setBorderType(NSBorderType::NoBorder);
-        scroll.setHasHorizontalScroller(false);
-        scroll.setHasVerticalScroller(true);
-        scroll.setAutohidesScrollers(false);
-        scroll.setDrawsBackground(false);
-        scroll.setScrollerStyle(NSScrollerStyle::Legacy);
-        let doc: Retained<Document> = unsafe {
-            msg_send![super(Document::alloc(main).set_ivars(Binding { ctx: cc.egui_ctx.clone(), area: Cell::new(None) })), initWithFrame: NSRect::ZERO]
+        let bar = NSScroller::initWithFrame(
+            NSScroller::alloc(main),
+            NSRect::new(NSPoint::ZERO, NSSize::new(15., 100.)),
+        );
+        bar.setScrollerStyle(NSScrollerStyle::Legacy);
+        bar.setHidden(true);
+        bar.setEnabled(true);
+        let target: Retained<Target> = unsafe {
+            msg_send![
+                super(Target::alloc(main).set_ivars(Binding {
+                    ctx: cc.egui_ctx.clone(),
+                    area: Cell::new(None)
+                })),
+                init
+            ]
         };
-        scroll.setDocumentView(Some(&doc));
-        holder.addSubview(&scroll);
-        let clip = scroll.contentView();
-        clip.setPostsBoundsChangedNotifications(true);
         unsafe {
-            NSNotificationCenter::defaultCenter().addObserver_selector_name_object(
-                &doc,
-                sel!(clipMoved:),
-                Some(NSViewBoundsDidChangeNotification),
-                Some(&clip),
-            );
+            bar.setTarget(Some(&target));
+            bar.setAction(Some(sel!(scrollDashboard:)));
         }
+        parent.addSubview(&bar);
         Some(Rc::new(Self {
-            holder,
-            scroll,
-            doc,
+            bar,
+            target,
             capture: RefCell::default(),
         }))
     }
 
     pub fn legacy_width(&self) -> Option<f32> {
-        let main = self.holder.mtm();
+        let main = self.bar.mtm();
         let style = NSScroller::preferredScrollerStyle(main);
         (style == NSScrollerStyle::Legacy).then(|| {
             NSScroller::scrollerWidthForControlSize_scrollerStyle(
@@ -109,22 +100,22 @@ impl NativeScroller {
                 style,
                 main,
             ) as f32
-                / self.doc.ivars().ctx.zoom_factor()
+                / self.target.ivars().ctx.zoom_factor()
         })
     }
 
     pub fn hide(&self) {
-        self.doc.ivars().area.set(None);
-        self.holder.setHidden(true);
+        self.target.ivars().area.set(None);
+        self.bar.setHidden(true);
     }
 
     // A framebuffer export cannot include NSView subviews. Draw the same live
     // scroller into that export, including its native insets and appearance.
     pub fn paint_capture(&self, ui: &Ui, rect: Rect) -> Option<()> {
-        if self.holder.isHidden() {
+        if self.bar.isHidden() {
             return None;
         }
-        let bar = self.scroll.verticalScroller()?;
+        let bar = &self.bar;
         let appearance = bar.effectiveAppearance();
         let scale = ui.ctx().pixels_per_point();
         let width = (rect.width() * scale).round() as isize;
@@ -167,15 +158,14 @@ impl NativeScroller {
 
     pub fn place(&self, id: Id, view: Rect, width: f32, content: f32, offset: f32) {
         // eframe owns the dashboard's root view throughout this main-thread update.
-        let Some(parent) = (unsafe { self.holder.superview() }) else {
+        let Some(parent) = (unsafe { self.bar.superview() }) else {
             return;
         };
         if content <= view.height() || view.height() <= 0. || width <= 0. {
             self.hide();
             return;
         }
-        let binding = self.doc.ivars();
-        binding.area.set(None);
+        let binding = self.target.ivars();
         let zoom = binding.ctx.zoom_factor();
         let points = |n: f32| f64::from(n * zoom);
         let bounds = parent.bounds();
@@ -184,39 +174,28 @@ impl NativeScroller {
         } else {
             bounds.size.height - points(view.bottom())
         };
-        let holder = NSRect::new(
+        let frame = NSRect::new(
             NSPoint::new(bounds.origin.x + points(view.right()), bounds.origin.y + y),
             NSSize::new(points(width), points(view.height())),
         );
-        if self.holder.frame() != holder {
-            self.holder.setFrame(holder);
+        if self.bar.frame() != frame {
+            self.bar.setFrame(frame);
         }
-        // Leave a point of document inside the scroll view. Clip that point
-        // off the leading edge so the entire visible rail belongs to AppKit.
-        let frame = NSRect::new(
-            NSPoint::new(-1., 0.),
-            NSSize::new(1. + points(width), points(view.height())),
-        );
-        let size = NSSize::new(1., points(content));
-        if self.scroll.frame() != frame || self.doc.frame().size != size {
-            self.scroll.setFrame(frame);
-            self.doc.setFrameSize(size);
-            self.scroll.tile();
-        }
-        let clip = self.scroll.contentView();
-        if (clip.bounds().origin.y - points(offset)).abs() >= 0.001 {
-            clip.scrollToPoint(NSPoint::new(0., points(offset)));
-            self.scroll.reflectScrolledClipView(&clip);
-        }
-        self.holder.setHidden(false);
-        binding.area.set(Some((id, zoom)));
+        let range = content - view.height();
+        // The egui viewport owns the content offset. Only a user action on
+        // the AppKit scroller may change it outside an egui frame.
+        self.bar
+            .setKnobProportion(f64::from(view.height() / content));
+        self.bar
+            .setDoubleValue(f64::from((offset / range).clamp(0., 1.)));
+        self.bar.setHidden(false);
+        binding.area.set(Some((id, view.height(), range)));
     }
 }
 
 impl Drop for NativeScroller {
     fn drop(&mut self) {
-        self.doc.ivars().area.set(None);
-        unsafe { NSNotificationCenter::defaultCenter().removeObserver(&self.doc) };
-        self.holder.removeFromSuperview();
+        unsafe { self.bar.setTarget(None) };
+        self.bar.removeFromSuperview();
     }
 }

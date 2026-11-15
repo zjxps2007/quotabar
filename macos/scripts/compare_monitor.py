@@ -11,6 +11,7 @@ import sys
 import time
 import traceback
 from uuid import UUID
+import monitor_providers
 
 HERE = Path(__file__).resolve().parent
 IDS = [str(UUID(int=i)).upper() for i in range(1, 7)]
@@ -70,6 +71,7 @@ def dashboard_probe():
     sample = Path(os.environ["QUOTABAR_TEST_SAMPLE"])
     checkpoints = []
     updates = []
+    providers = []
 
     def command(name, *values):
         wire["send"](outgoing, {name: {f"_{i}": v for i, v in enumerate(values)}})
@@ -162,9 +164,10 @@ def dashboard_probe():
         check_update("retry after rate limit", 200, "v" + offered, "available", offered)
         requests = (output.parent / "release-requests.log").read_text().splitlines()
         assert requests == [str(s["http"]) for s in updates], requests
-        write_json(output, {"checkpoints": checkpoints, "updates": updates})
+        traffic = monitor_providers.exercise(wire, incoming, outgoing, output.parent, providers)
+        write_json(output, {"checkpoints": checkpoints, "updates": updates, "providers": providers, "providerRequests": traffic})
     except Exception:
-        write_json(output, {"checkpoints": checkpoints, "updates": updates, "error": traceback.format_exc()})
+        write_json(output, {"checkpoints": checkpoints, "updates": updates, "providers": providers, "error": traceback.format_exc()})
     finally:
         command("quit")
     try:
