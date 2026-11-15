@@ -5,6 +5,38 @@ import Testing
 struct RefreshScheduleTests {
     private let anchor = Date(timeIntervalSince1970: 1_700_000_000)
 
+    @Test @MainActor func monitorWorkersKeepAccountIdentityUntilTheyFinish() throws {
+        let queue = AccountRefreshQueue()
+        let ids = (0..<5).map { _ in UUID() }
+        for id in ids { queue.enqueue(id) }
+        queue.enqueue(ids[0])
+        let first = try #require(queue.next())
+        #expect(UUID(uuid: first.account.bytes) == ids[0])
+        _ = try #require(queue.next())
+        _ = try #require(queue.next())
+        #expect(queue.next() == nil)
+        #expect(queue.status.queued == 2 && queue.status.running == 3)
+        #expect(queue.loading == Set(ids))
+        queue.cancel(ids[0])
+        queue.enqueue(ids[0])
+        let next = try #require(queue.next())
+        #expect(UUID(uuid: next.account.bytes) == ids[3])
+        #expect(!queue.finish(first))
+        queue.setInstalling(true)
+        #expect(queue.loading == Set([ids[1], ids[2], ids[3]]))
+        #expect(queue.finish(next))
+        queue.setSleeping(true)
+        queue.setInstalling(false)
+        queue.enqueue(ids[0])
+        #expect(queue.loading.isEmpty)
+        queue.setSleeping(false)
+        queue.enqueue(ids[0])
+        let replacement = try #require(queue.next())
+        #expect(UUID(uuid: replacement.account.bytes) == ids[0] && replacement.generation != first.generation)
+        #expect(!queue.finish(first))
+        #expect(queue.finish(replacement) && queue.loading.isEmpty)
+    }
+
     private func schedule(suspended: Bool = false, accounts: Bool = true, visible: Bool = true,
                           dashboard: Bool = true, logs: Bool = true, scanning: Bool = false,
                           interval: Int = 300, localAttempt: Date? = nil, automatic: Bool = true) -> RefreshSchedule {

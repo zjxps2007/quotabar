@@ -79,7 +79,7 @@ final class MonitorStore: ObservableObject {
     @Published private(set) var launchAtLogin: LaunchAtLoginState = .disabled
     @Published private(set) var appUpdate = AppUpdateState()
     private var appUpdater: AppUpdateManager?
-    private var installingUpdate = false
+    private var installingUpdate: Bool { refreshQueue.status.installing != 0 }
     private var dashboardRunning = false
     @Published var message: String?
     @Published var route = "dashboard"
@@ -91,12 +91,12 @@ final class MonitorStore: ObservableObject {
     private let vault = SecretVault()
     private let codexSessions = CodexSessionManager()
     private var storageHealthy = true
-    private var queue: [UUID] = []
-    private var jobs: [UUID: (UUID, Task<Void, Never>)] = [:]
+    private let refreshQueue = AccountRefreshQueue()
+    private var workers: [UUID: Task<Void, Never>] = [:]
     private var timer: Timer?
     private var scheduledDeadline: Date?
     private var idleCleanup: Task<Void, Never>?
-    private var sleeping = false
+    private var sleeping: Bool { refreshQueue.status.sleeping != 0 }
     private var lastScheduled = Date.distantPast
     private var observers: [NSObjectProtocol] = []
     var accounts: [MonitoredAccount] { settings.accounts }
@@ -154,14 +154,14 @@ final class MonitorStore: ObservableObject {
             if self?.appUpdate != value { self?.appUpdate = value }
         }, prepareExit: { [weak self] in
             guard let self else { return }
-            self.installingUpdate = true; self.queue.removeAll()
-            self.loading.formIntersection(self.jobs.keys)
+            self.refreshQueue.setInstalling(true)
+            self.publishLoading()
             self.timer?.invalidate(); self.timer = nil
-            let running = self.jobs.values.map { $0.1 }
+            let running = Array(self.workers.values)
             for task in running { await task.value }
             try await self.codexSessions.finishPendingWrites()
         }, resume: { [weak self] in
-            self?.installingUpdate = false; self?.refreshAccounts(); self?.scheduleNextRefresh()
+            self?.refreshQueue.setInstalling(false); self?.refreshAccounts(); self?.scheduleNextRefresh()
         }, exit: { NSApp.terminate(nil) })
         configureAppUpdates()
     }
@@ -218,14 +218,14 @@ final class MonitorStore: ObservableObject {
         diagnostic("scheduled-refresh")
     }
     private func suspend() {
-        sleeping = true; queue.removeAll()
-        for (_, task) in jobs.values { task.cancel() }
-        jobs.removeAll(); loading.removeAll()
+        refreshQueue.setSleeping(true)
+        for task in workers.values { task.cancel() }
+        workers.removeAll(); publishLoading()
         scheduleNextRefresh()
         configureAppUpdates()
     }
     private func wake() {
-        sleeping = false
+        refreshQueue.setSleeping(false)
         if settings.isAutoRefreshEnabled {
             refreshAccounts()
         }
@@ -243,23 +243,28 @@ final class MonitorStore: ObservableObject {
         enqueue([account.id])
     }
     private func enqueue(_ ids: [UUID]) {
-        guard !sleeping, !installingUpdate else { return }
-        for id in ids where !loading.contains(id) {
-            queue.append(id); loading.insert(id)
-        }
+        for id in ids { refreshQueue.enqueue(id) }
         drain()
     }
+    private func publishLoading() {
+        let ids = refreshQueue.loading
+        if loading != ids { loading = ids }
+    }
     private func drain() {
-        while jobs.count < 3, !queue.isEmpty {
-            let id = queue.removeFirst()
-            guard let account = accounts.first(where: { $0.id == id && $0.enabled }) else { loading.remove(id); continue }
-            let generation = UUID()
-            let task = Task { [weak self, service] in
+        while let job = refreshQueue.next() {
+            let id = UUID(uuid: job.account.bytes)
+            guard let account = accounts.first(where: { $0.id == id && $0.enabled }) else {
+                _ = refreshQueue.finish(job)
+                continue
+            }
+            workers[id] = Task { [weak self, service] in
                 let result = await service.fetch(account)
-                guard let self, !Task.isCancelled, self.jobs[id]?.0 == generation,
+                guard let self, self.refreshQueue.finish(job) else { return }
+                self.workers.removeValue(forKey: id)
+                defer { self.drain() }
+                guard !Task.isCancelled,
                       self.accounts.contains(where: { $0.id == id && $0.enabled }) else { return }
-                // Commit refreshed CLI credentials only after the generation check
-                // on the main actor. A deleted account cannot recreate a vault item.
+                // Only the current worker can publish refreshed CLI credentials.
                 if let data = result.updatedCredential {
                     do { try self.vault.save(data, id: id) }
                     catch { self.message = error.localizedDescription }
@@ -267,10 +272,9 @@ final class MonitorStore: ObservableObject {
                 if let snapshot = result.snapshot { self.snapshots[id] = snapshot }
                 if self.errors[id] != result.error { self.errors[id] = result.error }
                 if self.notes[id] != result.note { self.notes[id] = result.note }
-                self.jobs.removeValue(forKey: id); self.loading.remove(id); self.drain()
             }
-            jobs[id] = (generation, task)
         }
+        publishLoading()
     }
 
     @discardableResult
@@ -356,7 +360,8 @@ final class MonitorStore: ObservableObject {
         update(.menuVisibility(id: account.id, visible: visible))
     }
     private func cancel(_ id: UUID) {
-        queue.removeAll { $0 == id }; jobs[id]?.1.cancel(); jobs.removeValue(forKey: id); loading.remove(id)
+        refreshQueue.cancel(id)
+        workers.removeValue(forKey: id)?.cancel()
         drain()
     }
 
@@ -410,9 +415,10 @@ final class MonitorStore: ObservableObject {
         let args = ProcessInfo.processInfo.arguments
         guard let index = args.firstIndex(of: "--diagnostics"), args.indices.contains(index + 1) else { return }
         let url = URL(fileURLWithPath: args[index + 1])
+        let refresh = refreshQueue.status
         var fields: [String: Any] = ["event": event, "date": Date().timeIntervalSince1970,
-            "windowVisible": windowVisible, "scanning": false, "runningRequests": jobs.count,
-            "queuedRequests": queue.count, "demo": demo,
+            "windowVisible": windowVisible, "scanning": false, "runningRequests": refresh.running,
+            "queuedRequests": refresh.queued, "demo": demo,
             "nextRefresh": scheduledDeadline?.timeIntervalSince1970 as Any? ?? NSNull(),
             "timerActive": timer?.isValid == true]
         fields.merge(details) { _, value in value }

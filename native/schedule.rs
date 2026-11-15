@@ -1,3 +1,6 @@
+#[cfg(any(test, target_os = "macos", feature = "mac-settings-compat"))]
+pub mod accounts;
+
 pub const INTERVALS: [i32; 5] = [60, 300, 900, 1800, 3600];
 pub const LOCAL_INTERVAL: i32 = 300;
 

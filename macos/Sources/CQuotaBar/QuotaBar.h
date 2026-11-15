@@ -3,6 +3,19 @@
 #include <stdint.h>
 #include <stddef.h>
 typedef struct { int32_t accounts, local; } QBRefreshDelays;
+typedef struct QBMacRefresh QBMacRefresh;
+typedef struct { uint8_t bytes[16]; } QBRefreshAccount;
+typedef struct { QBRefreshAccount account; uint64_t generation; } QBRefreshJob;
+typedef struct { size_t queued, running; int32_t sleeping, installing; } QBMacRefreshStatus;
+QBMacRefresh *qb_mac_refresh_new(void);
+void qb_mac_refresh_free(QBMacRefresh *);
+void qb_mac_refresh_enqueue(QBMacRefresh *, QBRefreshAccount);
+QBRefreshJob qb_mac_refresh_next(QBMacRefresh *);
+int32_t qb_mac_refresh_finish(QBMacRefresh *, QBRefreshJob);
+void qb_mac_refresh_cancel(QBMacRefresh *, QBRefreshAccount);
+void qb_mac_refresh_sleeping(QBMacRefresh *, int32_t);
+void qb_mac_refresh_installing(QBMacRefresh *, int32_t);
+QBMacRefreshStatus qb_mac_refresh_status(const QBMacRefresh *, void *, void (*visitor)(void *, QBRefreshAccount));
 QBRefreshDelays qb_refresh_delays(int32_t suspended, int32_t automatic, int32_t accounts, int32_t dashboard,
                                  int32_t logs, int32_t scanning, int32_t interval);
 int32_t qb_refresh_interval(size_t index);

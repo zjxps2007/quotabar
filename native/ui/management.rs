@@ -428,15 +428,27 @@ impl Dashboard {
                 },
                 "",
             );
-            ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing.x = 12.;
-                caption(ui, "미리보기", p);
-                Frame::new()
-                    .fill(p.bg)
-                    .inner_margin(Margin::symmetric(12, 7))
-                    .corner_radius(7)
-                    .show(ui, |ui| crate::mac::menu_preview(ui, mode, value, p.ink));
-            });
+            let menu_height = if mode == "iconOnly" {
+                14.
+            } else {
+                crate::mac_text::system_line_height(
+                    ui,
+                    objc2_app_kit::NSFont::menuBarFontOfSize(0.).pointSize(),
+                )
+            };
+            ui.allocate_ui_with_layout(
+                vec2(ui.available_width(), menu_height + 14.),
+                Layout::left_to_right(Align::Center),
+                |ui| {
+                    ui.spacing_mut().item_spacing.x = 12.;
+                    label(ui, "미리보기", 10., false, p.muted);
+                    Frame::new()
+                        .fill(p.bg)
+                        .inner_margin(Margin::symmetric(12, 7))
+                        .corner_radius(7)
+                        .show(ui, |ui| crate::mac::menu_preview(ui, mode, value, p.ink));
+                },
+            );
         }
         #[cfg(windows)]
         Frame::new()
@@ -512,7 +524,7 @@ impl Dashboard {
                 else{("trayDisplayMode",&[("remaining","남은 비율 숫자"),("icon","로고만")])};
             if let Some(v)=segments(ui,modes,self.state.setting(key,modes[0].0),p,420.){self.preference(key,"menuBarMode",json!(v));}
             ui.add_space(if MAC {12.} else {24.});self.preview(p,ui);ui.add_space(12.);
-            if MAC{caption(ui,"잔여량은 Codex · Claude · Gemini 순서로 표시하며, 등록한 계정만 포함합니다. 표시할 계정은 Dashboard에서 선택하세요.",p);}
+            if MAC{label(ui,"잔여량은 Codex · Claude · Gemini 순서로 표시하며, 등록한 계정만 포함합니다. 표시할 계정은 Dashboard에서 선택하세요.",10.,false,p.muted);}
             else{caption(ui,"숫자는 표시 대상 계정·기간 중 가장 낮은 잔여 비율(%)입니다. 작은 아이콘에서는 % 기호를 생략합니다.",p);ui.add_space(6.);
                 caption(ui,"Dashboard에서 표시할 계정을 선택하세요. 마우스를 올리거나 클릭하면 계정별 내역을 확인할 수 있습니다.",p);}
         });
@@ -537,7 +549,7 @@ impl Dashboard {
                         self.preference("refreshSeconds", "interval", json!(intervals[index]));
                     }
                 });
-            });ui.add_space(if MAC {18.} else {10.});caption(ui,"창을 닫아도 선택한 주기로 조회합니다. 꺼도 앱 시작 시 조회와 수동 새로고침은 사용할 수 있습니다.",p);
+            });ui.add_space(if MAC {18.} else {10.});label(ui,"창을 닫아도 선택한 주기로 조회합니다. 꺼도 앱 시작 시 조회와 수동 새로고침은 사용할 수 있습니다.",if MAC {10.} else {11.},false,p.muted);
             section_divider(ui);let scan=self.state.flag("scanLocalLogs","scanLocalLogs");
             let scan_detail="Dashboard가 열려 있을 때만 로그를 확인합니다. 대화 본문은 저장하지 않습니다.";
             #[cfg(target_os = "macos")]

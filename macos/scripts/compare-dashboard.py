@@ -8,6 +8,7 @@ from uuid import UUID
 
 from importlib.util import module_from_spec, spec_from_file_location
 import dashboard_actions
+import compare_monitor
 
 HERE = Path(__file__).resolve().parent
 spec = spec_from_file_location("dashboard", HERE / "check-dashboard.py")
@@ -139,8 +140,9 @@ def main():
                 save_results()
         compare_popovers(work, app, originals, results, save_results, library)
         windows_match = dashboard_actions.compare_windows(dashboard, work, app, library)
+        monitor_matches = compare_monitor.compare(dashboard, work, app)
     save_results()
-    return 0 if actions_match and windows_match and all(record["identical"] for record in results.values()) else 1
+    return 0 if actions_match and windows_match and monitor_matches and all(record["identical"] for record in results.values()) else 1
 
 
 if __name__ == "__main__":
