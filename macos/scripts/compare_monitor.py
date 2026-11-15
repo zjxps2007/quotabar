@@ -13,6 +13,7 @@ import traceback
 from uuid import UUID
 import monitor_providers
 import monitor_update_download
+import monitor_keychain
 
 HERE = Path(__file__).resolve().parent
 IDS = [str(UUID(int=i)).upper() for i in range(1, 7)]
@@ -61,6 +62,8 @@ def dashboard_probe():
     # carry app commands and state; the monitor executable itself is unmodified.
     wire = runpy.run_path(str(HERE / "check-dashboard.py"))
     incoming, outgoing = sys.stdin.buffer, sys.stdout.buffer
+    if os.environ.get("QUOTABAR_TEST_KEYCHAIN"):
+        return monitor_keychain.dashboard(wire, incoming, outgoing)
     if stage := os.environ.get("QUOTABAR_TEST_HOST_STAGES"):
         directory = Path(stage)
         try:
@@ -271,6 +274,7 @@ def host_recovery(bundle, home, env):
 def compare(dashboard, work, reference):
     library, probe = work / "fixture-home.dylib", work / "foundation-home"
     subprocess.run(["xcrun", "clang", "-fobjc-arc", "-dynamiclib", "-framework", "Foundation",
+                    "-framework", "Security", "-framework", "LocalAuthentication",
                     HERE / "monitor-fixture-home.m", "-o", library], check=True)
     source = work / "home.swift"
     source.write_text("""import Foundation
@@ -320,7 +324,8 @@ print(URL(fileURLWithPath: CommandLine.arguments[1]).standardizedFileURL.resolvi
             saved = json.loads((root / "settings.json").read_text())
             assert (root / "instance.lock").is_file() and [a["id"].upper() for a in saved["accounts"]] == IDS[:5]
             results[side] = {**observed, "runningAtLaunch": 3, "queuedAtLaunch": 2, "persistedAccounts": IDS[:5],
-                             "dashboardRecovery": host_recovery(bundle, home, env)}
+                             "dashboardRecovery": host_recovery(bundle, home, env),
+                             "legacyMigration": monitor_keychain.compare(bundle, home, env)}
         except (OSError, ValueError, AssertionError, StopIteration, subprocess.SubprocessError) as exc:
             details = json.loads(result.read_text()) if result.exists() else {}
             requests = (home / "release-requests.log").read_text().splitlines()

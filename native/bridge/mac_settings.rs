@@ -1,10 +1,130 @@
 use quotabar::mac_settings::imported::{self, Import, Selection};
 use quotabar::mac_settings::{self, Error};
+use quotabar::{
+    codex_sessions::Secret,
+    mac_settings::migration::{self, LegacyItems},
+};
 use std::{
-    ffi::{CStr, CString, c_char},
+    ffi::{CStr, CString, c_char, c_void},
     path::Path,
     ptr, slice,
 };
+use uuid::Uuid;
+
+type LegacyCallback = unsafe extern "C" fn(*mut c_void, *const c_char, *mut Option<Secret>);
+struct LegacyAdapter(*mut c_void, LegacyCallback);
+
+impl LegacyItems for LegacyAdapter {
+    fn read(&mut self, id: Uuid) -> Option<Secret> {
+        let mut name = [0; 37];
+        id.hyphenated().encode_upper(&mut name);
+        let mut data = None;
+        unsafe {
+            (self.1)(self.0, name.as_ptr().cast(), &mut data);
+        }
+        data
+    }
+    fn delete(&mut self, id: Uuid) {
+        let mut name = [0; 37];
+        id.hyphenated().encode_upper(&mut name);
+        unsafe {
+            (self.1)(self.0, name.as_ptr().cast(), ptr::null_mut());
+        }
+    }
+}
+
+/// # Safety
+/// Paths are NUL-terminated UTF-8. The caller owns the callback context until
+/// return and releases successful settings JSON with qb_string_free.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn qb_mac_migrate(
+    path: *const c_char,
+    directory: *const c_char,
+    data: *const u8,
+    len: usize,
+    context: *mut c_void,
+    callback: Option<LegacyCallback>,
+    output: *mut *mut c_char,
+) -> i32 {
+    let Some(output) = (unsafe { output.as_mut() }) else {
+        return -1;
+    };
+    *output = ptr::null_mut();
+    if path.is_null() || directory.is_null() {
+        return -1;
+    }
+    let result = std::panic::catch_unwind(|| unsafe {
+        let path = Path::new(CStr::from_ptr(path).to_str().map_err(|_| -1)?);
+        let directory = Path::new(CStr::from_ptr(directory).to_str().map_err(|_| -1)?);
+        let settings = bytes(data, len)?;
+        let result = match callback {
+            Some(callback) => migration::run(
+                settings,
+                path,
+                directory,
+                &mut LegacyAdapter(context, callback),
+            ),
+            #[cfg(target_os = "macos")]
+            None => migration::run(
+                settings,
+                path,
+                directory,
+                &mut migration::keychain::Keychain,
+            ),
+            #[cfg(not(target_os = "macos"))]
+            None => return Err(-1),
+        }
+        .map_err(code)?;
+        CString::new(result).map_err(|_| -1)
+    });
+    match result {
+        Ok(Ok(reply)) => {
+            *output = reply.into_raw();
+            0
+        }
+        Ok(Err(code)) => code,
+        Err(_) => -1,
+    }
+}
+
+#[cfg(target_os = "macos")]
+unsafe fn legacy_id(id: *const c_char) -> Option<Uuid> {
+    if id.is_null() {
+        return None;
+    }
+    Uuid::try_parse_ascii(unsafe { CStr::from_ptr(id) }.to_bytes()).ok()
+}
+
+#[cfg(target_os = "macos")]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn qb_mac_legacy_read(
+    id: *const c_char,
+    value: *mut *mut u8,
+    length: *mut usize,
+) -> i32 {
+    let (Some(value), Some(length)) = (unsafe { value.as_mut() }, unsafe { length.as_mut() })
+    else {
+        return -1;
+    };
+    *value = ptr::null_mut();
+    *length = 0;
+    let Some(id) = (unsafe { legacy_id(id) }) else {
+        return -1;
+    };
+    let Some(secret) = migration::keychain::Keychain.read(id) else {
+        return 1;
+    };
+    super::credentials::publish_secret(&secret, value, length);
+    0
+}
+
+#[cfg(target_os = "macos")]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn qb_mac_legacy_delete(id: *const c_char) {
+    if let Some(id) = unsafe { legacy_id(id) } {
+        migration::keychain::Keychain.delete(id);
+    }
+}
 
 /// Paths and account JSON are valid until return. Successful data is owned
 /// by the caller and is released through qb_secret_free.

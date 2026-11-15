@@ -1,5 +1,7 @@
 // Loaded only into the two test monitor processes and their home-directory probe.
 #import <Foundation/Foundation.h>
+#import <LocalAuthentication/LocalAuthentication.h>
+#import <Security/Security.h>
 #import <objc/runtime.h>
 #include <stdlib.h>
 
@@ -42,6 +44,45 @@ static BOOL vaultContains(NSString *access) {
 __attribute__((used, section("__DATA,__interpose")))
 static const struct { const void *replacement, *original; } interposeHome = {
     (const void *)fixtureHome, (const void *)NSHomeDirectory
+};
+
+// During the legacy migration exercise, pass the monitor's own item query to
+// Security.framework scoped to one disposable keychain. Never search the
+// runner's login keychain for these accounts.
+static NSDictionary *migrationQuery(CFDictionaryRef input, NSString *operation) {
+    NSDictionary *query = (__bridge NSDictionary *)input;
+    const char *path = getenv("QUOTABAR_TEST_KEYCHAIN");
+    if (!path || ![query[(__bridge id)kSecAttrService] isEqual:@"com.aiusage.lite.credentials"]) return query;
+    SecKeychainRef keychain = NULL;
+    if (SecKeychainOpen(path, &keychain) != errSecSuccess) abort();
+    NSMutableDictionary *scoped = [query mutableCopy];
+    scoped[(__bridge id)kSecMatchSearchList] = @[CFBridgingRelease(keychain)];
+    LAContext *context = query[(__bridge id)kSecUseAuthenticationContext];
+    Boolean interaction = true;
+    BOOL quiet = SecKeychainGetUserInteractionAllowed(&interaction) == errSecSuccess && !interaction && context.interactionNotAllowed;
+    NSString *uuid = query[(__bridge id)kSecAttrAccount];
+    NSString *root = [fixtureHome() stringByAppendingPathComponent:@"Library/Application Support/AIUsage Lite"];
+    NSData *settings = [NSData dataWithContentsOfFile:[root stringByAppendingPathComponent:@"settings.json"]];
+    NSDictionary *saved = settings ? [NSJSONSerialization JSONObjectWithData:settings options:0 error:NULL] : nil;
+    NSString *vault = [[root stringByAppendingPathComponent:@"Credentials"] stringByAppendingPathComponent:[uuid stringByAppendingString:@".json"]];
+    NSDictionary *record = @{@"operation": operation, @"id": uuid, @"quiet": @(quiet),
+        @"marker": saved[@"credentialStorageVersion"] ?: @0, @"vault": @([[NSFileManager defaultManager] fileExistsAtPath:vault])};
+    NSMutableData *line = [[NSJSONSerialization dataWithJSONObject:record options:0 error:NULL] mutableCopy];
+    [line appendBytes:"\n" length:1];
+    NSFileHandle *log = [NSFileHandle fileHandleForWritingAtPath:[fixtureHome() stringByAppendingPathComponent:@"legacy-actions.jsonl"]];
+    [log seekToEndOfFile]; [log writeData:line]; [log closeFile];
+    return scoped;
+}
+static OSStatus fixtureCopyItem(CFDictionaryRef query, CFTypeRef *result) {
+    return SecItemCopyMatching((__bridge CFDictionaryRef)migrationQuery(query, @"read"), result);
+}
+static OSStatus fixtureDeleteItem(CFDictionaryRef query) {
+    return SecItemDelete((__bridge CFDictionaryRef)migrationQuery(query, @"delete"));
+}
+__attribute__((used, section("__DATA,__interpose")))
+static const struct { const void *replacement, *original; } keychainInterposition[] = {
+    {(const void *)fixtureCopyItem, (const void *)SecItemCopyMatching},
+    {(const void *)fixtureDeleteItem, (const void *)SecItemDelete}
 };
 
 // Serve scripted HTTPS responses in both unmodified monitor processes. Only

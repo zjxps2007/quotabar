@@ -118,6 +118,13 @@ void qb_secret_free(uint8_t *data, size_t length);
 int32_t qb_credentials(const uint8_t *data, size_t length, int32_t provider, int32_t mode, uint8_t **output, size_t *outputLength);
 typedef struct QBCodexSessions QBCodexSessions;
 typedef struct QBSessionRead QBSessionRead;
+/* A read callback fills the receiver with qb_sessions_loaded. A null receiver
+   retires the matching legacy item after the file and settings are committed. */
+typedef void (*QBLegacyItemCallback)(void *, const char *uuid, QBSessionRead *receiver);
+int32_t qb_mac_migrate(const char *settings_file, const char *vault, const uint8_t *settings, size_t length,
+                       void *context, QBLegacyItemCallback, char **output);
+int32_t qb_mac_legacy_read(const char *uuid, uint8_t **value, size_t *length);
+void qb_mac_legacy_delete(const char *uuid);
 /* A non-null receiver requests a load. Supply its data with qb_sessions_loaded,
  * return 1 when missing, or a negative code on failure. A null receiver requests a save. */
 typedef struct {

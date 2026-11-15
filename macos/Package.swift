@@ -7,7 +7,7 @@ let package = Package(
     products: [.executable(name: "QuotaBar", targets: ["QuotaBar"])],
     targets: [
         .systemLibrary(name: "CQuotaBar"),
-        .target(name: "UsageCore", dependencies: ["CQuotaBar"], linkerSettings: [.linkedLibrary("iconv"), .linkedFramework("ServiceManagement"), .linkedFramework("AppKit"), .linkedFramework("QuartzCore"), .linkedFramework("CoreGraphics")]),
+        .target(name: "UsageCore", dependencies: ["CQuotaBar"], linkerSettings: [.linkedLibrary("iconv"), .linkedFramework("ServiceManagement"), .linkedFramework("Security"), .linkedFramework("LocalAuthentication"), .linkedFramework("AppKit"), .linkedFramework("QuartzCore"), .linkedFramework("CoreGraphics")]),
         .executableTarget(name: "QuotaBar", dependencies: ["UsageCore", "CQuotaBar"],
                           exclude: ["Views.swift", "ActivityView.swift", "AppLogo.swift", "AppSettings.swift", "OpenSourceLicensesSettings.swift"],
                           resources: [.process("Resources")]),

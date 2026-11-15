@@ -2,6 +2,7 @@
 //! is shared with the original app's Foundation Codable models.
 mod codec;
 pub mod imported;
+pub mod migration;
 #[cfg(test)]
 mod tests;
 
