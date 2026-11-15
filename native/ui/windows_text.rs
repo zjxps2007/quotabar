@@ -17,7 +17,8 @@ struct Factories {
     write: IDWriteFactory,
     line_metrics: [Option<DWRITE_FONT_METRICS>; 2],
     coverage: IDWriteRenderingParams,
-    display: IDWriteRenderingParams,
+    lcd_coverage: IDWriteRenderingParams,
+    gamma: [f32; 4],
     contrast: [u8; 256],
     draw: ID2D1Factory,
     images: IWICImagingFactory,
@@ -72,6 +73,16 @@ impl Factories {
             // WPF applies the display's enhanced contrast to the glyph mask,
             // before compositing the foreground against the current surface.
             let display = write.CreateRenderingParams()?;
+            // Get channel coverage before Direct2D applies its own foreground
+            // and background blending. WPF composes these samples itself.
+            let lcd_coverage = write.CreateCustomRenderingParams(
+                1.,
+                0.,
+                display.GetClearTypeLevel(),
+                display.GetPixelGeometry(),
+                display.GetRenderingMode(),
+            )?;
+            let gamma = glyph_gamma(display.GetGamma());
             let contrast = display.GetEnhancedContrast();
             let contrast = std::array::from_fn(|i| {
                 let alpha = i as f32 / 255.;
@@ -81,7 +92,8 @@ impl Factories {
                 line_metrics: Self::line_metrics(&write),
                 write,
                 coverage,
-                display,
+                lcd_coverage,
+                gamma,
                 contrast,
                 draw: D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, None)?,
                 images: CoCreateInstance(&CLSID_WICImagingFactory, None, CLSCTX_INPROC_SERVER)?,
@@ -169,18 +181,21 @@ impl Factories {
                     },
                 )
                 .ok()?;
-            let brush_color = |color: Color32| D2D1_COLOR_F {
-                r: f32::from(color.r()) / 255.,
-                g: f32::from(color.g()) / 255.,
-                b: f32::from(color.b()) / 255.,
+            let white = D2D1_COLOR_F {
+                r: 1.,
+                g: 1.,
+                b: 1.,
                 a: 1.,
             };
-            let (ink, backdrop) = key.colors.unwrap_or((Color32::WHITE, Color32::BLACK));
-            let brush = target.CreateSolidColorBrush(&brush_color(ink), None).ok()?;
+            let black = D2D1_COLOR_F {
+                a: 1.,
+                ..Default::default()
+            };
+            let brush = target.CreateSolidColorBrush(&white, None).ok()?;
             target.BeginDraw();
-            target.Clear(Some(&brush_color(backdrop)));
+            target.Clear(Some(&black));
             target.SetTextRenderingParams(if key.colors.is_some() {
-                &self.display
+                &self.lcd_coverage
             } else {
                 &self.coverage
             });
@@ -199,17 +214,31 @@ impl Factories {
             bitmap
                 .CopyPixels(std::ptr::null(), (width * 4) as u32, &mut bytes)
                 .ok()?;
+            let colors = key.colors.map(|(ink, backdrop)| {
+                let channels = [
+                    (ink.r(), backdrop.r()),
+                    (ink.g(), backdrop.g()),
+                    (ink.b(), backdrop.b()),
+                ];
+                channels.map(|(fg, bg)| {
+                    self.contrast
+                        .map(|sample| compose_glyph(sample, fg, bg, self.gamma))
+                })
+            });
             let mask = bytes
                 .as_chunks::<4>()
                 .0
                 .iter()
                 .map(|px| {
-                    if key.colors.is_some() {
-                        let pixel = Color32::from_rgb(px[2], px[1], px[0]);
-                        if pixel == backdrop {
+                    if let Some([red, green, blue]) = &colors {
+                        if px[..3] == [0, 0, 0] {
                             Color32::TRANSPARENT
                         } else {
-                            pixel
+                            Color32::from_rgb(
+                                red[px[2] as usize],
+                                green[px[1] as usize],
+                                blue[px[0] as usize],
+                            )
                         }
                     } else {
                         // For an alpha bitmap WPF samples the center of the coverage texture.
@@ -223,6 +252,37 @@ impl Factories {
             ))
         }
     }
+}
+
+// Glyph gamma coefficients from dotnet/wpf, WpfGfx/core/common/Gamma.cpp.
+// Copyright (c) .NET Foundation and Contributors, MIT (windows/assets/WinForms-LICENSE).
+fn glyph_gamma(display_gamma: f32) -> [f32; 4] {
+    const COEFFICIENTS: [[f32; 4]; 13] = [
+        [0., 0., 0., 0.],
+        [0.0166, -0.0807, 0.2227, -0.0751],
+        [0.0350, -0.1760, 0.4325, -0.1370],
+        [0.0543, -0.2821, 0.6302, -0.1876],
+        [0.0739, -0.3963, 0.8167, -0.2287],
+        [0.0933, -0.5161, 0.9926, -0.2616],
+        [0.1121, -0.6395, 1.1588, -0.2877],
+        [0.1300, -0.7649, 1.3159, -0.3080],
+        [0.1469, -0.8911, 1.4644, -0.3234],
+        [0.1627, -1.0170, 1.6051, -0.3347],
+        [0.1773, -1.1420, 1.7385, -0.3426],
+        [0.1908, -1.2652, 1.8650, -0.3476],
+        [0.2031, -1.3864, 1.9851, -0.3501],
+    ];
+    COEFFICIENTS[(((display_gamma - 1.) * 10.) as usize).min(COEFFICIENTS.len() - 1)]
+}
+
+fn compose_glyph(sample: u8, foreground: u8, background: u8, [g1, g2, g3, g4]: [f32; 4]) -> u8 {
+    let alpha = f32::from(sample) / 255.;
+    let ink = f32::from(foreground) / 255.;
+    let corrected = alpha + alpha * (1. - alpha) * ((g1 * ink + g2) * alpha + (g3 * ink + g4));
+    // The display target blends an 8-bit coverage value with the destination channel.
+    let coverage = (255. * corrected.clamp(0., 1.)).round() as u32;
+    ((u32::from(foreground) * coverage + u32::from(background) * (255 - coverage) + 127) / 255)
+        as u8
 }
 
 thread_local! {
@@ -576,6 +636,22 @@ impl egui::Plugin for TextRenderer {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cleartype_coverage_blends_light_and_dark_ink() {
+        let gamma = glyph_gamma(1.75);
+        let samples = [0, 67, 127, 189, 255];
+        assert_eq!(
+            samples.map(|s| compose_glyph(s, 23, 255, gamma)),
+            [255, 211, 172, 117, 23]
+        );
+        assert_eq!(
+            samples.map(|s| compose_glyph(s, 229, 24, gamma)),
+            [24, 106, 154, 191, 229]
+        );
+        assert_eq!(compose_glyph(127, 255, 0, glyph_gamma(1.)), 127);
+        assert_eq!(glyph_gamma(3.), glyph_gamma(2.25));
+    }
 
     #[test]
     fn mixed_script_text_uses_the_system_rasterizer_at_both_scales() {
