@@ -19,10 +19,10 @@ mod mac_menu;
 mod mac_refresh;
 #[cfg(any(target_os = "macos", feature = "mac-settings-compat"))]
 mod mac_settings;
-#[cfg(target_os = "macos")]
-mod mac_updates;
 #[cfg(any(target_os = "macos", feature = "mac-settings-compat"))]
 mod mac_snapshots;
+#[cfg(target_os = "macos")]
+mod mac_updates;
 #[cfg(any(windows, target_os = "macos"))]
 mod managed_accounts;
 #[cfg(windows)]
@@ -45,6 +45,8 @@ mod windows_login;
 mod windows_operation;
 #[cfg(windows)]
 mod windows_settings;
+#[cfg(windows)]
+mod windows_updater;
 #[cfg(windows)]
 #[unsafe(no_mangle)]
 /// Draws straight-alpha BGRA into the caller's square icon buffer.

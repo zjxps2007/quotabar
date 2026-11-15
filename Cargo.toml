@@ -22,6 +22,8 @@ path = "native/lib.rs"
 [features]
 # Exercise the macOS monitor storage ABI with a host Swift Foundation toolchain.
 mac-settings-compat = []
+# Disposable Windows upgrade tests build the old release with a local HTTP response fixture.
+windows-update-fixture = []
 
 [[bin]]
 name = "quotabar-statusline"

@@ -10,7 +10,7 @@ use std::{
 };
 use uuid::Uuid;
 
-unsafe fn text<'a>(value: *const c_char) -> io::Result<&'a str> {
+pub(super) unsafe fn text<'a>(value: *const c_char) -> io::Result<&'a str> {
     if value.is_null() {
         return Err(io::ErrorKind::InvalidInput.into());
     }
@@ -18,7 +18,7 @@ unsafe fn text<'a>(value: *const c_char) -> io::Result<&'a str> {
         .to_str()
         .map_err(io::Error::other)
 }
-unsafe fn path<'a>(value: *const c_char) -> io::Result<&'a Path> {
+pub(super) unsafe fn path<'a>(value: *const c_char) -> io::Result<&'a Path> {
     unsafe { text(value) }.map(Path::new)
 }
 

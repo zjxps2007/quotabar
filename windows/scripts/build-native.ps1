@@ -1,5 +1,5 @@
 param([ValidateSet('Debug','Release')][string]$Configuration = 'Release',
-      [Parameter(Mandatory=$true)][string]$Destination)
+      [Parameter(Mandatory=$true)][string]$Destination, [switch]$UpdateFixture)
 $ErrorActionPreference = 'Stop'
 $repo = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..'))
 $localCargo = Join-Path $repo '.tools\rust\bin\cargo.exe'
@@ -15,7 +15,8 @@ try {
     if ($Configuration -eq 'Release') { $argsForBuild += '--release' }
     & $cargo @argsForBuild --package quotabar --bin quotabar-statusline
     if ($LASTEXITCODE -ne 0) { throw 'Native helper build failed.' }
-    & $cargo @argsForBuild --package quotabar-native
+    $bridgeFeatures = if ($UpdateFixture) { @('--features','windows-update-fixture') } else { @() }
+    & $cargo @argsForBuild --package quotabar-native @bridgeFeatures
     if ($LASTEXITCODE -ne 0) { throw 'Rust core library build failed.' }
     & $cargo @argsForBuild --package quotabar-ui --bin quotabar-dashboard
     if ($LASTEXITCODE -ne 0) { throw 'Rust dashboard build failed.' }

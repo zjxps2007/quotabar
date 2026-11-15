@@ -11,6 +11,7 @@ crate-type = ["cdylib", "staticlib"]
 
 [features]
 mac-settings-compat = ["quotabar/mac-settings-compat"]
+windows-update-fixture = ["quotabar/windows-update-fixture"]
 
 [dependencies]
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }

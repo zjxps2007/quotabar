@@ -18,6 +18,7 @@ use windows_sys::{
 const CLASS: *const u16 = w!("QuotaBar.Native.MonitorLoop");
 const WAKE: u32 = WM_APP + 37;
 const DASHBOARD: u32 = WM_APP + 38;
+const UPDATE_WORK: u32 = WM_APP + 39;
 static REGISTERED: OnceLock<Result<u16, i32>> = OnceLock::new();
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -31,6 +32,7 @@ pub enum Event {
     PowerStatus,
     Display,
     Dashboard,
+    UpdateWork,
 }
 
 pub struct MonitorLoop {
@@ -118,6 +120,9 @@ impl MonitorLoop {
     pub(crate) fn dashboard_input(window: isize) -> bool {
         window != 0 && unsafe { PostMessageW(window as HWND, DASHBOARD, 0, 0) != 0 }
     }
+    pub fn update_input(window: isize) -> bool {
+        window != 0 && unsafe { PostMessageW(window as HWND, UPDATE_WORK, 0, 0) != 0 }
+    }
     pub fn quit(&self) {
         unsafe {
             PostQuitMessage(0);
@@ -169,6 +174,7 @@ unsafe extern "system" fn window_proc(
             let event = match message {
                 WAKE => Some(Event::Work),
                 DASHBOARD => Some(Event::Dashboard),
+                UPDATE_WORK => Some(Event::UpdateWork),
                 WM_TIMER => {
                     if let Some(index) = state
                         .timers

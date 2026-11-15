@@ -13,8 +13,10 @@ internal static class UpdateIntegration
     {
         string root = Path.Combine(Path.GetTempPath(), "QuotaBar.Update.Tests-" + Guid.NewGuid()); PrivateFiles.EnsureDirectory(root);
         string target = Path.Combine(root, "QuotaBar 한글 with spaces"), data = Path.Combine(root, "data");
-        bool installed = mode == "installed", failure = mode == "rollback";
-        Process? monitor = null, helper = null;
+        bool resident = mode.StartsWith("resident-", StringComparison.Ordinal);
+        string scenario = resident ? mode["resident-".Length..] : mode;
+        bool installed = scenario == "installed", failure = scenario == "rollback";
+        Process? monitor = null;
         try
         {
             if (installed)
@@ -25,15 +27,13 @@ internal static class UpdateIntegration
             }
             else UpdateInstaller.CopyTree(oldPackage, target, CancellationToken.None);
             File.WriteAllText(Path.Combine(target, "user-file.txt"), "keep me");
-            var paths = new AppPaths(data); new SettingsStore(paths).Save(new Settings { AutomaticUpdates = false, AutoRefresh = false, Appearance = "dark" });
+            var paths = new AppPaths(data); new SettingsStore(paths).Save(new Settings { AutomaticUpdates = resident, AutoRefresh = false, Appearance = "dark" });
             var start = new ProcessStartInfo(Path.Combine(target, "QuotaBar.Monitor.exe")) { UseShellExecute = false, WorkingDirectory = target };
             foreach (string argument in new[] { "--background", "--data-dir", data }) start.ArgumentList.Add(argument);
-            monitor = Process.Start(start)!;
-            await Until(() => { using var lease = new SingleInstance(paths); return !lease.IsOwner; }, "old monitor lease");
-            Suite.Check(!monitor.HasExited);
             string current = AssemblyName.GetAssemblyName(Path.Combine(target, "QuotaBar.Monitor.dll")).Version!.ToString(3);
             const string version = "0.1.1";
-            string directory = Path.Combine(UpdateInstaller.UpdatesRoot(paths), Guid.NewGuid().ToString("D")); PrivateFiles.EnsureDirectory(directory);
+            string directory = resident ? Path.Combine(root, "fixture") : Path.Combine(UpdateInstaller.UpdatesRoot(paths), Guid.NewGuid().ToString("D"));
+            PrivateFiles.EnsureDirectory(directory);
             string name = $"QuotaBar-{version}-Windows-x64" + (installed ? "-Setup.exe" : ".zip");
             string payload = Path.Combine(directory, name); File.Copy(assetPath, payload);
             if (failure)
@@ -50,42 +50,32 @@ internal static class UpdateIntegration
             using var key = ECDsa.Create(); key.ImportFromPem(File.ReadAllText(keyPath));
             byte[] signature = key.SignData(manifest, HashAlgorithmName.SHA256, DSASignatureFormat.Rfc3279DerSequence);
             PrivateFiles.Write(Path.Combine(directory, "update-manifest.json"), manifest); PrivateFiles.Write(Path.Combine(directory, "update-manifest.sig"), signature);
-            var staged = new StagedUpdate(UpdateSignature.Verify(manifest, signature, UpdateInstaller.PublicKey, release, current), directory);
-            string signatureFile = Path.Combine(directory, "update-manifest.sig");
-            PrivateFiles.Write(signatureFile, new byte[signature.Length]);
-            try
+            if (resident)
             {
-                await UpdateInstaller.Prepare(staged, paths, target, current, CancellationToken.None);
-                throw new InvalidDataException("Prepared an update with an invalid signature.");
+                PrivateFiles.Write(Path.Combine(directory, "feed.json"), Json.Bytes(new {
+                    tag_name = release.Tag, html_url = release.Page, draft = false, prerelease = false,
+                    assets = new[] { new { name, size = asset.Bytes, state = "uploaded", digest = "sha256:" + hash, browser_download_url = asset.Url } }
+                }));
+                start.Environment["QUOTABAR_TEST_RELEASE_DIRECTORY"] = directory;
             }
-            catch (UsageException error) when (error.Code == "update_signature") { }
-            Suite.Check(!Directory.Exists(Path.Combine(directory, "Helper")) && !File.Exists(Path.Combine(directory, "install.json")));
-            PrivateFiles.Write(signatureFile, signature);
-            string job = await UpdateInstaller.Prepare(staged, paths, target, current, CancellationToken.None);
-            byte[] prepared = File.ReadAllBytes(job);
-            bool rejected = false;
-            try { await UpdateInstaller.Prepare(staged, paths, target, current, CancellationToken.None); }
-            catch (IOException) { rejected = true; }
-            Suite.Check(rejected && File.ReadAllBytes(job).SequenceEqual(prepared));
-            var plan = Json.Read<WindowsUpdatePlan>(prepared);
-            using var preparingProcess = Process.GetCurrentProcess();
-            Suite.Check(plan.ParentPid == preparingProcess.Id && plan.ParentStarted == preparingProcess.StartTime.ToUniversalTime().Ticks);
-            plan = plan with { ParentPid = monitor.Id, ParentStarted = monitor.StartTime.ToUniversalTime().Ticks };
-            PrivateFiles.Write(job, Json.Bytes(plan));
-            using var handoff = UpdateInstaller.Helper.Start(job);
-            helper = Process.GetProcessById(handoff.ProcessId);
-            await Until(handoff.IsReady, "helper ready");
-            Suite.Check(!helper.HasExited && !monitor.HasExited);
-            handoff.Detach();
-            monitor.Kill(); await monitor.WaitForExitAsync(); // Release the real old executable and its lease.
-            using var timeout = new CancellationTokenSource(TimeSpan.FromMinutes(3)); await helper.WaitForExitAsync(timeout.Token);
+            monitor = Process.Start(start)!;
+            await Until(() => { using var lease = new SingleInstance(paths); return !lease.IsOwner; }, "old monitor lease");
+            Suite.Check(!monitor.HasExited);
+            if (resident)
+            {
+                await ObserveResident(paths, monitor);
+            }
+            else
+            {
+                var staged = new StagedUpdate(UpdateSignature.Verify(manifest, signature, UpdateInstaller.PublicKey, release, current), directory);
+                await DriveInstaller(staged, signature, paths, target, current, monitor, failure);
+            }
             var result = UpdateInstaller.ReadResult(UpdateInstaller.ResultPath(paths));
             Suite.Check(result != null && result.Success == !failure, result?.Message ?? "No install result.");
-            Suite.Check((helper.ExitCode == 0) == !failure);
             string expected = failure ? current : version;
             Suite.Check(AssemblyName.GetAssemblyName(Path.Combine(target, "QuotaBar.Monitor.dll")).Version!.ToString(3) == expected);
             Suite.Check(File.ReadAllText(Path.Combine(target, "user-file.txt")) == "keep me");
-            var settings = new SettingsStore(paths).Load(); Suite.Check(settings.Appearance == "dark" && !settings.AutomaticUpdates && !settings.AutoRefresh);
+            var settings = new SettingsStore(paths).Load(); Suite.Check(settings.Appearance == "dark" && settings.AutomaticUpdates == resident && !settings.AutoRefresh);
             await Until(() => { using var lease = new SingleInstance(paths); return !lease.IsOwner; }, "restarted monitor lease");
             if (installed)
             {
@@ -99,7 +89,6 @@ internal static class UpdateIntegration
             foreach (var process in Process.GetProcessesByName("QuotaBar.Monitor"))
                 using (process) try { if (string.Equals(process.MainModule?.FileName, Path.Combine(target, "QuotaBar.Monitor.exe"), StringComparison.OrdinalIgnoreCase))
                     { process.Kill(); await process.WaitForExitAsync(); } } catch (InvalidOperationException) { }
-            if (helper != null) { if (!helper.HasExited) { helper.Kill(true); await helper.WaitForExitAsync(); } helper.Dispose(); }
             monitor?.Dispose();
             if (installed && File.Exists(Path.Combine(target, "unins000.exe")))
             {
@@ -110,9 +99,67 @@ internal static class UpdateIntegration
             try { Directory.Delete(root, true); } catch (IOException) { }
         }
     }
-    private static async Task Until(Func<bool> condition, string operation)
+    private static async Task ObserveResident(AppPaths paths, Process monitor)
     {
-        var deadline = DateTime.UtcNow.AddSeconds(30);
+        // No calls to the installer API here. The old monitor discovers the
+        // signed fixture on its idle timer, prepares it and exits under its own PID.
+        int pid = monitor.Id;
+        long started = monitor.StartTime.ToUniversalTime().Ticks;
+        string updates = UpdateInstaller.UpdatesRoot(paths);
+        string? job = null;
+        await Until(() => Directory.Exists(updates) && (job = Directory.EnumerateDirectories(updates)
+            .Select(dir => Path.Combine(dir, "install.json")).FirstOrDefault(File.Exists)) != null,
+            "resident prepared its own signed job", 180);
+        var plan = Json.Read<WindowsUpdatePlan>(File.ReadAllBytes(job!));
+        Suite.Check(plan.ParentPid == pid && plan.ParentStarted == started);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        await monitor.WaitForExitAsync(timeout.Token);
+        Suite.Check(monitor.ExitCode == 0);
+        await Until(() => UpdateInstaller.ReadResult(UpdateInstaller.ResultPath(paths)) != null, "resident update result", 180);
+    }
+
+    private static async Task DriveInstaller(StagedUpdate staged, byte[] signature, AppPaths paths,
+        string target, string current, Process monitor, bool failure)
+    {
+        string signatureFile = Path.Combine(staged.Directory, "update-manifest.sig");
+        PrivateFiles.Write(signatureFile, new byte[signature.Length]);
+        try
+        {
+            await UpdateInstaller.Prepare(staged, paths, target, current, CancellationToken.None);
+            throw new InvalidDataException("Prepared an update with an invalid signature.");
+        }
+        catch (UsageException error) when (error.Code == "update_signature") { }
+        Suite.Check(!Directory.Exists(Path.Combine(staged.Directory, "Helper")) && !File.Exists(Path.Combine(staged.Directory, "install.json")));
+        PrivateFiles.Write(signatureFile, signature);
+        string job = await UpdateInstaller.Prepare(staged, paths, target, current, CancellationToken.None);
+        byte[] prepared = File.ReadAllBytes(job);
+        bool rejected = false;
+        try { await UpdateInstaller.Prepare(staged, paths, target, current, CancellationToken.None); }
+        catch (IOException) { rejected = true; }
+        Suite.Check(rejected && File.ReadAllBytes(job).SequenceEqual(prepared));
+        var plan = Json.Read<WindowsUpdatePlan>(prepared);
+        using var preparingProcess = Process.GetCurrentProcess();
+        Suite.Check(plan.ParentPid == preparingProcess.Id && plan.ParentStarted == preparingProcess.StartTime.ToUniversalTime().Ticks);
+        plan = plan with { ParentPid = monitor.Id, ParentStarted = monitor.StartTime.ToUniversalTime().Ticks };
+        PrivateFiles.Write(job, Json.Bytes(plan));
+        using var handoff = UpdateInstaller.Helper.Start(job);
+        using var helper = Process.GetProcessById(handoff.ProcessId);
+        try
+        {
+            await Until(handoff.IsReady, "helper ready");
+            Suite.Check(!helper.HasExited && !monitor.HasExited);
+            handoff.Detach();
+            monitor.Kill(); await monitor.WaitForExitAsync();
+            using var timeout = new CancellationTokenSource(TimeSpan.FromMinutes(3));
+            await helper.WaitForExitAsync(timeout.Token);
+            Suite.Check((helper.ExitCode == 0) == !failure);
+        }
+        finally { if (!helper.HasExited) { helper.Kill(true); await helper.WaitForExitAsync(); } }
+    }
+
+    private static async Task Until(Func<bool> condition, string operation, int seconds = 30)
+    {
+        var deadline = DateTime.UtcNow.AddSeconds(seconds);
         while (!condition()) { if (DateTime.UtcNow > deadline) throw new TimeoutException(operation); await Task.Delay(100); }
     }
 }

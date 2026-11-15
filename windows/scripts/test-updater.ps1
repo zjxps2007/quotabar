@@ -13,7 +13,7 @@ try {
     [IO.File]::WriteAllText($keyPath, $key.ExportPkcs8PrivateKeyPem())
     [IO.File]::WriteAllText($publicPath, $key.ExportSubjectPublicKeyInfoPem())
     [IO.File]::WriteAllText($versionPath, '{"version":"0.1.0","build":6}')
-    & "$PSScriptRoot\package.ps1" -OutputFolder 'Updater-Old'
+    & "$PSScriptRoot\package.ps1" -OutputFolder 'Updater-Old' -UpdateFixture
     Invoke-Dotnet @('build', (Join-Path $RepoRoot 'windows\tests\QuotaBar.Tests\QuotaBar.Tests.csproj'), '-c', 'Release', '--nologo', '-m:1', '-nodeReuse:false', '-p:UseSharedCompilation=false')
     $probePath = Join-Path $RepoRoot 'artifacts\update-manager-probe.json'
     $probeInfo = [Diagnostics.ProcessStartInfo]::new((Join-Path $RepoRoot 'artifacts\Updater-Old\QuotaBar.Monitor.exe'))
@@ -26,13 +26,13 @@ try {
     Write-Output 'PASS manual update check while automatic updates are disabled'
     & "$PSScriptRoot\package-installer.ps1"
     [IO.File]::WriteAllText($versionPath, '{"version":"0.1.1","build":7}')
-    & "$PSScriptRoot\package.ps1" -OutputFolder 'Updater-New'
+    & "$PSScriptRoot\package.ps1" -OutputFolder 'Updater-New' -UpdateFixture
     & "$PSScriptRoot\package-installer.ps1"
     $tests = Join-Path $RepoRoot 'windows\tests\QuotaBar.Tests\bin\Release\net10.0-windows\QuotaBar.Tests.dll'
     $old = Join-Path $RepoRoot 'artifacts\Updater-Old'
     $oldSetup = Join-Path $RepoRoot 'artifacts\QuotaBar-0.1.0-Windows-x64-Setup.exe'
-    foreach ($mode in @('portable', 'rollback', 'installed')) {
-        $suffix = if ($mode -eq 'installed') { '-Setup.exe' } else { '.zip' }
+    foreach ($mode in @('portable', 'rollback', 'installed', 'resident-portable', 'resident-rollback', 'resident-installed')) {
+        $suffix = if ($mode.EndsWith('installed')) { '-Setup.exe' } else { '.zip' }
         $asset = Join-Path $RepoRoot ('artifacts\QuotaBar-0.1.1-Windows-x64' + $suffix)
         Invoke-Dotnet @($tests, '--update-integration', $mode, $old, $oldSetup, $asset, $keyPath)
     }

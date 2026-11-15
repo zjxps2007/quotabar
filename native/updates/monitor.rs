@@ -2,6 +2,20 @@
 //! download and installer, and reports their outcomes on its UI thread.
 use super::Version;
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) enum Phase {
+    #[default]
+    Idle,
+    Checking,
+    Current,
+    Available,
+    Downloading,
+    Ready,
+    Installing,
+    Failed,
+}
+
 #[derive(Clone, Copy, Default, PartialEq, Eq)]
 enum Operation {
     #[default]

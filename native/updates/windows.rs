@@ -32,10 +32,11 @@ const RETRY: Duration = Duration::from_millis(200);
 pub mod download;
 mod installer;
 mod package;
+pub mod resident;
 pub use installer::{Installer, PreparationError, acknowledge, clean_completed, discard, prepare};
 pub use package::{copy_tree, overlay_zip};
 
-#[derive(Deserialize, Serialize)]
+#[derive(Clone, Deserialize, Serialize)]
 struct Staged {
     update: Verified,
     directory: PathBuf,

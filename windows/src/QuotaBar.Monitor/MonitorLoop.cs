@@ -6,7 +6,7 @@ namespace QuotaBar.Monitor;
 // Marshals async monitor continuations to the thread that owns the native tray and dashboard host.
 internal sealed class MonitorLoop : SynchronizationContext, IDisposable
 {
-    internal enum Event { Work, Refresh, Update, Suspend, Resume, PowerStatus, Display, Dashboard }
+    internal enum Event { Work, Refresh, Update, Suspend, Resume, PowerStatus, Display, Dashboard, UpdateWork }
     internal enum Timer { Refresh, Update }
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)] private delegate void Callback(Event value);
     private readonly Queue<Action> pending = new();

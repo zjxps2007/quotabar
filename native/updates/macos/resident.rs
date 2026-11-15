@@ -4,7 +4,7 @@
 mod worker;
 
 use super::{InstallResult, Verified, data_root, discard, read_file};
-use crate::updates::monitor::{Monitor, OnConfigure};
+use crate::updates::monitor::{Monitor, OnConfigure, Phase};
 use block2::RcBlock;
 use dispatch2::MainThreadBound;
 use objc2::{MainThreadMarker, rc::Retained};
@@ -22,20 +22,6 @@ use std::{
     thread,
 };
 use worker::{Error, Operation, Worker};
-
-#[derive(Clone, Copy, Default, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
-enum Phase {
-    #[default]
-    Idle,
-    Checking,
-    Current,
-    Available,
-    Downloading,
-    Ready,
-    Installing,
-    Failed,
-}
 
 #[derive(Clone, Default, Serialize)]
 #[serde(rename_all = "camelCase")]

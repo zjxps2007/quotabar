@@ -1,5 +1,5 @@
 param([ValidateSet('win-x64')][string]$Runtime = 'win-x64',
-    [ValidatePattern('^[A-Za-z0-9][A-Za-z0-9_-]*$')][string]$OutputFolder = 'QuotaBar-Windows-x64')
+    [ValidatePattern('^[A-Za-z0-9][A-Za-z0-9_-]*$')][string]$OutputFolder = 'QuotaBar-Windows-x64', [switch]$UpdateFixture)
 . "$PSScriptRoot\common.ps1"
 $version = (Get-Content -LiteralPath (Join-Path $RepoRoot 'shared\version.json') -Raw | ConvertFrom-Json).version
 $stage = Join-Path $RepoRoot ('artifacts\windows\publish-' + [Guid]::NewGuid())
@@ -8,7 +8,7 @@ $bundle = Join-Path $stage 'QuotaBar-Windows-x64'
 New-Item -ItemType Directory -Force -Path $stage, $bundle | Out-Null
 Push-Location (Join-Path $RepoRoot 'windows')
 try {
-    & "$PSScriptRoot\build-native.ps1" -Destination (Join-Path $bundle 'StatusLine')
+    & "$PSScriptRoot\build-native.ps1" -Destination (Join-Path $bundle 'StatusLine') -UpdateFixture:$UpdateFixture
     & "$PSScriptRoot\write-update-version.ps1" -Path (Join-Path $bundle 'StatusLine\QuotaBar.StatusLine.dll') -Version $version
     & "$PSScriptRoot\write-update-version.ps1" -Path (Join-Path $bundle 'Dashboard\QuotaBar.Dashboard.dll') -Version $version
     $output = Join-Path $stage 'Monitor'

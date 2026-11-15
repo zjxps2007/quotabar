@@ -11,9 +11,9 @@ internal static class Program
     {
         try
         {
-            using var dispatcher = new MonitorLoop();
             if (Arguments.Value(args, "--update-manager-probe") is { } updateProbe)
-            { UpdateManagerProbe.Start(dispatcher, updateProbe); dispatcher.Run(); return; }
+            { Environment.ExitCode = AppUpdateManager.Probe(updateProbe, Brand.Version); return; }
+            using var dispatcher = new MonitorLoop();
             string? probe = Arguments.Value(args, "--probe");
             var paths = probe != null || args.Contains("--demo") ? null : new AppPaths(Arguments.Value(args, "--data-dir"));
             using var instance = paths == null ? null : new SingleInstance(paths);

@@ -60,10 +60,26 @@ fn transaction(stage: &Path, data_root: &Path) -> io::Result<Uuid> {
 pub fn prepare(request: &[u8], cancel: &AtomicBool) -> Result<(), PreparationError> {
     check_cancel(cancel)?;
     let request: Request = serde_json::from_slice(request).map_err(io::Error::from)?;
-    let mut staged = request.staged;
+    prepare_job(
+        request.staged,
+        &request.target,
+        &request.data_root,
+        request.current_version,
+        cancel,
+    )
+}
+
+pub(super) fn prepare_job(
+    mut staged: Staged,
+    target: &Path,
+    data_root: &Path,
+    current_version: String,
+    cancel: &AtomicBool,
+) -> Result<(), PreparationError> {
+    check_cancel(cancel)?;
     staged.directory = absolute(&staged.directory)?.components().collect();
-    let data_root: PathBuf = absolute(&request.data_root)?.components().collect();
-    let target: PathBuf = absolute(&request.target)?.components().collect();
+    let data_root: PathBuf = absolute(data_root)?.components().collect();
+    let target: PathBuf = absolute(target)?.components().collect();
     let id = transaction(&staged.directory, &data_root)?;
     if data_root.ancestors().any(|p| same(p, &target)) {
         return Err(invalid("Invalid update target").into());
@@ -74,7 +90,7 @@ pub fn prepare(request: &[u8], cancel: &AtomicBool) -> Result<(), PreparationErr
         installer: installed(&target)?,
         data_root,
         target,
-        current_version: request.current_version,
+        current_version,
         parent_pid: std::process::id(),
         parent_started: process_started(unsafe { GetCurrentProcess() })?,
     };
@@ -201,7 +217,7 @@ impl Drop for Installer {
     }
 }
 
-fn read_result(path: &Path) -> Option<InstallResult> {
+pub(super) fn read_result(path: &Path) -> Option<InstallResult> {
     reject_links(path).ok()?;
     serde_json::from_slice(&read_file(path, 4096).ok()?).ok()
 }
