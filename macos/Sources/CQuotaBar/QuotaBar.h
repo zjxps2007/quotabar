@@ -48,6 +48,14 @@ typedef int32_t (*QBMacStoreCallback)(void *, const QBMacPresentation *, QBMacSt
 int32_t qb_mac_monitor_run(void *context, QBMacStoreCallback);
 void qb_mac_presentation_changed(const QBMacPresentation *);
 void qb_mac_presentation_send(const QBMacPresentation *, uint32_t targets, const uint8_t *, size_t);
+typedef struct QBMacUpdater QBMacUpdater;
+typedef enum : int32_t { QBMacUpdateState, QBMacUpdatePrepareExit, QBMacUpdateResume, QBMacUpdateExit } QBMacUpdateEvent;
+typedef void (*QBMacUpdateCallback)(void *, QBMacUpdateEvent, const uint8_t *, size_t);
+const QBMacUpdater *qb_mac_updater_new(void *context, QBMacUpdateCallback);
+void qb_mac_updater_configure(const QBMacUpdater *, int32_t automatic, int32_t canInstall, int32_t suspended);
+void qb_mac_updater_check(const QBMacUpdater *, int32_t install);
+void qb_mac_updater_drained(const QBMacUpdater *, int32_t saved);
+void qb_mac_updater_free(const QBMacUpdater *);
 typedef struct QBMacInstaller QBMacInstaller;
 typedef struct QBUpdatePolicy QBUpdatePolicy;
 typedef enum { QBUpdateSchedule, QBUpdateCancel, QBUpdateInstall } QBUpdateOnConfigure;

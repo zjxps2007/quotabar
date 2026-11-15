@@ -19,6 +19,8 @@ mod mac_menu;
 mod mac_refresh;
 #[cfg(any(target_os = "macos", feature = "mac-settings-compat"))]
 mod mac_settings;
+#[cfg(target_os = "macos")]
+mod mac_updates;
 #[cfg(any(target_os = "macos", feature = "mac-settings-compat"))]
 mod mac_snapshots;
 #[cfg(any(windows, target_os = "macos"))]

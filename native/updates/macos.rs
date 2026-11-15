@@ -2,7 +2,7 @@ use super::{InstallResult, PUBLIC_KEY, Platform, Verified, verified_stage};
 use crate::files::{invalid, read_file, write_private};
 use crate::instance::acquire_lease;
 use objc2_foundation::{NSBundle, NSHomeDirectory, NSString, NSURL};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::{
     ffi::{CString, OsStr, OsString},
     fs, io,
@@ -17,14 +17,15 @@ use uuid::Uuid;
 
 pub mod download;
 mod installer;
+pub mod resident;
 pub use installer::{Installer, acknowledge_launch, discard, prepare};
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
 struct Staged {
     update: Verified,
     directory: String,
 }
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct Plan {
     staged: Staged,
@@ -110,13 +111,7 @@ fn run(program: &mut Command) -> io::Result<()> {
     Ok(())
 }
 
-fn validate_bundle(bundle: &Path, update: &Verified, public_key: &str) -> io::Result<()> {
-    if bundle_field(bundle, "CFBundleIdentifier")? != "com.aiusage.lite"
-        || bundle_field(bundle, "CFBundleShortVersionString")? != update.release.version
-        || bundle_field(bundle, "CFBundleVersion")? != update.build.to_string()
-    {
-        return Err(invalid("Update bundle identity or version mismatch"));
-    }
+fn bundle_key(bundle: &Path) -> io::Result<String> {
     let resources = bundle.join("Contents/Resources/QuotaBar_QuotaBar.bundle");
     let url = NSURL::fileURLWithPath(&NSString::from_str(
         resources
@@ -132,7 +127,17 @@ fn validate_bundle(bundle: &Path, update: &Verified, public_key: &str) -> io::Re
         })
         .and_then(|u| u.path())
         .ok_or_else(|| invalid("Missing update public key"))?;
-    if fs::read_to_string(key.to_string())?.trim() != public_key.trim() {
+    fs::read_to_string(key.to_string())
+}
+
+fn validate_bundle(bundle: &Path, update: &Verified, public_key: &str) -> io::Result<()> {
+    if bundle_field(bundle, "CFBundleIdentifier")? != "com.aiusage.lite"
+        || bundle_field(bundle, "CFBundleShortVersionString")? != update.release.version
+        || bundle_field(bundle, "CFBundleVersion")? != update.build.to_string()
+    {
+        return Err(invalid("Update bundle identity or version mismatch"));
+    }
+    if bundle_key(bundle)?.trim() != public_key.trim() {
         return Err(invalid("Update public key mismatch"));
     }
     run(Command::new("/usr/bin/codesign")

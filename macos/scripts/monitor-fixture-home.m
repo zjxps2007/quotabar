@@ -106,6 +106,9 @@ static const struct { const void *replacement, *original; } interposeHome = {
     // Exercise more than one data-delegate callback without using the network.
     for (NSUInteger offset = 0; offset < body.length; offset += 8192) {
         [self.client URLProtocol:self didLoadData:[body subdataWithRange:NSMakeRange(offset, MIN(8192, body.length-offset))]];
+        // Leave this request open after a real first chunk. The monitor must
+        // cancel the session itself when automatic downloads are switched off.
+        if (offset == 0 && [fixture[@"holdAfterFirstChunk"] boolValue]) return;
     }
     [self.client URLProtocolDidFinishLoading:self];
 }

@@ -13,6 +13,7 @@ VERSION = "2147483646.0.3"
 TAG = "v" + VERSION
 REPO = "https://github.com/zjxps2007/quotabar"
 INVALID = "업데이트 파일의 서명을 확인하지 못했습니다. 현재 버전을 유지합니다."
+INSTALL_FAILED = "업데이트 설치를 시작하지 못했습니다. 현재 앱을 유지합니다."
 
 
 def signed_fixture(work):
@@ -81,15 +82,35 @@ def exercise(wire, incoming, command, home, results):
     wait_for(lambda s: s["settings"].get("automaticUpdates") is True)
     expected_log = []
     previous = None
-    for step, signature, contents in [("reject invalid signature", "invalid.sig", archive.name),
+    for step, signature, contents in [("cancel in-flight archive", "update-manifest.sig", archive.name),
+                                      ("reject invalid signature", "invalid.sig", archive.name),
                                       ("reject invalid archive", "update-manifest.sig", "corrupt.zip"),
                                       ("stage signed archive", "update-manifest.sig", archive.name)]:
         entries = [("manifest", "update-manifest.json", "update-manifest.json"),
                    ("signature", "update-manifest.sig", signature), ("archive", archive.name, contents)]
-        respond("asset-responses.json", {base + path: dict(name=name, status=200, file=body) for name, path, body in entries})
+        responses = {base + path: dict(name=name, status=200, file=body) for name, path, body in entries}
+        if step == "cancel in-flight archive":
+            responses[base + archive.name]["holdAfterFirstChunk"] = True
+        respond("asset-responses.json", responses)
         respond("release-response.json", dict(status=200, body=feed))
         command("checkAppUpdate")
         expected_log.extend(name + " 200" for name, _, _ in (entries[:2] if signature == "invalid.sig" else entries))
+        if step == "cancel in-flight archive":
+            # The server has started the payload and deliberately never sends EOF.
+            # A phase-only check could toggle the setting before the GET began.
+            deadline = time.monotonic() + 10
+            while trace.read_text().splitlines() != expected_log:
+                if time.monotonic() >= deadline:
+                    raise AssertionError(("archive never started", trace.read_text()))
+                time.sleep(0.03)
+            command("automaticUpdates", False)
+            wait_for(lambda s: s["settings"].get("automaticUpdates") is False and
+                     s.get("appUpdate", {}).get("phase") == "idle")
+            assert not any(p.is_dir() for p in stages.iterdir())
+            results.append(dict(step=step, phase="idle", staged=0))
+            command("automaticUpdates", True)
+            wait_for(lambda s: s["settings"].get("automaticUpdates") is True)
+            continue
         phase = "ready" if step == "stage signed archive" else "failed"
         checked = wait_for(lambda s: (v := s.get("appUpdate", {})).get("phase") == phase and v.get("version") == VERSION
                            and v.get("checkedAt") is not None and v["checkedAt"] != previous)
@@ -107,6 +128,15 @@ def exercise(wire, incoming, command, home, results):
             assert stat.S_IMODE(stage.stat().st_mode) == 0o700
             row.update(sha256=digest, bytes=archive.stat().st_size)
         results.append(row)
+    # The ZIP is signed and intact but contains no installable application.
+    # Force the real resident handoff and keep using its dashboard pipe afterwards.
+    command("installAppUpdate")
+    failed = wait_for(lambda s: s.get("appUpdate", {}).get("phase") == "failed" and
+                      s["appUpdate"].get("message") == INSTALL_FAILED)
+    assert failed["version"] == VERSION and (stage / archive.name).is_file()
+    assert trace.read_text().splitlines() == expected_log
+    results.append(dict(step="decline un-installable staged archive", phase="failed",
+                        version=failed["version"], message=failed["message"], staged=1))
     # Checking again discards the old staged files before issuing the request.
     respond("release-response.json", dict(status=404, body={}))
     command("checkAppUpdate")
