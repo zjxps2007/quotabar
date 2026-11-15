@@ -90,6 +90,9 @@ private struct ProbeError: Error, CustomStringConvertible {
         }
         guard let scroll = panel.subviews.compactMap({ $0 as? NSScrollView }).first,
               scroll.hasVerticalScroller, abs(try distanceFromTop(scroll)) <= 1 else { throw ProbeError("Overflow list did not start at the top") }
+        guard let document = scroll.documentView, abs(document.bounds.width - scroll.contentSize.width) <= 1,
+              let bar = descendants(document).first(where: { $0.accessibilityRole() == .progressIndicator }),
+              abs(bar.frame.maxX - scroll.contentSize.width) <= 1 else { throw ProbeError("Scrollbar covers the quota values") }
         let clip = scroll.contentView
         clip.scroll(to: NSPoint(x: 0, y: clip.bounds.minY - 90))
         scroll.reflectScrolledClipView(clip)

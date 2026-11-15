@@ -445,13 +445,28 @@ impl Status {
             .as_array()
             .map(Vec::as_slice)
             .unwrap_or_default();
-        let headers: Vec<_> = accounts.iter().map(|a| AccountHeader::new(a, m)).collect();
-        let list_height: f64 = accounts
-            .iter()
-            .zip(&headers)
-            .map(|(a, h)| account_height(a, h.height))
-            .sum::<f64>()
-            + 14. * accounts.len().saturating_sub(1) as f64;
+        let measure = |width| {
+            let headers: Vec<_> = accounts
+                .iter()
+                .map(|a| AccountHeader::new(a, m, width))
+                .collect();
+            let height = accounts
+                .iter()
+                .zip(&headers)
+                .map(|(a, h)| account_height(a, h.height))
+                .sum::<f64>()
+                + 14. * accounts.len().saturating_sub(1) as f64;
+            (headers, height)
+        };
+        let scroll = NSScrollView::initWithFrame(NSScrollView::alloc(m), rect(0., 0., 294., 430.));
+        scroll.setDrawsBackground(false);
+        let (mut headers, mut list_height) = measure(294.);
+        scroll.setHasVerticalScroller(list_height > 430.);
+        scroll.tile();
+        let list_width = scroll.contentSize().width;
+        if list_width != 294. {
+            (headers, list_height) = measure(list_width);
+        }
         let demo = v["demo"] == true;
         let pre = 18. + 24. + 14. + if demo { 27. } else { 0. };
         let list_top = pre + if accounts.is_empty() { 0. } else { 27. };
@@ -501,7 +516,7 @@ impl Status {
         logo.setContentTintColor(Some(&ink));
         view.rounded(18., 18., 24., 24., 24. * 108. / 456., &tile);
         root.addSubview(&logo);
-        view.label("QuotaBar", [50., 18., 180., 24.], 13., true, false);
+        view.label("QuotaBar", [50., 22., 180., 18.], 13., true, false);
         view.button(
             "새로고침",
             [286., 16., 29., 28.],
@@ -531,14 +546,9 @@ impl Status {
                     Some((document.size.height - visible.origin.y - visible.size.height).max(0.))
                 })
             });
-            let scroll = NSScrollView::initWithFrame(
-                NSScrollView::alloc(m),
-                view.rect(18., list_top, 294., list_size),
-            );
-            scroll.setDrawsBackground(false);
-            scroll.setHasVerticalScroller(list_height > 430.);
-            scroll.setAutohidesScrollers(true);
-            let content = NSView::initWithFrame(NSView::alloc(m), rect(0., 0., 294., list_height));
+            scroll.setFrame(view.rect(18., list_top, 294., list_size));
+            let content =
+                NSView::initWithFrame(NSView::alloc(m), rect(0., 0., list_width, list_height));
             let list = View {
                 native: &content,
                 height: list_height,
@@ -595,10 +605,10 @@ struct AccountHeader {
     height: f64,
 }
 impl AccountHeader {
-    fn new(a: &Value, m: MainThreadMarker) -> Self {
+    fn new(a: &Value, m: MainThreadMarker, list_width: f64) -> Self {
         let title = format!("{}({})", text(a, "provider"), text(a, "name"));
         let label = NSTextField::wrappingLabelWithString(&s(&title), m);
-        let width = if a["loading"] == true { 238. } else { 262. };
+        let width = list_width - if a["loading"] == true { 56. } else { 32. };
         label.setFont(Some(&NSFont::systemFontOfSize_weight(12., unsafe {
             NSFontWeightMedium
         })));
@@ -647,7 +657,8 @@ impl View<'_> {
         muted: bool,
     ) -> Retained<NSTextField> {
         let t = NSTextField::labelWithString(&s(value), self.m);
-        t.setFrame(self.rect(x, y, w, h));
+        // NSTextFieldCell insets text two points from each horizontal edge.
+        t.setFrame(self.rect(x - 2., y, w + 4., h));
         let font = if bold {
             NSFont::boldSystemFontOfSize(size)
         } else {
@@ -722,6 +733,7 @@ impl View<'_> {
         view
     }
     fn account(&self, a: &Value, header: &AccountHeader, y: f64, dark: bool) {
+        let width = self.native.bounds().size.width;
         let provider = text(a, "provider");
         let bytes: &[u8] = match provider {
             "Claude" => include_bytes!("../shared/assets/ClaudeLogo.svg"),
@@ -748,16 +760,16 @@ impl View<'_> {
                 .height
         });
         header.label.setFrame(self.rect(
-            32.,
+            30.,
             y + (header.height - label_height) / 2.,
-            header.width,
+            header.width + 4.,
             label_height,
         ));
         self.native.addSubview(&header.label);
         if a["loading"] == true {
             let progress = NSProgressIndicator::initWithFrame(
                 NSProgressIndicator::alloc(self.m),
-                self.rect(278., y + (header.height - 16.) / 2., 16., 16.),
+                self.rect(width - 16., y + (header.height - 16.) / 2., 16., 16.),
             );
             progress.setStyle(NSProgressIndicatorStyle::Spinning);
             progress.setControlSize(NSControlSize::Mini);
@@ -776,7 +788,7 @@ impl View<'_> {
             self.label(text(w, "title"), [0., top, 190., 16.], 11., false, true);
             let remaining = self.label(
                 &format!("{}% 남음", n.round()),
-                [232., top, 62., 16.],
+                [width - 62., top, 62., 16.],
                 11.,
                 true,
                 false,
@@ -805,7 +817,7 @@ impl View<'_> {
             let track = self.bar(
                 0.,
                 top + 19.,
-                294.,
+                width,
                 5.,
                 &NSColor::labelColor().colorWithAlphaComponent(0.06),
             );
@@ -825,7 +837,7 @@ impl View<'_> {
                 self.bar(
                     0.,
                     top + 19.,
-                    294. * n / 100.,
+                    width * n / 100.,
                     5.,
                     &tint.colorWithAlphaComponent(if a["stale"] == true { 0.45 } else { 1. }),
                 );
@@ -844,7 +856,7 @@ impl View<'_> {
                         )
                     )
                 };
-                self.label(&reset, [0., top + 29., 294., 14.], 9., false, true)
+                self.label(&reset, [0., top + 29., width, 14.], 9., false, true)
                     .setTextColor(Some(&NSColor::tertiaryLabelColor()));
                 top += 18.;
             }
@@ -853,7 +865,7 @@ impl View<'_> {
         if a["error"] == true {
             self.label(
                 "연결 확인 필요 · Dashboard에서 자세히 보기",
-                [0., top, 294., 18.],
+                [0., top, width, 18.],
                 10.,
                 false,
                 true,
@@ -863,7 +875,7 @@ impl View<'_> {
         self.bar(
             0.,
             y + account_height(a, header.height) - 1.,
-            294.,
+            width,
             1.,
             &NSColor::separatorColor(),
         );
