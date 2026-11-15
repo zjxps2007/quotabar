@@ -160,8 +160,7 @@ impl Dashboard {
                 ui.horizontal(|ui| {
                     ui.vertical(|ui| {
                         #[cfg(target_os = "macos")]
-                        ui.set_min_height(crate::mac_text::system_line_height(ui, 25.) + 5.
-                            + crate::mac_text::system_line_height(ui, 12.));
+                        ui.set_min_height(crate::mac_text::title_stack_height(ui, 25., 12., 5.));
                         system_label(ui, title, 25., true, p.ink);
                         ui.add_space(5.);
                         system_label(ui, subtitle, if MAC { 12. } else { 11. }, false, p.muted);
@@ -187,12 +186,14 @@ impl Dashboard {
                     #[cfg(target_os = "macos")]
                     {
                         ui.spacing_mut().interact_size.y = 0.;
-                        ui.horizontal(|ui| {
+                        ui.horizontal_top(|ui| {
                             ui.spacing_mut().item_spacing.x = 7.;
                             if !crate::mac::intrinsic_symbol(ui, "eye", 10., p.muted) {
                                 ui.allocate_exact_size(vec2(16., 13.), Sense::hover());
                             }
-                            system_label(ui, note, 10., false, p.muted);
+                            if crate::mac_text::paragraph(ui, note, 10., 0., p.muted).is_none() {
+                                system_label(ui, note, 10., false, p.muted);
+                            }
                         });
                     }
                     #[cfg(windows)]

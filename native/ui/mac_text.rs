@@ -273,6 +273,12 @@ pub fn system_line_height(ui: &Ui, size: f64) -> f32 {
     ((font_line_height(size) * scale).ceil() / scale) as f32
 }
 
+pub fn title_stack_height(ui: &Ui, title: f64, subtitle: f64, spacing: f64) -> f32 {
+    let scale = f64::from(ui.ctx().pixels_per_point());
+    let total = font_line_height(title) + spacing + font_line_height(subtitle);
+    ((total * scale).ceil() / scale) as f32
+}
+
 fn font_line_height(size: f64) -> f64 {
     let font = NSFont::systemFontOfSize(size);
     font.ascender() - font.descender() + font.leading()

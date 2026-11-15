@@ -3,9 +3,9 @@ use block2::StackBlock;
 use eframe::egui::*;
 use objc2::{MainThreadMarker, MainThreadOnly, rc::Retained};
 use objc2_app_kit::{
-    NSAppearanceCustomization, NSApplication, NSButton, NSCellImagePosition, NSColor, NSControl,
+    NSAppearanceCustomization, NSApplication, NSButton, NSCellImagePosition, NSControl,
     NSControlSize, NSFont, NSImage, NSPopUpButton, NSSegmentDistribution, NSSegmentSwitchTracking,
-    NSSegmentedControl,
+    NSSegmentedControl, NSUserInterfaceLayoutDirection,
 };
 use objc2_foundation::{NSArray, NSPoint, NSRect, NSSize, NSString};
 
@@ -71,7 +71,26 @@ fn control_image(
     appearance.performAsCurrentDrawingAppearance(&StackBlock::new(|| {
         control.cacheDisplayInRect_toBitmapImageRep(control.bounds(), &rep);
     }));
-    let rgba = bitmap_pixels(&rep)?;
+    let mut rgba = bitmap_pixels(&rep)?;
+    if enabled && control.downcast_ref::<NSPopUpButton>().is_some() {
+        // AppKit paints the pop-up indicator with the system accent even when
+        // the button has a custom bezel color. Preserve its gradient, chevrons
+        // and alpha while applying the dashboard's monochrome accent.
+        let rtl =
+            control.userInterfaceLayoutDirection() == NSUserInterfaceLayoutDirection::RightToLeft;
+        let (width, height) = rgba.dimensions();
+        let charcoal: u16 = if ui.visuals().dark_mode { 92 } else { 0 };
+        for (x, _, pixel) in rgba.enumerate_pixels_mut() {
+            let trailing = if rtl { x } else { width - 1 - x };
+            if trailing < height {
+                let [r, g, b, a] = pixel.0;
+                let low = r.min(g).min(b);
+                let range = u16::from(r.max(g).max(b) - low);
+                let shade = low + ((range * charcoal + 127) / 255) as u8;
+                pixel.0 = [shade, shade, shade, a];
+            }
+        }
+    }
     if !rgba.pixels().any(|p| p[3] != 0) {
         return None;
     }
@@ -188,16 +207,9 @@ fn popup_button(
     main: MainThreadMarker,
     labels: &[impl AsRef<str>],
     selected: usize,
-    dark: bool,
 ) -> Retained<NSPopUpButton> {
     let button =
         NSPopUpButton::initWithFrame_pullsDown(NSPopUpButton::alloc(main), NSRect::ZERO, false);
-    let accent = if dark {
-        NSColor::whiteColor()
-    } else {
-        NSColor::blackColor()
-    };
-    button.setBezelColor(Some(&accent));
     let titles: Vec<_> = labels
         .iter()
         .map(|value| NSString::from_str(value.as_ref()))
@@ -229,7 +241,7 @@ pub fn popup_choice(
         Id::new(title),
         rect.size(),
         |main| {
-            popup_button(main, labels, selected, ui.visuals().dark_mode)
+            popup_button(main, labels, selected)
                 .into_super()
                 .into_super()
         },
@@ -289,7 +301,7 @@ pub fn popup_choice(
             f64::from(rect.height()) * zoom,
         ),
     );
-    let button = popup_button(main, labels, selected, ui.visuals().dark_mode);
+    let button = popup_button(main, labels, selected);
     button.setFrame(button.frameForAlignmentRect(alignment));
     view.addSubview(&button);
     // AppKit tracks the menu synchronously, including Escape, arrow keys and type selection.

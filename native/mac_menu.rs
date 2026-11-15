@@ -693,7 +693,7 @@ impl Status {
         .setFont(Some(&headline));
         view.button(
             "새로고침",
-            [296., 18., 16., 24.],
+            [297., 18., 16., 24.],
             REFRESH,
             &self.menus.target,
         );
