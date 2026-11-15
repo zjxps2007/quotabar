@@ -124,7 +124,7 @@ fn expand(path: &str) -> String {
         .to_string()
 }
 #[cfg(target_os = "macos")]
-fn canonical(path: &str) -> String {
+pub(crate) fn canonical(path: &str) -> String {
     use objc2_foundation::{NSString, NSURL};
     let expanded = NSString::from_str(path).stringByExpandingTildeInPath();
     NSURL::fileURLWithPath(&expanded)

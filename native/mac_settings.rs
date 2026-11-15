@@ -83,13 +83,13 @@ pub struct Account {
     pub(crate) app_managed_login: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     show_in_menu_bar: Option<bool>,
-    enabled: bool,
+    pub(crate) enabled: bool,
     created_at: f64,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", from = "String")]
-enum Appearance {
+pub(crate) enum Appearance {
     #[default]
     System,
     Light,
@@ -106,7 +106,7 @@ impl From<String> for Appearance {
 }
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", from = "String")]
-enum MenuDisplay {
+pub(crate) enum MenuDisplay {
     #[default]
     ProviderAndRemaining,
     RemainingOnly,
@@ -122,21 +122,21 @@ impl From<String> for MenuDisplay {
     }
 }
 
-#[derive(Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct Settings {
-    accounts: Vec<Account>,
+pub(crate) struct Settings {
+    pub(crate) accounts: Vec<Account>,
     #[serde(deserialize_with = "codec::integer")]
-    refresh_seconds: i64,
+    pub(crate) refresh_seconds: i64,
     #[serde(skip_serializing_if = "Option::is_none")]
-    auto_refresh: Option<bool>,
+    pub(crate) auto_refresh: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    automatic_updates: Option<bool>,
+    pub(crate) automatic_updates: Option<bool>,
     scan_local_logs: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
-    appearance: Option<Appearance>,
+    pub(crate) appearance: Option<Appearance>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    show_dock_icon: Option<bool>,
+    pub(crate) show_dock_icon: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     menu_bar_display_mode: Option<MenuDisplay>,
     #[serde(
@@ -162,7 +162,7 @@ impl Default for Settings {
     }
 }
 impl Settings {
-    fn load(path: &Path) -> Result<Self, Error> {
+    pub(crate) fn load(path: &Path) -> Result<Self, Error> {
         match fs::read(path) {
             Ok(bytes) => codec::decode(&bytes),
             Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(Self::default()),
@@ -198,7 +198,7 @@ impl Settings {
             .iter()
             .position(|a| same_identity(&a.identity, identity))
     }
-    fn index(&self, id: AccountId) -> Option<usize> {
+    pub(crate) fn index(&self, id: AccountId) -> Option<usize> {
         self.accounts.iter().position(|a| a.id == id)
     }
     fn matching(&self, provider: Provider, identity: &str) -> Option<usize> {
@@ -206,7 +206,12 @@ impl Settings {
             .iter()
             .position(|a| a.provider == provider && same_identity(&a.identity, identity))
     }
-    fn new_account(provider: Provider, identity: &str, label: &str, path: &str) -> Account {
+    pub(crate) fn new_account(
+        provider: Provider,
+        identity: &str,
+        label: &str,
+        path: &str,
+    ) -> Account {
         let epoch = SystemTime::UNIX_EPOCH + Duration::from_secs(978_307_200);
         let created_at = match SystemTime::now().duration_since(epoch) {
             Ok(d) => d.as_secs_f64(),
@@ -260,13 +265,13 @@ fn same_identity(a: &str, b: &str) -> bool {
 }
 
 #[derive(Deserialize)]
-struct Target {
-    id: AccountId,
-    identity: String,
+pub(crate) struct Target {
+    pub(crate) id: AccountId,
+    pub(crate) identity: String,
 }
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", rename_all_fields = "camelCase")]
-enum Edit {
+pub(crate) enum Edit {
     Interval {
         seconds: i64,
     },
@@ -326,7 +331,7 @@ enum Edit {
 }
 #[derive(Clone, Copy, PartialEq, Deserialize)]
 #[serde(rename_all = "camelCase")]
-enum Storage {
+pub(crate) enum Storage {
     Disk,
     Memory,
     Unavailable,
@@ -345,10 +350,10 @@ enum Request {
     },
 }
 #[derive(Serialize)]
-struct Reply {
-    settings: Settings,
-    changed: bool,
-    index: Option<usize>,
+pub(crate) struct Reply {
+    pub(crate) settings: Settings,
+    pub(crate) changed: bool,
+    pub(crate) index: Option<usize>,
 }
 
 fn preference<T: PartialEq + Copy>(field: &mut Option<T>, default: T, value: T) -> bool {
@@ -382,7 +387,7 @@ fn save_credential(
     Ok(())
 }
 
-fn apply(
+pub(crate) fn apply(
     mut settings: Settings,
     edit: Edit,
     storage: Storage,

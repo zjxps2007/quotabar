@@ -1,6 +1,7 @@
 //! AppKit's process lifetime, legacy helper entry points and application delegate.
 pub mod fetch;
 mod presentation;
+mod store;
 use crate::instance::Instance;
 use objc2::{
     DefinedClass, MainThreadMarker, MainThreadOnly, define_class, msg_send, rc::autoreleasepool,
@@ -8,11 +9,11 @@ use objc2::{
 };
 use objc2_app_kit::{NSApplication, NSApplicationDelegate};
 use objc2_foundation::{NSBundle, NSHomeDirectory, NSNotification, NSObject, NSObjectProtocol};
-pub use presentation::{Callback, Presentation};
+use presentation::Presentation;
 use std::{
     cell::OnceCell,
     env,
-    ffi::{OsStr, OsString, c_void},
+    ffi::{OsStr, OsString},
     os::unix::process::CommandExt,
     path::PathBuf,
     process::Command,
@@ -20,8 +21,6 @@ use std::{
 };
 
 struct Services {
-    context: *mut c_void,
-    callback: Callback,
     arguments: Vec<OsString>,
     presentation: OnceCell<Rc<Presentation>>,
 }
@@ -40,14 +39,9 @@ define_class!(
             if services.presentation.get().is_some() {
                 return;
             }
-            let presentation = Presentation::new(
-                self.mtm(),
-                services.context,
-                services.callback,
-                &services.arguments,
-            );
+            let presentation = Presentation::new(self.mtm(), &services.arguments);
             let _ = services.presentation.set(presentation.clone());
-            presentation.launch();
+            presentation.launch(&services.arguments);
             crate::updates::macos::acknowledge_launch();
         }
         #[unsafe(method(applicationShouldTerminateAfterLastWindowClosed:))]
@@ -83,7 +77,7 @@ fn helper(arguments: &[OsString]) -> Option<&'static str> {
     }
 }
 
-pub fn run(context: *mut c_void, callback: Callback) -> i32 {
+pub fn run() -> i32 {
     let Some(main) = MainThreadMarker::new() else {
         return 1;
     };
@@ -122,8 +116,6 @@ pub fn run(context: *mut c_void, callback: Callback) -> i32 {
         let delegate: objc2::rc::Retained<Delegate> = unsafe {
             msg_send![
                 super(Delegate::alloc(main).set_ivars(Services {
-                    context,
-                    callback,
                     arguments,
                     presentation: OnceCell::new()
                 })),

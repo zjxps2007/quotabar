@@ -18,26 +18,8 @@ use std::{
     time::Duration,
 };
 
-#[repr(i32)]
-pub enum StoreEvent {
-    Launch,
-    ApplyDock,
-    Terminate,
-    Refresh,
-    Reclaim,
-    Diagnostic,
-    DashboardStarted,
-    DashboardExited,
-    MissingHelper,
-    LaunchFailed,
-    Snapshot,
-    Command,
-}
-pub type Callback =
-    extern "C" fn(*mut c_void, *const Presentation, StoreEvent, u32, *const u8, usize) -> i32;
-
 const MENU: u32 = 1;
-const DASHBOARD: u32 = 2;
+pub(super) const DASHBOARD: u32 = 2;
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -51,8 +33,7 @@ enum WindowCommand {
 pub struct Presentation {
     main: MainThreadMarker,
     owner: Arc<MainThreadBound<Weak<Self>>>,
-    context: *mut c_void,
-    callback: Callback,
+    store: OnceCell<Rc<super::store::Store>>,
     host: OnceCell<Rc<Host>>,
     status: OnceCell<Rc<Status>>,
     active: Cell<bool>,
@@ -64,17 +45,11 @@ pub struct Presentation {
 }
 
 impl Presentation {
-    pub(super) fn new(
-        main: MainThreadMarker,
-        context: *mut c_void,
-        callback: Callback,
-        arguments: &[OsString],
-    ) -> Rc<Self> {
+    pub(super) fn new(main: MainThreadMarker, arguments: &[OsString]) -> Rc<Self> {
         let has = |flag: &str| arguments.iter().any(|arg| arg == flag);
         Rc::new_cyclic(|weak| Self {
             main,
-            context,
-            callback,
+            store: OnceCell::new(),
             owner: Arc::new(MainThreadBound::new(weak.clone(), main)),
             host: OnceCell::new(),
             status: OnceCell::new(),
@@ -87,22 +62,31 @@ impl Presentation {
         })
     }
 
-    fn notify(&self, event: StoreEvent, value: u32, data: &[u8]) -> i32 {
-        (self.callback)(self.context, self, event, value, data.as_ptr(), data.len())
+    fn store(&self) -> &super::store::Store {
+        self.store
+            .get()
+            .expect("resident store initialized at launch")
     }
 
-    pub(super) fn launch(&self) {
-        let login_launch = self.notify(StoreEvent::Launch, 0, &[]) != 0;
-        let context = std::ptr::from_ref(self).cast_mut().cast();
+    fn snapshot(&self, targets: u32) {
+        self.send(targets, &self.store().snapshot(targets & DASHBOARD != 0));
+    }
+
+    pub(super) fn launch(self: &Rc<Self>, arguments: &[OsString]) {
+        let store = super::store::Store::new(self.main, Rc::downgrade(self), arguments);
+        let _ = self.store.set(store);
+        self.store().start();
+        let login_launch = super::store::login_launch();
+        let context = Rc::as_ptr(self).cast_mut().cast();
         if let Some(host) = Host::new(context, host_event, self.demo) {
             let _ = self.host.set(host);
         }
         if let Some(status) = Status::monitor(context, menu_event) {
             let _ = self.status.set(status);
         }
-        self.notify(StoreEvent::ApplyDock, 0, &[]);
+        self.store().apply_dock();
         self.active.set(true);
-        self.notify(StoreEvent::Snapshot, MENU, &[]);
+        self.snapshot(MENU);
         if !login_launch && !self.menu_only {
             self.reopen();
         }
@@ -129,7 +113,7 @@ impl Presentation {
             if let Some(host) = self.host.get() {
                 host.stop();
             }
-            self.notify(StoreEvent::Terminate, 0, &[]);
+            self.store().stop();
         }
     }
 
@@ -144,11 +128,7 @@ impl Presentation {
                 presentation.pending.set(false);
                 if presentation.active.get() {
                     let ready = presentation.host.get().is_some_and(|host| host.ready());
-                    presentation.notify(
-                        StoreEvent::Snapshot,
-                        if ready { MENU | DASHBOARD } else { MENU },
-                        &[],
-                    );
+                    presentation.snapshot(if ready { MENU | DASHBOARD } else { MENU });
                 }
             }
         });
@@ -180,10 +160,11 @@ impl Presentation {
     fn record(&self, name: &str) {
         let running = self.host.get().is_some_and(|host| host.running());
         let shown = self.status.get().is_some_and(|status| status.shown());
-        self.notify(
-            StoreEvent::Diagnostic,
-            u32::from(running) | (u32::from(shown) << 1),
-            name.as_bytes(),
+        self.store().record(
+            name,
+            serde_json::json!({
+                "dashboardRetained":running, "popoverRetained":shown, "popoverVisible":shown
+            }),
         );
     }
 
@@ -208,7 +189,7 @@ impl Presentation {
             Ok(WindowCommand::Quit {}) => {
                 NSApplication::sharedApplication(self.main).terminate(None)
             }
-            Err(_) => return self.notify(StoreEvent::Command, 0, data),
+            Err(_) => return self.store().command(data),
         }
         0
     }
@@ -278,11 +259,11 @@ extern "C" fn menu_event(context: *mut c_void, event: i32) {
     match event {
         mac_menu::OPENED => presentation.record("popover-opened"),
         mac_menu::CLOSED => {
-            presentation.notify(StoreEvent::Reclaim, 0, &[]);
+            presentation.store().reclaim();
             presentation.record("popover-closed");
         }
         mac_menu::REFRESH => {
-            presentation.notify(StoreEvent::Refresh, 0, &[]);
+            presentation.store().refresh_all();
         }
         mac_menu::DASHBOARD => presentation.show("dashboard"),
         mac_menu::SETTINGS => presentation.show("settings"),
@@ -301,17 +282,38 @@ extern "C" fn host_event(
     if !presentation.active.get() {
         return -1;
     }
-    let event = match event {
-        HostEvent::Started => StoreEvent::DashboardStarted,
-        HostEvent::Exited => StoreEvent::DashboardExited,
-        HostEvent::MissingHelper => StoreEvent::MissingHelper,
-        HostEvent::LaunchFailed => StoreEvent::LaunchFailed,
-        HostEvent::PublishState => {
-            return presentation.notify(StoreEvent::Snapshot, DASHBOARD, &[]);
+    let store = presentation.store();
+    match event {
+        HostEvent::Started => {
+            store.dashboard_running(true);
+            store.record(
+                "dashboard-process-started",
+                serde_json::json!({"pid":value}),
+            );
         }
+        HostEvent::Exited => {
+            if value != 0 {
+                store.message(Some(
+                    "Dashboard가 응답하지 않습니다. 다시 열어 주세요.".into(),
+                ));
+            }
+            store.set_visible(false);
+            store.dashboard_running(false);
+            store.record("dashboard-process-exited", serde_json::Value::Null);
+        }
+        HostEvent::MissingHelper => store.message(Some(
+            "Dashboard 실행 파일을 찾지 못했습니다. 앱을 다시 설치해 주세요.".into(),
+        )),
+        HostEvent::LaunchFailed => {
+            store.dashboard_running(false);
+            store.message(Some(
+                "Dashboard를 열지 못했습니다. 앱을 다시 실행해 주세요.".into(),
+            ));
+        }
+        HostEvent::PublishState => presentation.snapshot(DASHBOARD),
         HostEvent::Command => {
             return presentation.command(unsafe { std::slice::from_raw_parts(data, len) });
         }
-    };
-    presentation.notify(event, value, &[])
+    }
+    0
 }

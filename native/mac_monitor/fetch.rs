@@ -1,6 +1,6 @@
 //! One refresh of a resident account. A replacement CLI login travels separately
 //! from the dashboard state, and is saved only if the caller still owns the job.
-mod failure;
+pub(super) mod failure;
 
 use crate::{
     claude::{mac_connection, mac_snapshots},
@@ -78,6 +78,34 @@ fn date(value: &Value) -> Option<f64> {
 }
 
 impl Snapshot {
+    pub(super) fn preview(provider: Provider, now: f64, remaining: f64, plan: &str) -> Self {
+        let titles = if provider == Provider::Gemini {
+            ["Pro", "Flash"]
+        } else {
+            ["5시간", "주간"]
+        };
+        let observed = now.floor();
+        Self {
+            fetched_at: now,
+            observed_at: Some(observed),
+            plan: Some(plan.to_owned()),
+            email: Some("preview@example.com".into()),
+            windows: vec![
+                Window {
+                    title: titles[0].into(),
+                    remaining,
+                    reset_at: Some(observed + 7200.),
+                },
+                Window {
+                    title: titles[1].into(),
+                    remaining: (remaining + 12.).min(95.),
+                    reset_at: Some(observed + 172800.),
+                },
+            ],
+            state: None,
+        }
+    }
+
     fn from_usage(usage: Value, provider: Provider) -> Self {
         let labels = if provider == Provider::Gemini {
             ["Pro", "Flash", "Flash Lite"]

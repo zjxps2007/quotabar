@@ -12,8 +12,6 @@ mod login_item;
 #[cfg(any(target_os = "macos", feature = "mac-settings-compat"))]
 mod mac_claude;
 #[cfg(target_os = "macos")]
-mod mac_fetch;
-#[cfg(target_os = "macos")]
 mod mac_login;
 #[cfg(target_os = "macos")]
 mod mac_menu;

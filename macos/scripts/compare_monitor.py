@@ -62,6 +62,14 @@ def dashboard_probe():
     # carry app commands and state; the monitor executable itself is unmodified.
     wire = runpy.run_path(str(HERE / "check-dashboard.py"))
     incoming, outgoing = sys.stdin.buffer, sys.stdout.buffer
+    if output := os.environ.get("QUOTABAR_TEST_PREVIEW_RESULT"):
+        try:
+            write_json(Path(output), preview_probe(wire, incoming, outgoing))
+        except Exception:
+            write_json(Path(output), {"error": traceback.format_exc()})
+        finally:
+            wire["send"](outgoing, {"quit": {}})
+        return
     if os.environ.get("QUOTABAR_TEST_KEYCHAIN"):
         return monitor_keychain.dashboard(wire, incoming, outgoing)
     if stage := os.environ.get("QUOTABAR_TEST_HOST_STAGES"):
@@ -204,6 +212,61 @@ def dashboard_probe():
         pass
 
 
+def preview_probe(wire, incoming, outgoing):
+    from datetime import date
+
+    def send(name, **fields):
+        wire["send"](outgoing, {name: fields})
+
+    send("ready")
+    state = wire["wait_for"](incoming, "state")["_0"]
+    route = wire["wait_for"](incoming, "show")["route"]
+    config = state["settings"].copy()
+    rows = config.pop("accounts")
+    snapshots = dict(zip(state["snapshots"][::2], state["snapshots"][1::2], strict=True))
+    report = state["demoReport"]
+    assert len(rows) == len(snapshots) == 4 and len(report["days"]) == 364
+    home = os.environ["QUOTABAR_TEST_MONITOR_HOME"]
+    accounts = []
+    for row in rows:
+        row = row.copy()
+        snapshot = snapshots[row.pop("id")].copy()
+        UUID(row.pop("identity"))
+        assert abs(row.pop("createdAt") - report["scannedAt"]) < 5
+        assert abs(snapshot.pop("fetchedAt") - report["scannedAt"]) < 5
+        observed = snapshot.pop("observedAt")
+        assert abs(observed - report["scannedAt"]) < 5
+        for window in snapshot["windows"]:
+            window["resetAt"] = round(window["resetAt"] - report["scannedAt"])
+            assert any(abs(window["resetAt"] - offset) <= 1 for offset in (7200, 172800))
+            window["resetAt"] = min((7200, 172800), key=lambda x: abs(x-window["resetAt"]))
+        row["sourcePath"] = row["sourcePath"].replace(home, "$HOME")
+        accounts.append({**row, "snapshot": snapshot})
+    today = date.fromisoformat(report["days"][0]["day"])
+    days = [{**row, "day": (today - date.fromisoformat(row["day"])).days} for row in report["days"]]
+    digest = hashlib.sha256(json.dumps(days, sort_keys=True).encode()).hexdigest()
+    send("menuBarVisibility", _0=rows[0]["id"], _1=False)
+    send("launchAtLogin", _0=True)
+    send("scanLogs", _0=False)
+    send("checkAppUpdate")
+    send("message", _0="preview state barrier")
+    deadline = time.monotonic() + 10
+    while True:
+        later = wire["receive"](incoming, deadline).get("state", {}).get("_0", {})
+        if later.get("message") == "preview state barrier":
+            break
+    assert later["settings"]["accounts"][0]["showInMenuBar"] is False
+    assert later["settings"]["scanLocalLogs"] is False and later["launchAtLogin"] == "enabled"
+    assert later["demoReport"] == {"days": [], "scannedFiles": 0, "warnings": []}
+    request = str(UUID(int=100)).upper()
+    send("connect", id=request, provider="codex", path="/unused-preview-account", alias="Preview")
+    reply = wire["wait_for"](incoming, "reply")
+    assert reply["id"] == request and reply.get("error")
+    return {"route": route, "accounts": accounts, "settings": config, "reportDays": len(days),
+            "reportDigest": digest, "scannedFiles": report["scannedFiles"], "warnings": report["warnings"],
+            "update": later["appUpdate"], "previewConnectError": reply["error"]}
+
+
 def host_probe(wire, incoming, outgoing, directory):
     stage = (directory / "stage").read_text()
     if stage == "timeout":
@@ -323,7 +386,15 @@ print(URL(fileURLWithPath: CommandLine.arguments[1]).standardizedFileURL.resolvi
             assert not startup["demo"] and (startup["runningRequests"], startup["queuedRequests"]) == (3, 2), startup
             saved = json.loads((root / "settings.json").read_text())
             assert (root / "instance.lock").is_file() and [a["id"].upper() for a in saved["accounts"]] == IDS[:5]
+            preview_result = home / "preview.json"
+            subprocess.run([bundle / "Contents/MacOS/QuotaBar", "--demo", "--demo-appearance", "dark"],
+                           env={**env, "QUOTABAR_TEST_PREVIEW_RESULT": str(preview_result)}, timeout=35, check=True)
+            preview = json.loads(preview_result.read_bytes())
+            if "error" in preview:
+                raise ValueError(preview["error"])
+            assert json.loads((root / "settings.json").read_bytes()) == saved, "Preview modified the real settings"
             results[side] = {**observed, "runningAtLaunch": 3, "queuedAtLaunch": 2, "persistedAccounts": IDS[:5],
+                             "preview": preview,
                              "dashboardRecovery": host_recovery(bundle, home, env),
                              "legacyMigration": monitor_keychain.compare(bundle, home, env)}
         except (OSError, ValueError, AssertionError, StopIteration, subprocess.SubprocessError) as exc:

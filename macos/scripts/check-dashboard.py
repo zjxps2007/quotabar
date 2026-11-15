@@ -156,12 +156,14 @@ def write_fixtures():
 def main():
     REPORT.mkdir(parents=True, exist_ok=True)
     dependencies = {}
-    for name, program in (("monitor", MONITOR), ("dashboard", APP)):
+    for name, program in (("monitor", MONITOR), ("dashboard", APP),
+                          ("statusline", MONITOR.with_name("quotabar-statusline"))):
         linked = subprocess.check_output(["otool", "-L", program], text=True).splitlines()[1:]
         dependencies[name] = [line.strip().split(" (compatibility version", 1)[0] for line in linked]
     (REPORT / "linked-libraries.json").write_text(json.dumps(dependencies, indent=2))
-    assert not any("/Combine.framework/" in path for path in dependencies["monitor"]), dependencies["monitor"]
-    assert not any("libswift" in path for path in dependencies["dashboard"]), dependencies["dashboard"]
+    for name, libraries in dependencies.items():
+        assert not any("libswift" in path or "/Combine.framework/" in path or "/SwiftUI.framework/" in path
+                       for path in libraries), (name, libraries)
     write_fixtures()
     check_monitor()
     sizes = {}

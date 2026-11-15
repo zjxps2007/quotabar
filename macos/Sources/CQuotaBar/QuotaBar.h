@@ -34,20 +34,8 @@ typedef struct QBScanner QBScanner;
 typedef struct QBCancel QBCancel;
 typedef struct QBLogin QBLogin;
 typedef struct QBFrameDecoder QBFrameDecoder;
-/* Presentation belongs to the resident Rust AppKit delegate on the main thread.
-   The store may use its borrowed handle from launch until termination. */
-typedef struct QBMacPresentation QBMacPresentation;
-typedef enum : int32_t {
-    QBStoreLaunch, QBStoreApplyDock, QBStoreTerminate, QBStoreRefresh, QBStoreReclaim, QBStoreDiagnostic,
-    QBStoreDashboardStarted, QBStoreDashboardExited, QBStoreMissingHelper, QBStoreLaunchFailed,
-    QBStoreSnapshot, QBStoreCommand
-} QBMacStoreEvent;
-typedef enum : uint32_t { QBMenuSnapshot = 1, QBDashboardSnapshot = 2 } QBMacSnapshotTarget;
-typedef enum : uint32_t { QBDashboardRetained = 1, QBPopoverVisible = 2 } QBMacDiagnosticFlag;
-typedef int32_t (*QBMacStoreCallback)(void *, const QBMacPresentation *, QBMacStoreEvent, uint32_t, const uint8_t *, size_t);
-int32_t qb_mac_monitor_run(void *context, QBMacStoreCallback);
-void qb_mac_presentation_changed(const QBMacPresentation *);
-void qb_mac_presentation_send(const QBMacPresentation *, uint32_t targets, const uint8_t *, size_t);
+/* SwiftPM convenience entry. The packaged application runs the Rust executable directly. */
+int32_t qb_mac_monitor_run(void);
 typedef struct QBMacUpdater QBMacUpdater;
 typedef enum : int32_t { QBMacUpdateState, QBMacUpdatePrepareExit, QBMacUpdateResume, QBMacUpdateExit } QBMacUpdateEvent;
 typedef void (*QBMacUpdateCallback)(void *, QBMacUpdateEvent, const uint8_t *, size_t);
@@ -150,15 +138,6 @@ QBManagedAccounts *qb_managed_accounts_new(const char *directory);
 void qb_managed_accounts_free(QBManagedAccounts *);
 void qb_managed_accounts_invalidate(const QBManagedAccounts *, const char *uuid);
 int32_t qb_managed_accounts_flush(const QBManagedAccounts *);
-typedef struct {
-    uint8_t *state;
-    size_t stateLength;
-    uint8_t *credential;
-    size_t credentialLength;
-} QBMacRefreshResult;
-/* The worker returns UI state and an optional pending CLI login in distinct owned buffers. */
-int32_t qb_mac_fetch_account(const QBManagedAccounts *, const char *root, const uint8_t *account,
-                             size_t length, const QBCancel *, QBMacRefreshResult *);
 /* Output contains a quota snapshot or provider error. A null transport uses the system HTTP client. */
 int32_t qb_managed_accounts_fetch(const QBManagedAccounts *, const char *uuid, const uint8_t *identity, size_t identityLength,
                                   const QBCancel *, void *context, QBManagedHTTP transport, int32_t *osError,

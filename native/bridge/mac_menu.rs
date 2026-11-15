@@ -1,5 +1,4 @@
 use quotabar::mac_menu::{Callback, Status};
-use quotabar::mac_monitor::Presentation;
 use std::{ffi::c_void, ptr, rc::Rc};
 #[unsafe(no_mangle)]
 pub extern "C" fn qb_mac_appearance(mode: i32) {
@@ -83,33 +82,6 @@ pub unsafe extern "C" fn qb_mac_status_free(handle: *mut Status) {
     }
 }
 #[unsafe(no_mangle)]
-pub extern "C" fn qb_mac_monitor_run(
-    context: *mut std::ffi::c_void,
-    callback: Option<quotabar::mac_monitor::Callback>,
-) -> i32 {
-    callback.map_or(1, |callback| quotabar::mac_monitor::run(context, callback))
-}
-
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn qb_mac_presentation_changed(handle: *const Presentation) {
-    if let Some(presentation) = unsafe { handle.as_ref() } {
-        presentation.changed();
-    }
-}
-
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn qb_mac_presentation_send(
-    handle: *const Presentation,
-    targets: u32,
-    data: *const u8,
-    len: usize,
-) {
-    if let Some(presentation) = unsafe { handle.as_ref() } {
-        let frame = if data.is_null() {
-            &[]
-        } else {
-            unsafe { std::slice::from_raw_parts(data, len) }
-        };
-        presentation.send(targets, frame);
-    }
+pub extern "C" fn qb_mac_monitor_run() -> i32 {
+    quotabar::mac_monitor::run()
 }

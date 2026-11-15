@@ -10,7 +10,7 @@ use crate::{
 
 const READ: &str = "조회에 실패했습니다. 연결한 파일과 앱의 접근 권한을 확인하세요.";
 const LOGIN_JSON: &str = "로그인 파일을 읽을 수 없습니다. JSON 형식을 확인하세요.";
-const STORAGE: &str =
+pub(in crate::mac_monitor) const STORAGE: &str =
     "앱 전용 로그인 파일에 접근할 수 없습니다. 앱 데이터 폴더의 권한과 저장 공간을 확인하세요.";
 const NETWORK: &str = "네트워크 연결을 확인하세요. 마지막 성공 결과를 유지합니다.";
 
@@ -27,7 +27,7 @@ impl From<Failure> for Error {
     }
 }
 
-fn credential(error: Credential, provider: Provider) -> &'static str {
+pub(in crate::mac_monitor) fn credential(error: Credential, provider: Provider) -> &'static str {
     match error {
         Credential::TooLarge | Credential::InvalidJson => LOGIN_JSON,
         Credential::FoundationJson => READ,

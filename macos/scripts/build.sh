@@ -5,22 +5,27 @@ configuration="${1:-release}"
 artifacts="$PWD/../artifacts"
 version="$(plutil -extract version raw -o - ../shared/version.json)"
 build="$(plutil -extract build raw -o - ../shared/version.json)"
-cp ../shared/assets/* Sources/QuotaBar/Resources/
-export CLANG_MODULE_CACHE_PATH="$PWD/.build/module-cache"
-export SWIFTPM_MODULECACHE_OVERRIDE="$PWD/.build/module-cache"
-mkdir -p .build/cache .build/config .build/security "$artifacts"
+mkdir -p "$artifacts"
 bash scripts/build-native.sh "$configuration"
-options=(--build-system native --cache-path .build/cache --config-path .build/config --security-path .build/security --disable-sandbox -c "$configuration" -Xlinker "$PWD/../target/$configuration/libquotabar_native.a")
-swift build "${options[@]}" --product QuotaBar
-binary_dir="$(swift build "${options[@]}" --show-bin-path)"
 app="$artifacts/QuotaBar.app"
 # Keep the original bundle identifiers for upgrades; all visible names are QuotaBar.
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
 cp "$PWD/../target/$configuration/quotabar-statusline" "$app/Contents/MacOS/quotabar-statusline"
 codesign --force --sign - "$app/Contents/MacOS/quotabar-statusline"
-cp "$binary_dir/QuotaBar" "$app/Contents/MacOS/QuotaBar"
+cp "$PWD/../target/$configuration/quotabar-monitor" "$app/Contents/MacOS/QuotaBar"
 cp ../LICENSE ../NOTICE "$app/Contents/Resources/"
-cp -R "$binary_dir/QuotaBar_QuotaBar.bundle" "$app/Contents/Resources/"
+resources="$app/Contents/Resources/QuotaBar_QuotaBar.bundle/Contents"
+mkdir -p "$resources/Resources"
+cp ../shared/assets/* "$resources/Resources/"
+cat > "$resources/Info.plist" <<'PLIST'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>CFBundleIdentifier</key><string>com.aiusage.lite.resources</string>
+<key>CFBundlePackageType</key><string>BNDL</string>
+<key>CFBundleDevelopmentRegion</key><string>en</string>
+</dict></plist>
+PLIST
 cat > "$app/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -38,7 +43,7 @@ cat > "$app/Contents/Info.plist" <<PLIST
 <key>NSHighResolutionCapable</key><true/>
 </dict></plist>
 PLIST
-swift scripts/make-icon.swift "$artifacts/AppIcon.iconset" "$PWD/Sources/QuotaBar/Resources/AppMark.svg"
+swift scripts/make-icon.swift "$artifacts/AppIcon.iconset" "$PWD/../shared/assets/AppMark.svg"
 iconutil -c icns "$artifacts/AppIcon.iconset" -o "$app/Contents/Resources/AppIcon-4.icns"
 cp "$artifacts/AppIcon.iconset/icon_256x256@2x.png" "$app/Contents/Resources/AppDockIcon.png"
 rm -f "$app/Contents/Resources/AppIcon.icns"

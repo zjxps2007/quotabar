@@ -41,7 +41,7 @@ fn cli_login(account: &Account) -> Option<Secret> {
         .filter(|data| matches(account, data))
 }
 
-fn migrate(
+pub(crate) fn migrate(
     settings: &mut Settings,
     path: &Path,
     directory: &Path,
