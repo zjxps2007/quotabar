@@ -196,6 +196,10 @@ static NSDictionary *perform(NSDictionary *request) {
     }
     NSMutableArray *available = [NSMutableArray array];
     NSWindow *target = window.attachedSheet ?: window;
+    // SwiftUI's segmented picker can expose its enclosing AppKit control for
+    // multiple choices. A real mouse click selects the requested segment.
+    if ([op isEqual:@"press"] && [@[@"라이트", @"다크", @"아이콘만", @"이름 + 잔여량"] containsObject:label] &&
+        clickReference(target, label)) return @{@"pressed": label};
     id element = control(target, label, available);
     if (!element && ([op isEqual:@"press"] || [op isEqual:@"attempt"]) && clickReference(target, label))
         return @{@"pressed": label};

@@ -18,6 +18,8 @@ mod style;
 #[cfg(windows)]
 mod windows_border;
 #[cfg(windows)]
+mod windows_capture;
+#[cfg(windows)]
 mod windows_choice;
 #[cfg(windows)]
 mod windows_scroll;
@@ -38,9 +40,42 @@ struct Capture {
     painted: std::sync::Arc<std::sync::Mutex<Option<std::sync::Arc<egui::ColorImage>>>>,
 }
 impl Capture {
-    fn dialog_image(&mut self, ctx: &egui::Context) -> Option<std::sync::Arc<egui::ColorImage>> {
+    fn dialog_image(
+        &mut self,
+        ctx: &egui::Context,
+        _frame: &eframe::Frame,
+        _title: &str,
+    ) -> Option<std::sync::Arc<egui::ColorImage>> {
         if let Some(image) = self.painted.lock().unwrap().take() {
             return Some(image);
+        }
+        #[cfg(windows)]
+        if _frame.gl().is_none() {
+            if !self.requested
+                && Instant::now() >= self.after
+                && let Some(hwnd) = platform::dialog_hwnd(_frame, _title)
+            {
+                // Immediate viewports don't receive WGPU's screenshot event.
+                // Capture the presented, owned client while its UI thread keeps painting.
+                self.requested = true;
+                let handle = hwnd as usize;
+                let result = self.painted.clone();
+                let wake = ctx.clone();
+                std::thread::spawn(move || {
+                    match windows_capture::client_pixels(handle) {
+                        Ok(image) => {
+                            let size = [image.width() as usize, image.height() as usize];
+                            *result.lock().unwrap() = Some(std::sync::Arc::new(
+                                egui::ColorImage::from_rgb(size, &image),
+                            ));
+                        }
+                        Err(error) => record_probe_error(&error.to_string()),
+                    }
+                    wake.request_repaint();
+                });
+            }
+            ctx.request_repaint_after_for(Duration::from_millis(25), egui::ViewportId::ROOT);
+            return None;
         }
         if !self.requested && Instant::now() >= self.after {
             self.requested = true;
@@ -94,6 +129,8 @@ struct Dashboard {
     scroll_activity: bool,
     filter: String,
     query: String,
+    #[cfg(target_os = "macos")]
+    focus_query: bool,
     attention: bool,
     dialog: Option<dialogs::Dialog>,
     assets: style::Assets,
@@ -110,6 +147,10 @@ struct Dashboard {
 
 impl Dashboard {
     fn navigate(&mut self, page: &str, notify: bool) {
+        #[cfg(target_os = "macos")]
+        if page == "accounts" && self.route != page {
+            self.focus_query = true;
+        }
         self.scroll_activity = page == "activity";
         self.route = match page {
             "accounts" | "settings" => page,
@@ -352,6 +393,13 @@ fn set_taskbar(_frame: &eframe::Frame, _show: bool) {
     }
 }
 
+#[cfg(windows)]
+fn record_probe_error(message: &str) {
+    if let Some(path) = std::env::var_os("QUOTABAR_PROBE_UI_ERROR") {
+        let _ = std::fs::write(path, message);
+    }
+}
+
 fn main() -> eframe::Result {
     let args: Vec<_> = std::env::args().skip(1).collect();
     let Some((wire, inbox, wake)) = wire::Peer::start(&args) else {
@@ -394,6 +442,7 @@ fn main() -> eframe::Result {
         .with_titlebar_shown(false)
         .with_title_shown(false);
     let options = eframe::NativeOptions {
+        renderer: eframe::Renderer::Glow,
         viewport,
         centered: true,
         persist_window: false,
@@ -401,62 +450,89 @@ fn main() -> eframe::Result {
         dithering: !cfg!(windows),
         ..Default::default()
     };
-    let result = eframe::run_native(
-        "QuotaBar",
-        options,
-        Box::new(move |cc| {
+    let create: eframe::AppCreator<'_> = Box::new(move |cc| {
+        #[cfg(target_os = "macos")]
+        {
+            platform::restore_window(cc);
+            quotabar::mac_menu::apply_appearance(state.setting("appearance", "system"));
+            cc.egui_ctx.add_plugin(mac_text::Renderer::default());
+        }
+        style::fonts(&cc.egui_ctx);
+        #[cfg(windows)]
+        {
+            platform::constrain_dashboard_window(cc);
+            cc.egui_ctx
+                .tessellation_options_mut(|options| options.round_rects_to_pixels = false);
+            cc.egui_ctx
+                .add_plugin(windows_text::TextRenderer::default());
+            cc.egui_ctx
+                .add_plugin(windows_border::BorderRenderer::default());
+        }
+        let assets = style::Assets::new(&cc.egui_ctx);
+        *wake.lock().unwrap() = Some(cc.egui_ctx.clone());
+        let mut app = Dashboard {
+            dialog_access: accessibility::DialogAccess::new(&cc.egui_ctx),
+            wire,
+            inbox,
+            state,
+            assets,
+            route: "dashboard".into(),
+            scroll_top: true,
+            scroll_activity: false,
+            filter: "전체 Provider".into(),
+            query: String::new(),
             #[cfg(target_os = "macos")]
-            {
-                platform::restore_window(cc);
-                quotabar::mac_menu::apply_appearance(state.setting("appearance", "system"));
-                cc.egui_ctx.add_plugin(mac_text::Renderer::default());
-            }
-            style::fonts(&cc.egui_ctx);
-            #[cfg(windows)]
-            {
-                platform::constrain_dashboard_window(cc);
-                cc.egui_ctx
-                    .tessellation_options_mut(|options| options.round_rects_to_pixels = false);
-                cc.egui_ctx
-                    .add_plugin(windows_text::TextRenderer::default());
-                cc.egui_ctx
-                    .add_plugin(windows_border::BorderRenderer::default());
-            }
-            let assets = style::Assets::new(&cc.egui_ctx);
-            *wake.lock().unwrap() = Some(cc.egui_ctx.clone());
-            let mut app = Dashboard {
-                dialog_access: accessibility::DialogAccess::new(&cc.egui_ctx),
-                wire,
-                inbox,
-                state,
-                assets,
-                route: "dashboard".into(),
-                scroll_top: true,
-                scroll_activity: false,
-                filter: "전체 Provider".into(),
-                query: String::new(),
-                attention: false,
-                dialog: None,
-                capture: None,
-                capture_dialog: false,
-                visible: None,
-                focused: false,
-                taskbar: None,
-                #[cfg(target_os = "macos")]
-                local: Default::default(),
-                #[cfg(target_os = "macos")]
-                app_menu: mac::AppMenu::install(&cc.egui_ctx),
-            };
-            // Queue the initial event ahead of subsequent messages.
-            app.wire.initial = Some(first);
-            Ok(Box::new(app))
-        }),
-    );
+            focus_query: false,
+            attention: false,
+            dialog: None,
+            capture: None,
+            capture_dialog: false,
+            visible: None,
+            focused: false,
+            taskbar: None,
+            #[cfg(target_os = "macos")]
+            local: Default::default(),
+            #[cfg(target_os = "macos")]
+            app_menu: mac::AppMenu::install(&cc.egui_ctx),
+        };
+        // Queue the initial event ahead of subsequent messages.
+        app.wire.initial = Some(first);
+        Ok(Box::new(app))
+    });
+    #[cfg(target_os = "macos")]
+    let result = eframe::run_native("QuotaBar", options, create);
     #[cfg(windows)]
-    if let Err(error) = &result
-        && let Some(path) = std::env::var_os("QUOTABAR_PROBE_UI_ERROR")
-    {
-        let _ = std::fs::write(path, error.to_string());
+    let result = {
+        let mut directx = options.clone();
+        directx.renderer = eframe::Renderer::Wgpu;
+        if let eframe::egui_wgpu::WgpuSetup::CreateNew(settings) =
+            &mut directx.wgpu_options.wgpu_setup
+        {
+            settings.instance_descriptor.backends = wgpu::Backends::DX12;
+        }
+        // OpenGL may initialize with only Microsoft's legacy 1.1 driver.
+        // Its painter rejects that driver before consuming the application or IPC state.
+        let mut pending = Some(create);
+        let first = eframe::run_native(
+            "QuotaBar",
+            options,
+            Box::new(|cc| pending.take().expect("one dashboard per helper")(cc)),
+        );
+        match (first, pending) {
+            (
+                Err(
+                    eframe::Error::OpenGL(_)
+                    | eframe::Error::Glutin(_)
+                    | eframe::Error::NoGlutinConfigs(..),
+                ),
+                Some(create),
+            ) => eframe::run_native("QuotaBar", directx, create),
+            (result, _) => result,
+        }
+    };
+    #[cfg(windows)]
+    if let Err(error) = &result {
+        record_probe_error(&error.to_string());
     }
     result
 }

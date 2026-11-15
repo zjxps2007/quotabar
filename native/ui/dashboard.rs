@@ -209,6 +209,14 @@ impl Dashboard {
                 });
                 ui.add_space(18.);
             }
+            #[cfg(target_os = "macos")]
+            if self.route == "accounts" {
+                Frame::new().inner_margin(Margin::symmetric(28, 0)).show(ui, |ui| {
+                    ui.set_width(ui.available_width());
+                    self.accounts(ui, p);
+                });
+                return;
+            }
             let mut scroll = ScrollArea::vertical().auto_shrink([false, false]).id_salt((&self.route, "body"));
             if self.scroll_top {
                 scroll = scroll.vertical_scroll_offset(0.);
@@ -227,7 +235,7 @@ impl Dashboard {
             #[cfg(windows)]
             crate::windows_scroll::show(ui, scroll, p, body);
             #[cfg(target_os = "macos")]
-            scroll.show(ui, body);
+            mac_scroll(ui, scroll, p, body);
         });
     }
     fn overview(&mut self, ui: &mut Ui, p: Palette) {

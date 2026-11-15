@@ -83,6 +83,12 @@ def exercise(dashboard, executable, folder, library, fixture, observed):
                 controls.request("appearance", expected={"appearance": value})
             observed.append({"preference": event, "value": value})
             time.sleep(0.25)
+            # Account for any repeated command from this click before sending
+            # the next one. Keep duplicates in the comparison and its evidence.
+            while select.select([app.stdout], [], [], 0)[0]:
+                extra = dashboard.receive(app.stdout, time.monotonic() + 2)
+                if event in extra:
+                    observed.append({"repeatedPreference": event, "value": extra[event]["_0"]})
 
         consent = "이 폴더의 statusLine 연결 허용 (기존 명령은 보존)"
         try:

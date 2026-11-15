@@ -9,63 +9,6 @@ use serde_json::Value;
 use serde_json::json;
 use std::time::{Duration, Instant};
 
-#[cfg(target_os = "macos")]
-fn mac_field(
-    ui: &mut Ui,
-    text: &mut String,
-    hint: &str,
-    id: &str,
-    width: f32,
-    p: Palette,
-) -> Response {
-    use objc2_app_kit::{NSColor, NSColorSpace};
-    let system_color = |value: &NSColor, fallback: Color32| {
-        let Some(c) = value.colorUsingColorSpace(&NSColorSpace::sRGBColorSpace()) else {
-            return fallback;
-        };
-        let byte = |n: f64| (n.clamp(0., 1.) * 255.).round() as u8;
-        Color32::from_rgba_unmultiplied(
-            byte(c.redComponent()),
-            byte(c.greenComponent()),
-            byte(c.blueComponent()),
-            byte(c.alphaComponent()),
-        )
-    };
-    let placeholder = system_color(&NSColor::placeholderTextColor(), p.muted);
-    let background = ui.painter().add(Shape::Noop);
-    let field = ui.add(
-        TextEdit::singleline(text)
-            .id(Id::new(id))
-            .hint_text(rich(hint, 13., false, placeholder))
-            .font(FontId::proportional(13.))
-            .frame(false)
-            .margin(Margin::symmetric(10, 0))
-            .vertical_align(Align::Center)
-            .min_size(vec2(0., 22.))
-            .desired_width((width - 20.).max(0.)),
-    );
-    ui.painter().set(
-        background,
-        epaint::RectShape::new(
-            field.rect,
-            6.,
-            p.card,
-            Stroke::new(1.0_f32, p.line),
-            StrokeKind::Inside,
-        ),
-    );
-    if field.has_focus() {
-        let ring = system_color(&NSColor::keyboardFocusIndicatorColor(), p.ink);
-        ui.painter().rect_stroke(
-            field.rect.expand(1.),
-            6.,
-            Stroke::new(3.0_f32, ring),
-            StrokeKind::Middle,
-        );
-    }
-    field
-}
-
 fn full_button(ui: &mut Ui, title: &str, primary: bool, p: Palette) -> bool {
     let fill = if primary { p.accent } else { p.card };
     let ink = if primary { p.on } else { p.ink };
@@ -432,7 +375,7 @@ impl Dashboard {
                         }
                     }
                 });
-            capture.and_then(|c| c.dialog_image(ctx))
+            capture.and_then(|c| c.dialog_image(ctx, frame, title))
         };
         {
             let id = crate::accessibility::viewport();
@@ -765,8 +708,14 @@ impl Dashboard {
             && !locked;
         let mut close = false;
         let submit = if MAC {
+            #[cfg(target_os = "macos")]
+            let row_height = crate::mac_text::natural_size(ui, "연결", 13., false)
+                .map_or(16., |size| size.y.ceil())
+                + 12.;
+            #[cfg(windows)]
+            let row_height = 31.;
             ui.allocate_ui_with_layout(
-                vec2(ui.available_width(), 31.),
+                vec2(ui.available_width(), row_height),
                 Layout::right_to_left(Align::Center),
                 |ui| {
                     let submit = ui

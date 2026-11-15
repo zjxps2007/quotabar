@@ -25,6 +25,81 @@ use std::{
     time::{Duration, Instant},
 };
 
+fn template_texture(
+    ctx: &Context,
+    name: &str,
+    image: &objc2_app_kit::NSImage,
+) -> Option<eframe::egui::TextureHandle> {
+    use eframe::egui::{Color32, ColorImage, TextureOptions};
+    use objc2_app_kit::{NSBitmapImageFileType, NSBitmapImageRep};
+    use objc2_foundation::NSDictionary;
+    let tiff = image.TIFFRepresentation()?;
+    let rep = NSBitmapImageRep::imageRepWithData(&tiff)?;
+    // An empty encoding options dictionary takes no typed values.
+    let png = unsafe {
+        rep.representationUsingType_properties(NSBitmapImageFileType::PNG, &NSDictionary::new())
+    }?;
+    let bitmap = image::load_from_memory(&png.to_vec()).ok()?.to_rgba8();
+    let size = [bitmap.width() as usize, bitmap.height() as usize];
+    let mask = bitmap
+        .pixels()
+        .map(|p| Color32::from_white_alpha(p[3]))
+        .collect();
+    Some(ctx.load_texture(name, ColorImage::new(size, mask), TextureOptions::LINEAR))
+}
+
+pub fn menu_preview(
+    ui: &mut eframe::egui::Ui,
+    mode: &str,
+    value: &str,
+    ink: eframe::egui::Color32,
+) {
+    use eframe::egui::{
+        Id, Pos2, Rect, Sense, TextureHandle, Vec2, WidgetInfo, WidgetType, pos2, vec2,
+    };
+    let ctx = ui.ctx();
+    let key = Id::new((
+        "menu-preview",
+        mode,
+        value,
+        ctx.pixels_per_point().to_bits(),
+    ));
+    let cached = ctx.data(|d| d.get_temp::<(TextureHandle, Vec2)>(key));
+    let item = cached.or_else(|| {
+        let image = quotabar::mac_menu::menu_preview(mode, value)?;
+        let size = image.size();
+        let item = (
+            template_texture(ctx, "menu preview", &image)?,
+            vec2(size.width as f32, size.height as f32),
+        );
+        ctx.data_mut(|d| d.insert_temp(key, item.clone()));
+        Some(item)
+    });
+    let spoken = if mode == "iconOnly" {
+        "아이콘만"
+    } else {
+        value
+    };
+    if let Some((texture, size)) = item {
+        let (rect, response) = ui.allocate_exact_size(size, Sense::hover());
+        ui.painter().image(
+            texture.id(),
+            rect,
+            Rect::from_min_max(Pos2::ZERO, pos2(1., 1.)),
+            ink,
+        );
+        response.widget_info(|| {
+            WidgetInfo::labeled(
+                WidgetType::Image,
+                true,
+                format!("상단바 미리보기 · {spoken}"),
+            )
+        });
+    } else {
+        ui.label(spoken);
+    }
+}
+
 pub fn symbol(
     painter: &eframe::egui::Painter,
     bounds: eframe::egui::Rect,
@@ -33,12 +108,10 @@ pub fn symbol(
     semibold: bool,
     tint: eframe::egui::Color32,
 ) -> bool {
-    use eframe::egui::{Color32, ColorImage, Id, Pos2, Rect, TextureHandle, TextureOptions, pos2};
+    use eframe::egui::{Id, Pos2, Rect, TextureHandle, pos2};
     use objc2_app_kit::{
-        NSBitmapImageFileType, NSBitmapImageRep, NSFontWeightRegular, NSFontWeightSemibold,
-        NSImage, NSImageSymbolConfiguration,
+        NSFontWeightRegular, NSFontWeightSemibold, NSImage, NSImageSymbolConfiguration,
     };
-    use objc2_foundation::NSDictionary;
 
     let ctx = painter.ctx();
     let scale = ctx.pixels_per_point();
@@ -63,22 +136,7 @@ pub fn symbol(
                 weight,
             );
             let image = base.imageWithSymbolConfiguration(&config)?;
-            let tiff = image.TIFFRepresentation()?;
-            let rep = NSBitmapImageRep::imageRepWithData(&tiff)?;
-            // An empty encoding options dictionary takes no typed values.
-            let png = unsafe {
-                rep.representationUsingType_properties(
-                    NSBitmapImageFileType::PNG,
-                    &NSDictionary::new(),
-                )
-            }?;
-            let bitmap = image::load_from_memory(&png.to_vec()).ok()?.to_rgba8();
-            let size = [bitmap.width() as usize, bitmap.height() as usize];
-            let mask = bitmap
-                .pixels()
-                .map(|p| Color32::from_white_alpha(p[3]))
-                .collect();
-            Some(ctx.load_texture(name, ColorImage::new(size, mask), TextureOptions::LINEAR))
+            template_texture(ctx, name, &image)
         };
         let texture = load();
         ctx.data_mut(|d| d.insert_temp(id, texture.clone()));

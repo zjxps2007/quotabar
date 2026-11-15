@@ -2,7 +2,9 @@ use crate::{Dashboard, dialogs::Dialog, model::*, style::*};
 use eframe::egui::*;
 use serde_json::{Value, json};
 
-use crate::account_text::{AccountField, contains_query, email_matches_alias};
+#[cfg(windows)]
+use crate::account_text::AccountField;
+use crate::account_text::{contains_query, email_matches_alias};
 
 fn provider_filter(ui: &mut Ui, filter: &mut String, width: f32) {
     let providers = ["전체 Provider", "Codex", "Claude", "Gemini"];
@@ -37,19 +39,27 @@ impl Dashboard {
                 ui.spacing_mut().item_spacing.x = 12.;
             }
             let w = (width - 300.).clamp(64., 280.);
+            #[cfg(target_os = "macos")]
+            let field = {
+                let field = mac_field(
+                    ui,
+                    &mut self.query,
+                    "계정 이름 또는 이메일 검색",
+                    "accounts-query",
+                    w,
+                    p,
+                );
+                if std::mem::take(&mut self.focus_query) {
+                    field.request_focus();
+                }
+                field
+            };
+            #[cfg(windows)]
             let field = ui.add_sized(
-                [w, if MAC { 31. } else { 46. }],
+                [w, 46.],
                 TextEdit::singleline(&mut AccountField(&mut self.query))
-                    .hint_text(if MAC {
-                        RichText::new("계정 이름 또는 이메일 검색")
-                    } else {
-                        rich("계정 이름 또는 이메일 검색", 11., false, p.muted)
-                    })
-                    .margin(if MAC {
-                        Margin::symmetric(5, 5)
-                    } else {
-                        Margin::symmetric(11, 15)
-                    }),
+                    .hint_text(rich("계정 이름 또는 이메일 검색", 11., false, p.muted))
+                    .margin(Margin::symmetric(11, 15)),
             );
             crate::accessibility::text_value(
                 ui,
@@ -124,13 +134,30 @@ impl Dashboard {
                 }
             });
         }
-        for account in rows {
-            ui.push_id(&account.id, |ui| {
-                p.frame(20)
-                    .show(ui, |ui| self.connection_card(ui, p, &account))
-            });
-            ui.add_space(14.);
-        }
+        #[cfg(target_os = "macos")]
+        let scroll = {
+            let scroll = ScrollArea::vertical()
+                .id_salt("account cards")
+                .auto_shrink([false, true]);
+            if std::mem::take(&mut self.scroll_top) {
+                scroll.vertical_scroll_offset(0.)
+            } else {
+                scroll
+            }
+        };
+        let cards = |ui: &mut Ui| {
+            for account in rows {
+                ui.push_id(&account.id, |ui| {
+                    p.frame(20)
+                        .show(ui, |ui| self.connection_card(ui, p, &account))
+                });
+                ui.add_space(14.);
+            }
+        };
+        #[cfg(target_os = "macos")]
+        mac_scroll(ui, scroll, p, cards);
+        #[cfg(windows)]
+        cards(ui);
     }
     fn connection_card(&mut self, ui: &mut Ui, p: Palette, a: &Account) {
         ui.set_width(ui.available_width());
@@ -212,7 +239,7 @@ impl Dashboard {
             ui.add_space(8.);
             caption(ui, note, p);
         }
-        ui.add_space(18.);
+        ui.add_space(if MAC { 16. } else { 18. });
         ui.scope(|ui| {
             if !MAC {
                 ui.spacing_mut().interact_size.y = 16.;
@@ -225,6 +252,18 @@ impl Dashboard {
                 } else {
                     "로그인 파일 연결"
                 };
+                #[cfg(target_os = "macos")]
+                {
+                    let (icon, _) = ui.allocate_exact_size(Vec2::splat(11.), Sense::hover());
+                    let name = if a.managed {
+                        "arrow.triangle.2.circlepath"
+                    } else if a.provider == "Claude" {
+                        "folder"
+                    } else {
+                        "doc"
+                    };
+                    crate::mac::symbol(ui.painter(), icon, name, 11., false, p.muted);
+                }
                 caption(ui, connection, p);
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     ui.allocate_ui_with_layout(
@@ -348,45 +387,44 @@ impl Dashboard {
             serde_json::to_value(quotabar::tray::windows(&native))
         }
         .unwrap_or_default();
+        #[cfg(target_os = "macos")]
+        {
+            let mode = self
+                .state
+                .setting("menuBarDisplayMode", "providerAndRemaining");
+            let value = text(
+                &summary,
+                if mode == "remainingOnly" {
+                    "remaining"
+                } else {
+                    "title"
+                },
+                "",
+            );
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 12.;
+                caption(ui, "미리보기", p);
+                Frame::new()
+                    .fill(p.bg)
+                    .inner_margin(Margin::symmetric(12, 7))
+                    .corner_radius(7)
+                    .show(ui, |ui| crate::mac::menu_preview(ui, mode, value, p.ink));
+            });
+        }
+        #[cfg(windows)]
         Frame::new()
             .fill(p.bg)
             .inner_margin(Margin {
                 left: 12,
-                right: if MAC { 12 } else { 22 },
+                right: 22,
                 top: 8,
                 bottom: 8,
             })
             .corner_radius(7)
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
-                    if !MAC {
-                        ui.spacing_mut().item_spacing.x = 10.;
-                    }
-                    if MAC {
-                        caption(ui, "미리보기", p);
-                        let mode = self
-                            .state
-                            .setting("menuBarDisplayMode", "providerAndRemaining");
-                        if mode == "iconOnly" {
-                            mark(ui, 22., p);
-                        } else {
-                            label(
-                                ui,
-                                text(
-                                    &summary,
-                                    if mode == "remainingOnly" {
-                                        "remaining"
-                                    } else {
-                                        "title"
-                                    },
-                                    "",
-                                ),
-                                12.,
-                                true,
-                                p.ink,
-                            );
-                        }
-                    } else if summary["useLogo"] == true {
+                    ui.spacing_mut().item_spacing.x = 10.;
+                    if summary["useLogo"] == true {
                         mark(ui, 22., p);
                         caption(ui, "QuotaBar", p);
                     } else {
@@ -417,13 +455,18 @@ impl Dashboard {
     }
     pub fn settings(&mut self, ui: &mut Ui, p: Palette) {
         p.frame(20).show(ui,|ui|{ui.set_width(ui.available_width());settings_title(ui,"화면 및 표시","menubar.dock.rectangle",p);ui.add_space(18.);
-            label(ui,"화면 모드",12.,false,p.ink);ui.add_space(12.);
+            label(ui,"화면 모드",if MAC {13.} else {12.},false,p.ink);ui.add_space(if MAC {18.} else {12.});
             if let Some(v)=segments(ui,&[("system","시스템 설정 따르기"),("light","라이트"),("dark","다크")],self.state.setting("appearance","system"),p,420.){
                 self.preference("appearance","appearance",json!(v));}
             divider(ui,p);let dock=self.state.flag("showTaskbarIcon","showDockIcon");
-            if toggle(ui,if MAC{"Dock에 앱 아이콘 표시"}else{"작업 표시줄에 앱 아이콘 표시"},dock,p.accent,p).clicked(){
+            #[cfg(target_os = "macos")]
+            let dock_toggle = mac_setting_toggle(ui,"Dock에 앱 아이콘 표시",Some("끄면 상단바에서 Dashboard와 설정을 열 수 있습니다."),dock,p.accent,p);
+            #[cfg(windows)]
+            let dock_toggle = toggle(ui,"작업 표시줄에 앱 아이콘 표시",dock,p.accent,p);
+            if dock_toggle.clicked(){
                 self.preference(if MAC{"showDockIcon"}else{"showTaskbarIcon"},"dockIcon",json!(!dock));}
-            ui.add_space(6.);caption(ui,if MAC{"끄면 상단바에서 Dashboard와 설정을 열 수 있습니다."}else{"끄면 트레이에서 Dashboard와 설정을 열 수 있습니다."},p);
+            #[cfg(windows)]
+            {ui.add_space(6.);caption(ui,"끄면 트레이에서 Dashboard와 설정을 열 수 있습니다.",p);}
             divider(ui,p);label(ui,if MAC{"상단바 표시 형식"}else{"트레이 표시"},12.,false,p.ink);ui.add_space(12.);
             let (key,modes):(&str,&[(&str,&str)])=if MAC{("menuBarDisplayMode",&[("providerAndRemaining","이름 + 잔여량"),("remainingOnly","잔여량만"),("iconOnly","아이콘만")])}
                 else{("trayDisplayMode",&[("remaining","남은 비율 숫자"),("icon","로고만")])};
@@ -436,10 +479,14 @@ impl Dashboard {
         ui.add_space(20.);
         p.frame(20).show(ui,|ui|{ui.set_width(ui.available_width());settings_title(ui,"모니터링","arrow.triangle.2.circlepath",p);ui.add_space(18.);
             let auto=self.state.flag("autoRefresh","autoRefresh");let seconds=self.state.raw["settings"]["refreshSeconds"].as_i64().unwrap_or(300);
-            ui.horizontal(|ui|{let w=(ui.available_width()-146.).max(120.);
-                if !MAC { ui.spacing_mut().item_spacing.x = 16.; }
+            ui.horizontal(|ui|{
+                #[cfg(windows)]
+                let w=(ui.available_width()-146.).max(120.);
+                #[cfg(target_os = "macos")]
+                let w=crate::mac_text::natural_size(ui,"자동 새로고침",13.,false).map_or(74., |size| size.x.ceil()) + 46.;
+                ui.spacing_mut().item_spacing.x = if MAC {12.} else {16.};
                 let layout = if MAC { Layout::top_down(Align::Min) } else { Layout::left_to_right(Align::Center) };
-                ui.allocate_ui_with_layout(vec2(w,31.),layout,|ui|{
+                ui.allocate_ui_with_layout(vec2(w,if MAC {22.} else {31.}),layout,|ui|{
                     if toggle(ui,"자동 새로고침",auto,p.accent,p).clicked(){self.preference("autoRefresh","autoRefresh",json!(!auto));}
                 });
                 ui.add_enabled_ui(auto, |ui| {
@@ -450,10 +497,16 @@ impl Dashboard {
                         self.preference("refreshSeconds", "interval", json!(intervals[index]));
                     }
                 });
-            });ui.add_space(10.);caption(ui,"창을 닫아도 선택한 주기로 조회합니다. 꺼도 앱 시작 시 조회와 수동 새로고침은 사용할 수 있습니다.",p);
+            });ui.add_space(if MAC {18.} else {10.});caption(ui,"창을 닫아도 선택한 주기로 조회합니다. 꺼도 앱 시작 시 조회와 수동 새로고침은 사용할 수 있습니다.",p);
             divider(ui,p);let scan=self.state.flag("scanLocalLogs","scanLocalLogs");
-            if toggle(ui,"로컬 토큰 통계",scan,p.accent,p).clicked(){self.preference("scanLocalLogs","scanLogs",json!(!scan));}
-            ui.add_space(6.);caption(ui,"Dashboard가 열려 있을 때만 로그를 확인합니다. 대화 본문은 저장하지 않습니다.",p);
+            let scan_detail="Dashboard가 열려 있을 때만 로그를 확인합니다. 대화 본문은 저장하지 않습니다.";
+            #[cfg(target_os = "macos")]
+            let scan_toggle=mac_setting_toggle(ui,"로컬 토큰 통계",Some(scan_detail),scan,p.accent,p);
+            #[cfg(windows)]
+            let scan_toggle=toggle(ui,"로컬 토큰 통계",scan,p.accent,p);
+            if scan_toggle.clicked(){self.preference("scanLocalLogs","scanLogs",json!(!scan));}
+            #[cfg(windows)]
+            {ui.add_space(6.);caption(ui,scan_detail,p);}
         });
         ui.add_space(20.);
         self.app_settings(ui, p);

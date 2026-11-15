@@ -89,7 +89,12 @@ fn raster(key: &Key, limit: usize) -> Option<(ColorImage, Vec2)> {
         .collect();
     Some((
         ColorImage::new([width, height], pixels),
-        vec2(bounds.width as f32, (height as f64 / scale) as f32),
+        // The texture needs room on both sides of the baseline, while AppKit
+        // rounds the whole logical line box once when stacking controls.
+        vec2(
+            bounds.width as f32,
+            (((bounds.ascent + bounds.descent + bounds.leading) * scale).round() / scale) as f32,
+        ),
     ))
 }
 

@@ -190,6 +190,63 @@ impl Palette {
             .inner_margin(pad)
     }
 }
+#[cfg(target_os = "macos")]
+pub fn mac_field(
+    ui: &mut Ui,
+    text: &mut String,
+    hint: &str,
+    id: &str,
+    width: f32,
+    p: Palette,
+) -> Response {
+    use objc2_app_kit::{NSColor, NSColorSpace};
+    let system_color = |value: &NSColor, fallback: Color32| {
+        let Some(c) = value.colorUsingColorSpace(&NSColorSpace::sRGBColorSpace()) else {
+            return fallback;
+        };
+        let byte = |n: f64| (n.clamp(0., 1.) * 255.).round() as u8;
+        Color32::from_rgba_unmultiplied(
+            byte(c.redComponent()),
+            byte(c.greenComponent()),
+            byte(c.blueComponent()),
+            byte(c.alphaComponent()),
+        )
+    };
+    let placeholder = system_color(&NSColor::placeholderTextColor(), p.muted);
+    let background = ui.painter().add(Shape::Noop);
+    let field = ui.add(
+        TextEdit::singleline(text)
+            .id(Id::new(id))
+            .hint_text(rich(hint, 13., false, placeholder))
+            .font(FontId::proportional(13.))
+            .frame(false)
+            .margin(Margin::symmetric(10, 0))
+            .vertical_align(Align::Center)
+            .min_size(vec2(0., 22.))
+            .desired_width((width - 20.).max(0.)),
+    );
+    ui.painter().set(
+        background,
+        epaint::RectShape::new(
+            field.rect,
+            6.,
+            p.card,
+            Stroke::new(1.0_f32, p.line),
+            StrokeKind::Inside,
+        ),
+    );
+    if field.has_focus() {
+        let ring = system_color(&NSColor::keyboardFocusIndicatorColor(), p.ink);
+        ui.painter().rect_stroke(
+            field.rect.expand(1.),
+            6.,
+            Stroke::new(3.0_f32, ring),
+            StrokeKind::Middle,
+        );
+    }
+    field
+}
+
 pub fn rich(s: impl Into<String>, size: f32, heavy: bool, c: Color32) -> RichText {
     RichText::new(s)
         .font(FontId::new(
@@ -254,6 +311,44 @@ pub fn disclosure(
 #[cfg(windows)]
 pub use crate::windows_choice::choose;
 #[cfg(target_os = "macos")]
+pub fn mac_scroll(ui: &mut Ui, scroll: ScrollArea, p: Palette, body: impl FnOnce(&mut Ui)) {
+    use objc2::MainThreadMarker;
+    use objc2_app_kit::{NSScroller, NSScrollerStyle};
+    let content_style = ui.style().clone();
+    ui.scope(|ui| {
+        let style = ui.style_mut();
+        if MainThreadMarker::new()
+            .is_some_and(|m| NSScroller::preferredScrollerStyle(m) == NSScrollerStyle::Overlay)
+        {
+            style.spacing.scroll = egui::style::ScrollStyle::floating();
+            style.spacing.scroll.dormant_handle_opacity = 0.;
+        } else {
+            style.spacing.scroll = egui::style::ScrollStyle::solid();
+            style.spacing.scroll.bar_width = 8.;
+            style.spacing.scroll.bar_inner_margin = 4.;
+            style.spacing.scroll.bar_outer_margin = 3.;
+        }
+        let knob = if p.dark {
+            Color32::from_gray(102)
+        } else {
+            Color32::from_gray(195)
+        };
+        style.visuals.widgets.inactive.bg_fill = knob;
+        style.visuals.widgets.hovered.bg_fill = knob.lerp_to_gamma(p.ink, 0.15);
+        style.visuals.widgets.active.bg_fill = knob.lerp_to_gamma(p.ink, 0.3);
+        style.visuals.extreme_bg_color = if p.dark {
+            p.rail
+        } else {
+            Color32::from_gray(250)
+        };
+        scroll.show(ui, |ui| {
+            ui.set_style(content_style);
+            body(ui);
+        });
+    });
+}
+
+#[cfg(target_os = "macos")]
 pub fn choose(
     ui: &mut Ui,
     name: &str,
@@ -263,19 +358,48 @@ pub fn choose(
     size: f32,
 ) -> Option<usize> {
     let mut index = selected;
-    ComboBox::from_id_salt(name)
-        .width(width)
-        .selected_text(rich(
-            labels[index].as_ref(),
-            size,
-            false,
-            ui.visuals().text_color(),
-        ))
-        .show_ui(ui, |ui| {
-            for (i, label) in labels.iter().enumerate() {
-                ui.selectable_value(&mut index, i, label.as_ref());
-            }
-        });
+    ui.scope(|ui| {
+        ui.spacing_mut().button_padding = vec2(6., 2.);
+        ui.spacing_mut().icon_width = 16.;
+        ui.spacing_mut().interact_size.y = 22.;
+        let enabled = ui.is_enabled();
+        let visual = ui.visuals();
+        let ink = visual.text_color();
+        let on = if visual.dark_mode {
+            Color32::BLACK
+        } else {
+            Color32::WHITE
+        };
+        ComboBox::from_id_salt(name)
+            .width(width)
+            .icon(move |ui, rect, _, _| {
+                let badge = Rect::from_center_size(rect.center(), Vec2::splat(16.));
+                if enabled {
+                    ui.painter().rect_filled(badge, 4., ink);
+                }
+                crate::mac::symbol(
+                    ui.painter(),
+                    badge.shrink(2.),
+                    "chevron.up.chevron.down",
+                    11.,
+                    true,
+                    if enabled { on } else { ink },
+                );
+            })
+            .selected_text(rich(
+                labels[index].as_ref(),
+                size,
+                false,
+                ui.visuals().text_color(),
+            ))
+            .show_ui(ui, |ui| {
+                for (i, label) in labels.iter().enumerate() {
+                    ui.selectable_value(&mut index, i, label.as_ref());
+                }
+            })
+            .response
+            .widget_info(|| WidgetInfo::labeled(WidgetType::ComboBox, enabled, name));
+    });
     (index != selected).then_some(index)
 }
 /// Windows ButtonBase activates on Space release and cancels a held press on
@@ -555,7 +679,91 @@ pub fn divider(ui: &mut Ui, p: Palette) {
     ui.add_space(if cfg!(windows) { 16. } else { 14. });
 }
 pub fn toggle(ui: &mut Ui, s: &str, value: bool, tint: Color32, p: Palette) -> Response {
-    named_toggle(ui, s, s, value, tint, p)
+    #[cfg(target_os = "macos")]
+    {
+        mac_setting_toggle(ui, s, None, value, tint, p)
+    }
+    #[cfg(windows)]
+    {
+        named_toggle(ui, s, s, value, tint, p)
+    }
+}
+
+#[cfg(target_os = "macos")]
+pub fn mac_setting_toggle(
+    ui: &mut Ui,
+    title: &str,
+    detail: Option<&str>,
+    value: bool,
+    tint: Color32,
+    p: Palette,
+) -> Response {
+    let height = if detail.is_some() { 33. } else { 22. };
+    let (row, response) =
+        ui.allocate_exact_size(vec2(ui.available_width(), height), Sense::click());
+    response
+        .widget_info(|| WidgetInfo::selected(WidgetType::Checkbox, ui.is_enabled(), value, title));
+    let painter = ui.painter();
+    if let Some(detail) = detail {
+        painter.text(
+            row.left_top(),
+            Align2::LEFT_TOP,
+            title,
+            FontId::proportional(13.),
+            p.ink,
+        );
+        painter.text(
+            row.left_bottom(),
+            Align2::LEFT_BOTTOM,
+            detail,
+            FontId::proportional(10.),
+            p.muted,
+        );
+    } else {
+        painter.text(
+            row.left_center(),
+            Align2::LEFT_CENTER,
+            title,
+            FontId::proportional(13.),
+            p.ink,
+        );
+    }
+    let track = Rect::from_center_size(row.right_center() - vec2(19., 0.), vec2(38., 22.));
+    let track_color = if value {
+        tint
+    } else {
+        p.card.lerp_to_gamma(p.ink, 0.12)
+    };
+    painter.rect(
+        track,
+        11.,
+        track_color,
+        Stroke::new(1.0_f32, p.line),
+        StrokeKind::Inside,
+    );
+    let knob = pos2(
+        if value {
+            track.right() - 11.
+        } else {
+            track.left() + 11.
+        },
+        track.center().y,
+    );
+    painter.circle(
+        knob,
+        10.,
+        Color32::WHITE,
+        Stroke::new(1.0_f32, track_color.lerp_to_gamma(p.ink, 0.12)),
+    );
+    if response.has_focus() {
+        painter.rect_stroke(
+            track.expand(2.),
+            12.,
+            Stroke::new(2.0_f32, p.muted),
+            StrokeKind::Outside,
+        );
+    }
+    response
 }
 pub fn checkbox(ui: &mut Ui, checked: &mut bool, title: &str, size: f32, p: Palette) -> Response {
     let text = ui

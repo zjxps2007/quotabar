@@ -1,8 +1,7 @@
 //! AppKit status item, transient popover and application menus. UI objects
 //! live on the application thread and the popover's view is released on close.
 use objc2::{
-    AllocAnyThread, ClassType, DefinedClass, MainThreadMarker, MainThreadOnly, define_class,
-    msg_send,
+    AllocAnyThread, DefinedClass, MainThreadMarker, MainThreadOnly, define_class, msg_send,
     rc::{Retained, Weak},
     runtime::{AnyObject, ProtocolObject, Sel},
     sel,
@@ -14,7 +13,7 @@ use objc2_foundation::{
 };
 use serde_json::Value;
 use std::{
-    cell::{OnceCell, RefCell},
+    cell::{Cell, OnceCell, RefCell},
     ffi::c_void,
     rc::{Rc, Weak as StatusOwner},
 };
@@ -32,7 +31,8 @@ const OPENED: i32 = 7;
 struct Actions {
     context: *mut c_void,
     callback: Callback,
-    monitor: OnceCell<StatusOwner<Status>>,
+    owner: OnceCell<StatusOwner<Status>>,
+    monitor: Cell<bool>,
 }
 define_class!(
     #[unsafe(super=NSObject)]
@@ -49,6 +49,12 @@ define_class!(
         }
     }
     unsafe impl NSPopoverDelegate for Target{
+        #[unsafe(method(popoverDidShow:))]
+        fn opened(&self,_:&NSNotification){
+            if let Some(status) = self.ivars().owner.get().and_then(StatusOwner::upgrade) {
+                status.fit_visible_list();
+            }
+        }
         #[unsafe(method(popoverDidClose:))]
         fn closed(&self,_:&NSNotification){self.dispatch(CLOSED);}
     }
@@ -57,13 +63,13 @@ impl Target {
     fn dispatch(&self, tag: i32) {
         let action = self.ivars();
         let notify = |event| (action.callback)(action.context, event);
-        let Some(owner) = action.monitor.get() else {
+        if !action.monitor.get() {
             notify(tag);
             return;
         };
         // Closing a popover can synchronously call its delegate. Keep the
         // controller alive if AppKit terminates or the service releases its handle.
-        let Some(status) = owner.upgrade() else {
+        let Some(status) = action.owner.get().and_then(StatusOwner::upgrade) else {
             return;
         };
         match tag {
@@ -93,7 +99,8 @@ impl Target {
                 super(Self::alloc(m).set_ivars(Actions {
                     context,
                     callback,
-                    monitor: OnceCell::new()
+                    owner: OnceCell::new(),
+                    monitor: Cell::new(false)
                 })),
                 init
             ]
@@ -262,7 +269,31 @@ impl Menus {
         Self { target }
     }
 }
-fn title_image(mark: &Retained<NSImage>, font: &NSFont, title: &str) -> Retained<NSImage> {
+fn menu_mark() -> Option<Retained<NSImage>> {
+    let mark = image(
+        include_bytes!("../shared/assets/AppMark.svg"),
+        NSSize::new(14. * 266. / 282., 14.),
+    )?;
+    mark.setTemplate(true);
+    Some(mark)
+}
+
+fn menu_font() -> Retained<NSFont> {
+    NSFont::monospacedDigitSystemFontOfSize_weight(
+        NSFont::menuBarFontOfSize(0.).pointSize(),
+        unsafe { NSFontWeightRegular },
+    )
+}
+
+pub fn menu_preview(mode: &str, value: &str) -> Option<Retained<NSImage>> {
+    match mode {
+        "iconOnly" => menu_mark(),
+        "remainingOnly" => Some(title_image(None, &menu_font(), value)),
+        _ => Some(title_image(Some(&menu_mark()?), &menu_font(), value)),
+    }
+}
+
+fn title_image(mark: Option<&Retained<NSImage>>, font: &NSFont, title: &str) -> Retained<NSImage> {
     use objc2_foundation::{NSAttributedString, NSDictionary};
     let black = NSColor::blackColor();
     let keys = unsafe { [NSFontAttributeName, NSForegroundColorAttributeName] };
@@ -274,10 +305,10 @@ fn title_image(mark: &Retained<NSImage>, font: &NSFont, title: &str) -> Retained
             Some(&attrs),
         )
     };
-    let mark = mark.clone();
-    let logo = mark.size();
+    let mark = mark.cloned();
+    let logo = mark.as_ref().map_or(NSSize::ZERO, |image| image.size());
     let label = text.size();
-    let x = logo.width + 6.;
+    let x = if mark.is_some() { logo.width + 6. } else { 0. };
     let size = NSSize::new(
         (x + label.width).ceil(),
         logo.height.max(label.height).ceil(),
@@ -289,12 +320,14 @@ fn title_image(mark: &Retained<NSImage>, font: &NSFont, title: &str) -> Retained
             logo.width,
             logo.height,
         );
-        mark.drawInRect_fromRect_operation_fraction(
-            frame,
-            NSRect::ZERO,
-            NSCompositingOperation::SourceOver,
-            1.,
-        );
+        if let Some(mark) = &mark {
+            mark.drawInRect_fromRect_operation_fraction(
+                frame,
+                NSRect::ZERO,
+                NSCompositingOperation::SourceOver,
+                1.,
+            );
+        }
         text.drawAtPoint(NSPoint::new(x, (size.height - label.height) / 2.));
         objc2::runtime::Bool::YES
     });
@@ -330,12 +363,8 @@ impl Status {
             button.setAction(Some(sel!(chosen:)));
         }
         button.setTag(TOGGLE as isize);
-        let mark = image(
-            include_bytes!("../shared/assets/AppMark.svg"),
-            NSSize::new(14. * 266. / 282., 14.),
-        )?;
-        mark.setTemplate(true);
-        Some(Rc::new(Self {
+        let mark = menu_mark()?;
+        let status = Rc::new(Self {
             m,
             item,
             menus,
@@ -343,17 +372,19 @@ impl Status {
             title_image: Default::default(),
             state: RefCell::new(Value::Null),
             panel: RefCell::default(),
-        }))
-    }
-    pub fn monitor(context: *mut c_void, callback: Callback) -> Option<Rc<Self>> {
-        let status = Self::new(context, callback)?;
+        });
         status
             .menus
             .target
             .ivars()
-            .monitor
+            .owner
             .set(Rc::downgrade(&status))
             .ok()?;
+        Some(status)
+    }
+    pub fn monitor(context: *mut c_void, callback: Callback) -> Option<Rc<Self>> {
+        let status = Self::new(context, callback)?;
+        status.menus.target.ivars().monitor.set(true);
         Some(status)
     }
     pub fn show_popover(&self) {
@@ -378,10 +409,7 @@ impl Status {
     pub fn update(&self, v: Value) {
         let mode = text(&v, "mode");
         if let Some(button) = self.item.button(self.m) {
-            let font = NSFont::monospacedDigitSystemFontOfSize_weight(
-                NSFont::menuBarFontOfSize(0.).pointSize(),
-                unsafe { NSFontWeightRegular },
-            );
+            let font = menu_font();
             button.setFont(Some(&font));
             let title = match mode {
                 "iconOnly" => "",
@@ -400,7 +428,10 @@ impl Status {
                 } else {
                     let mut cache = self.title_image.borrow_mut();
                     if cache.as_ref().is_none_or(|(old, _)| old != title) {
-                        cache.replace((title.to_owned(), title_image(&self.mark, &font, title)));
+                        cache.replace((
+                            title.to_owned(),
+                            title_image(Some(&self.mark), &font, title),
+                        ));
                     }
                     button.setImage(cache.as_ref().map(|(_, img)| &**img));
                 }
@@ -411,6 +442,7 @@ impl Status {
         self.state.replace(v);
         if self.shown() {
             self.rebuild();
+            self.fit_visible_list();
         }
     }
     pub fn toggle(&self) {
@@ -429,8 +461,39 @@ impl Status {
         #[allow(deprecated)]
         NSApplication::sharedApplication(self.m).activateIgnoringOtherApps(true);
         panel.showRelativeToRect_ofView_preferredEdge(button.bounds(), &button, NSRectEdge::MinY);
+        self.fit_visible_list();
+    }
+    fn visible_list(&self) -> Option<Retained<NSScrollView>> {
+        let panel = self.panel.borrow().clone()?;
+        if !panel.isShown() {
+            return None;
+        }
+        let root = panel.contentViewController()?.view();
+        root.layoutSubtreeIfNeeded();
+        root.subviews()
+            .iter()
+            .find_map(|view| view.downcast::<NSScrollView>().ok())
+    }
+    fn fit_visible_list(&self) {
+        let Some(scroll) = self.visible_list() else {
+            return;
+        };
+        let Some(document) = scroll.documentView() else {
+            return;
+        };
+        let width = scroll.contentView().bounds().size.width;
+        if width > 0. && (document.bounds().size.width - width).abs() > 0.5 {
+            self.rebuild_at(Some(width));
+        }
     }
     fn rebuild(&self) {
+        let width = self
+            .visible_list()
+            .filter(|scroll| scroll.hasVerticalScroller())
+            .map(|scroll| scroll.contentView().bounds().size.width);
+        self.rebuild_at(width);
+    }
+    fn rebuild_at(&self, visible_width: Option<f64>) {
         let Some(panel) = self.panel.borrow().clone() else {
             return;
         };
@@ -466,14 +529,19 @@ impl Status {
         let scroller_style = NSScroller::preferredScrollerStyle(m);
         scroll.setScrollerStyle(scroller_style);
         scroll.setHasVerticalScroller(overflow);
-        // Before the popover is shown an empty clip view still reports its full
-        // width. Ask AppKit for the occupied width with the user's scroller style.
-        let list_width = unsafe {
-            NSScrollView::contentSizeForFrameSize_horizontalScrollerClass_verticalScrollerClass_borderType_controlSize_scrollerStyle(
-                NSSize::new(294., 430.), None, overflow.then(NSScroller::class),
-                scroll.borderType(), NSControlSize::Regular, scroller_style, m,
-            )
-        }.width;
+        // AppKit can reserve a legacy-width gutter in a visible popover even
+        // when an unattached scroll view advertises overlay scrollers.
+        let list_width = if overflow {
+            visible_width.filter(|w| *w > 0.).unwrap_or_else(|| {
+                294. - NSScroller::scrollerWidthForControlSize_scrollerStyle(
+                    NSControlSize::Regular,
+                    NSScrollerStyle::Legacy,
+                    m,
+                )
+            })
+        } else {
+            294.
+        };
         if list_width != 294. {
             (headers, list_height) = measure(list_width);
         }
