@@ -69,7 +69,7 @@ internal static partial class DashboardActions
                             var selector = Wait(() => licenses.FindFirst(TreeScope.Descendants,
                                 new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.ComboBox)), "라이선스 문서");
                             selector.SetFocus();
-                            SendKey(selector, 0x28, 0x150);
+                            TypeKey(selector, "{DOWN}");
                             Wait(() => Reader("Apache License"), "read-only Apache license");
                             Save(licenseHwnd, "licenses-apache");
                             Press(licenses, "닫기");
@@ -95,12 +95,12 @@ internal static partial class DashboardActions
                         var provider = Wait(() => dialog.FindFirst(TreeScope.Descendants, new PropertyCondition(
                             AutomationElement.ControlTypeProperty, ControlType.ComboBox)), "연결 서비스");
                         provider.SetFocus();
-                        SendKey(provider, 0x28, 0x150);
+                        TypeKey(provider, "{DOWN}");
                         Wait(() => dialog.FindFirst(TreeScope.Descendants, new PropertyCondition(AutomationElement.NameProperty,
                             "기존 status line을 보존하는 연결에 동의합니다")), "Claude consent");
                         Save(owned, "connect-claude");
                         provider.SetFocus();
-                        SendKey(provider, 0x28, 0x150);
+                        TypeKey(provider, "{DOWN}");
                         Wait(() => dialog.FindFirst(TreeScope.Descendants, new PropertyCondition(AutomationElement.NameProperty,
                             "Gemini Code Assist의 현재 지원 대상 조직 계정만 연결할 수 있습니다. 개인용 종료 및 서버 정책에 따라 조회가 거절될 수 있습니다.")), "Gemini 설명");
                         Save(owned, "connect-gemini");

@@ -165,12 +165,12 @@ def exercise(dashboard, executable, folder, library, fixture, observed):
             send({"reply": {"id": next_id}})
             controls.request("sheet", expected={"sheet": False})
             observed.append({"successfulConnectionDismissesSheet": True})
-            controls.request("accountRefresh", f"{account['name']} 계정 메뉴")
+            controls.request("accountRefresh", f"{account['name']} 계정 메뉴", {"selected": "새로고침"})
             if UUID(command("refresh")["_0"]) != UUID(account["id"]):
                 raise ValueError("The account menu refreshed a different account")
             observed.append({"accountMenuRefresh": True})
             for button in ("취소", "삭제"):
-                controls.request("accountRemove", f"{account['name']} 계정 메뉴")
+                controls.request("accountRemove", f"{account['name']} 계정 메뉴", {"selected": "계정 삭제…"})
                 controls.request("sheet", expected={"sheet": True})
                 expect_no_command("remove")
                 controls.request("press", button)
@@ -253,7 +253,7 @@ def capture_windows(dashboard, program, folder, library, fixture, output, theme)
             controls.request("press", "취소")
             controls.request("sheet", expected={"sheet": False})
             account = fixture["settings"]["accounts"][0]
-            controls.request("accountRemove", f"{account['name']} 계정 메뉴")
+            controls.request("accountRemove", f"{account['name']} 계정 메뉴", {"selected": "계정 삭제…"})
             controls.request("sheet", expected={"sheet": True})
             capture("remove", sheet=True)
             controls.request("press", "취소")

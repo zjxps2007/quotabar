@@ -142,7 +142,8 @@ static id control(NSWindow *window, NSString *name, NSMutableArray *available) {
 static BOOL clickControl(NSWindow *window, NSString *label) {
     // The Dock switch occupies the same part of both windows. Give both helpers
     // one down/up pair so an accessibility action cannot introduce a duplicate.
-    if (!getenv("QUOTABAR_TEST_REFERENCE_INPUT") && ![label isEqual:@"Dock에 앱 아이콘 표시"]) return NO;
+    if (!getenv("QUOTABAR_TEST_REFERENCE_INPUT") && ![label isEqual:@"Dock에 앱 아이콘 표시"] &&
+        ![label hasSuffix:@" 계정 메뉴"]) return NO;
     NSView *view = window.contentView;
     CGFloat w = NSWidth(view.bounds), h = NSHeight(view.bounds), x, y;
     if ([label isEqual:@"계정 연결"]) { x = w - 76; y = 85; }
@@ -185,29 +186,6 @@ static NSDictionary *perform(NSDictionary *request) {
     if ([op isEqual:@"appearance"]) {
         NSString *match = [window.effectiveAppearance bestMatchFromAppearancesWithNames:@[NSAppearanceNameAqua, NSAppearanceNameDarkAqua]];
         return @{@"appearance": [match isEqual:NSAppearanceNameDarkAqua] ? @"dark" : @"light"};
-    }
-    if ([op isEqual:@"accountRefresh"] || [op isEqual:@"accountRemove"]) {
-        // Choose the item in the application's actual tracking menu, whose
-        // nested event loop runs in NSEventTrackingRunLoopMode.
-        NSString *title = [op isEqual:@"accountRefresh"] ? @"새로고침" : @"계정 삭제…";
-        __block id token;
-        NSNotificationCenter *center = NSNotificationCenter.defaultCenter;
-        token = [center addObserverForName:NSMenuDidBeginTrackingNotification object:nil queue:nil usingBlock:^(NSNotification *notice) {
-            NSMenu *menu = notice.object;
-            if (![menu itemWithTitle:@"새로고침"] || ![menu itemWithTitle:@"계정 삭제…"]) return;
-            NSMenuItem *item = [menu itemWithTitle:title];
-            [center removeObserver:token];
-            token = nil;
-            CFRunLoopPerformBlock(CFRunLoopGetMain(), (__bridge CFStringRef)NSEventTrackingRunLoopMode, ^{
-                [menu update];
-                if (item.enabled) [menu performActionForItemAtIndex:[menu indexOfItem:item]];
-                [menu cancelTracking];
-            });
-            CFRunLoopWakeUp(CFRunLoopGetMain());
-        }];
-        NSDictionary *opened = perform(@{@"op": @"press", @"label": label});
-        if (!opened[@"pressed"] && token) { [center removeObserver:token]; token = nil; }
-        return opened;
     }
     if ([op isEqual:@"menu"] || [op isEqual:@"shortcut"]) {
         for (NSMenuItem *entry in NSApp.mainMenu.itemArray) {
@@ -257,6 +235,42 @@ static NSDictionary *perform(NSDictionary *request) {
     return @{@"error": @"control exposes no press action", @"label": label};
 }
 
+static void selectAccountItem(NSDictionary *request, void (^reply)(NSDictionary *)) {
+    NSWindow *window = dashboardWindow();
+    if (!window) { reply(@{@"pending": @"dashboard window"}); return; }
+    NSString *title = [request[@"op"] isEqual:@"accountRefresh"] ? @"새로고침" : @"계정 삭제…";
+    NSNotificationCenter *center = NSNotificationCenter.defaultCenter;
+    __block id observer;
+    observer = [center addObserverForName:NSMenuDidBeginTrackingNotification object:nil queue:nil usingBlock:^(NSNotification *notice) {
+        NSMenu *menu = notice.object;
+        if (![menu itemWithTitle:@"새로고침"] || ![menu itemWithTitle:@"계정 삭제…"]) return;
+        [center removeObserver:observer];
+        observer = nil;
+        CFRunLoopPerformBlock(CFRunLoopGetMain(), (__bridge CFStringRef)NSEventTrackingRunLoopMode, ^{
+            [menu update];
+            NSMenuItem *item = [menu itemWithTitle:title];
+            BOOL enabled = item.enabled;
+            if (enabled) [menu performActionForItemAtIndex:[menu indexOfItem:item]];
+            [menu cancelTracking];
+            // A click is only queued by postEvent. Acknowledge the actual
+            // selection after AppKit has left its nested menu tracking loop.
+            CFRunLoopPerformBlock(CFRunLoopGetMain(), kCFRunLoopDefaultMode, ^{
+                reply(enabled ? @{@"selected": title} : @{@"error": @"disabled account menu item", @"label": title});
+            });
+            CFRunLoopWakeUp(CFRunLoopGetMain());
+        });
+        CFRunLoopWakeUp(CFRunLoopGetMain());
+    }];
+    clickControl(window, request[@"label"]);
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 1500 * NSEC_PER_MSEC), dispatch_get_main_queue(), ^{
+        if (observer) {
+            [center removeObserver:observer];
+            observer = nil;
+            reply(@{@"pending": @"account menu did not begin tracking", @"label": title});
+        }
+    });
+}
+
 __attribute__((constructor)) static void startDashboardDriver(void) {
     const char *path = getenv("QUOTABAR_TEST_UI_DIRECTORY");
     if (!path) return;
@@ -287,6 +301,10 @@ __attribute__((constructor)) static void startDashboardDriver(void) {
                         NSWindow *window = dashboardWindow();
                         if ([request[@"label"] isEqual:@"sheet"]) window = window.attachedSheet;
                         captureRegion(window.sheetParent ?: window, window.frame, NO, [dir URLByAppendingPathComponent:@"frame.png"], reply);
+                        return;
+                    }
+                    if ([request[@"op"] isEqual:@"accountRefresh"] || [request[@"op"] isEqual:@"accountRemove"]) {
+                        selectAccountItem(request, reply);
                         return;
                     }
                     NSDictionary *result;

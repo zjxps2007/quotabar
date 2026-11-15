@@ -138,7 +138,7 @@ internal static partial class DashboardActions
                     new PropertyCondition(AutomationElement.NameProperty, "+  계정 연결"),
                     new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Button))), "계정 연결 버튼");
                 connectButton.SetFocus();
-                SendKey(connectButton, 0x20, 0x39, () =>
+                SendSpace(connectButton, () =>
                 {
                     // A WPF Button stays pressed while Space is held and invokes on release.
                     var watch = Stopwatch.StartNew();
@@ -151,25 +151,33 @@ internal static partial class DashboardActions
                 var connect = Window(pid, "QuotaBar · 계정 연결");
                 var provider = Wait(() => connect.FindFirst(TreeScope.Descendants,
                     new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.ComboBox)), "연결 서비스");
+                void ExpectProviderControl(string name, string transition)
+                {
+                    var named = new PropertyCondition(AutomationElement.NameProperty, name);
+                    try { Wait(() => connect.FindFirst(TreeScope.Descendants, named), transition); }
+                    catch (TimeoutException cause)
+                    {
+                        var buttons = connect.FindAll(TreeScope.Descendants, new PropertyCondition(
+                            AutomationElement.ControlTypeProperty, ControlType.Button)).Cast<AutomationElement>();
+                        var labels = string.Join(", ", buttons.Select(b => b.Current.Name));
+                        throw new TimeoutException($"{transition}. Provider focused: {provider.Current.HasKeyboardFocus}. Dialog buttons: {labels}", cause);
+                    }
+                }
                 provider.SetFocus();
-                SendKey(provider, 0x28, 0x150); // Down selects Claude with the list closed.
-                Wait(() => connect.FindFirst(TreeScope.Descendants, new PropertyCondition(AutomationElement.NameProperty,
-                    "기존 status line을 보존하는 연결에 동의합니다")), "Claude consent after keyboard selection");
-                SendKey(provider, 0x24, 0x147); // Home returns to Codex.
-                Wait(() => connect.FindFirst(TreeScope.Descendants, new PropertyCondition(AutomationElement.NameProperty,
-                    "브라우저로 Codex 로그인")), "Codex after Home");
-                SendKey(provider, 0x47, 0x22); // Typing G selects Gemini.
-                Wait(() => connect.FindFirst(TreeScope.Descendants, new PropertyCondition(AutomationElement.NameProperty,
-                    "Gemini Code Assist의 현재 지원 대상 조직 계정만 연결할 수 있습니다. 개인용 종료 및 서버 정책에 따라 조회가 거절될 수 있습니다.")), "Gemini after typing G");
-                SendKey(provider, 0x24, 0x147);
-                SendKey(provider, 0x73, 0x3e); // F4 opens the list; Escape discards an uncommitted selection.
-                SendKey(provider, 0x28, 0x150);
-                SendKey(provider, 0x1b, 0x01);
-                Wait(() => connect.FindFirst(TreeScope.Descendants, new PropertyCondition(AutomationElement.NameProperty,
-                    "브라우저로 Codex 로그인")), "Codex after cancelling the provider list");
-                SendKey(provider, 0x73, 0x3e);
-                SendKey(provider, 0x28, 0x150);
-                SendKey(provider, 0x0d, 0x1c); // Enter commits Claude.
+                TypeKey(provider, "{DOWN}"); // Down selects Claude with the list closed.
+                ExpectProviderControl("기존 status line을 보존하는 연결에 동의합니다", "Claude consent after keyboard selection");
+                TypeKey(provider, "{HOME}"); // Home returns to Codex.
+                ExpectProviderControl("브라우저로 Codex 로그인", "Codex after Home");
+                TypeKey(provider, "g"); // Typing G selects Gemini.
+                ExpectProviderControl("Gemini Code Assist의 현재 지원 대상 조직 계정만 연결할 수 있습니다. 개인용 종료 및 서버 정책에 따라 조회가 거절될 수 있습니다.", "Gemini after typing G");
+                TypeKey(provider, "{HOME}");
+                TypeKey(provider, "{F4}"); // F4 opens the list; Escape discards an uncommitted selection.
+                TypeKey(provider, "{DOWN}");
+                TypeKey(provider, "{ESC}");
+                ExpectProviderControl("브라우저로 Codex 로그인", "Codex after cancelling the provider list");
+                TypeKey(provider, "{F4}");
+                TypeKey(provider, "{DOWN}");
+                TypeKey(provider, "{ENTER}"); // Enter commits Claude.
                 Toggle(connect, "기존 status line을 보존하는 연결에 동의합니다");
                 var directory = Wait(() => connect.FindFirst(TreeScope.Descendants, new PropertyCondition(
                     AutomationElement.ControlTypeProperty, ControlType.Edit)), "Claude 설정 경로");
@@ -273,10 +281,10 @@ internal static partial class DashboardActions
         // WPF's TogglePattern sets IsChecked without the Click event subscribed
         // by the monitor. Activate the focused control with the user's Space key.
         node.SetFocus();
-        SendKey(node, 0x20, 0x39);
+        SendSpace(node);
     }
 
-    private static void SendKey(AutomationElement node, int key, int scan, Action? whileDown = null)
+    private static nint FocusedKeyboardTarget(AutomationElement node)
     {
         Thread.Sleep(100);
         int expected = node.Current.ProcessId;
@@ -297,13 +305,27 @@ internal static partial class DashboardActions
         nint target = info.Focus == 0 ? active : info.Focus;
         GetWindowThreadProcessId(target, out int owner);
         if (owner != expected) throw new InvalidOperationException("Dashboard keyboard target belongs to another process");
-        int flags = 1 | scan << 16;
-        if (!PostMessage(target, 0x100, key, flags)) throw new InvalidOperationException("Cannot press dashboard key");
+        return target;
+    }
+
+    private static void TypeKey(AutomationElement node, string keys)
+    {
+        FocusedKeyboardTarget(node);
+        // Like the rename field, drive the active keyboard input queue. Posting
+        // WM_KEYDOWN/UP skips keyboard translation and native focus routing.
+        System.Windows.Forms.SendKeys.SendWait(keys);
+    }
+
+    private static void SendSpace(AutomationElement node, Action? whileDown = null)
+    {
+        nint target = FocusedKeyboardTarget(node);
+        const int space = 0x20, flags = 1 | 0x39 << 16;
+        if (!PostMessage(target, 0x100, space, flags)) throw new InvalidOperationException("Cannot press Space");
         try { whileDown?.Invoke(); }
         finally
         {
-            if (!PostMessage(target, 0x101, key, unchecked((int)0xc0000000) | flags))
-                throw new InvalidOperationException("Cannot release dashboard key");
+            if (!PostMessage(target, 0x101, space, unchecked((int)0xc0000000) | flags))
+                throw new InvalidOperationException("Cannot release Space");
         }
     }
 
