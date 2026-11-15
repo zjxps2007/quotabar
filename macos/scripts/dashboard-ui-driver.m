@@ -254,7 +254,8 @@ static id control(NSWindow *window, NSString *name, NSMutableArray *available) {
 static BOOL clickControl(NSWindow *window, NSString *label) {
     // The Dock switch occupies the same part of both windows. Give both helpers
     // one down/up pair so an accessibility action cannot introduce a duplicate.
-    if (!getenv("QUOTABAR_TEST_REFERENCE_INPUT") && ![label isEqual:@"Dock에 앱 아이콘 표시"] &&
+    BOOL sheetSegment = window.sheetParent && [@[@"Codex", @"Claude", @"Gemini", @"브라우저 로그인", @"파일 가져오기"] containsObject:label];
+    if (!getenv("QUOTABAR_TEST_REFERENCE_INPUT") && !sheetSegment && ![label isEqual:@"Dock에 앱 아이콘 표시"] &&
         ![label hasSuffix:@" 계정 메뉴"]) return NO;
     NSView *view = window.contentView;
     CGFloat w = NSWidth(view.bounds), h = NSHeight(view.bounds), x, y;
@@ -269,8 +270,11 @@ static BOOL clickControl(NSWindow *window, NSString *label) {
         y = [NSProcessInfo.processInfo.arguments containsObject:@"--demo"] ? 240 : 209;
     }
     else if ([label hasSuffix:@") 모니터링"]) { x = w - 60; y = 251; }
+    else if ([label isEqual:@"Codex"]) { x = w * 0.29; y = 116; }
     else if ([label isEqual:@"Claude"]) { x = w * 0.55; y = 116; }
     else if ([label isEqual:@"Gemini"]) { x = w * 0.81; y = 116; }
+    else if ([label isEqual:@"브라우저 로그인"]) { x = w * 0.35; y = 158; }
+    else if ([label isEqual:@"파일 가져오기"]) { x = w * 0.75; y = 158; }
     else if ([label hasPrefix:@"이 폴더의 statusLine"]) { x = 50; y = h - 99; }
     else if ([label isEqual:@"연결"]) { x = w - 52; y = h - 42; }
     else if ([label isEqual:@"취소"]) { x = w - 103; y = h - 42; }
@@ -327,7 +331,8 @@ static NSDictionary *perform(NSDictionary *request) {
     NSWindow *target = window.attachedSheet ?: window;
     // SwiftUI's segmented picker can expose its enclosing AppKit control for
     // multiple choices. A real mouse click selects the requested segment.
-    if ([op isEqual:@"press"] && [@[@"라이트", @"다크", @"아이콘만", @"이름 + 잔여량", @"Dock에 앱 아이콘 표시"] containsObject:label] &&
+    if ([op isEqual:@"press"] && [@[@"라이트", @"다크", @"아이콘만", @"이름 + 잔여량", @"Dock에 앱 아이콘 표시",
+                                    @"Codex", @"Claude", @"Gemini", @"브라우저 로그인", @"파일 가져오기"] containsObject:label] &&
         clickControl(target, label)) return @{@"pressed": label};
     id element = control(target, label, available);
     if (!element && ([op isEqual:@"press"] || [op isEqual:@"attempt"]) && clickControl(target, label))

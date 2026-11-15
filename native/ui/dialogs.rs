@@ -9,6 +9,13 @@ use serde_json::Value;
 use serde_json::json;
 use std::time::{Duration, Instant};
 
+#[cfg(target_os = "macos")]
+fn sheet_field_caption(ui: &mut Ui, title: &str, p: Palette) {
+    let caption = label(ui, title, 10., true, p.ink);
+    let line = crate::mac_text::system_line_height(ui, 10.);
+    ui.add_space(8. + (line - caption.rect.height()).max(0.));
+}
+
 fn full_button(ui: &mut Ui, title: &str, primary: bool, p: Palette) -> bool {
     let fill = if primary { p.accent } else { p.card };
     let ink = if primary { p.on } else { p.ink };
@@ -509,6 +516,7 @@ impl Dashboard {
             if MAC {
                 if let Some(s) = ui
                     .horizontal(|ui| {
+                        ui.set_row_height(22.);
                         label(ui, "Provider", 13., false, p.ink);
                         segments(
                             ui,
@@ -556,6 +564,7 @@ impl Dashboard {
             ui.add_enabled_ui(!locked, |ui| {
                 if let Some(s) = ui
                     .horizontal(|ui| {
+                        ui.set_row_height(22.);
                         label(ui, "연결 방법", 13., false, p.ink);
                         segments(
                             ui,
@@ -575,8 +584,7 @@ impl Dashboard {
         }
         #[cfg(target_os = "macos")]
         {
-            label(ui, "계정 이름", 11., true, p.ink);
-            ui.add_space(8.);
+            sheet_field_caption(ui, "계정 이름", p);
             let field = ui
                 .add_enabled_ui(!locked, |ui| {
                     mac_field(
@@ -635,8 +643,13 @@ impl Dashboard {
             } else {
                 "또는 CLI 로그인 파일 연결"
             };
-            form_text(ui, description, 11., MAC, if MAC { p.ink } else { p.muted });
-            ui.add_space(if MAC { 8. } else { 7. });
+            #[cfg(target_os = "macos")]
+            sheet_field_caption(ui, description, p);
+            #[cfg(windows)]
+            {
+                form_text(ui, description, 11., false, p.muted);
+                ui.add_space(7.);
+            }
             let browse = ui
                 .add_enabled_ui(!locked, |ui| {
                     #[cfg(target_os = "macos")]

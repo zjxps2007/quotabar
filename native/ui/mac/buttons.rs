@@ -1,62 +1,81 @@
 use super::{bitmap_pixels, bitmap_rep};
 use block2::StackBlock;
 use eframe::egui::*;
-use objc2::MainThreadMarker;
-use objc2_app_kit::{NSAppearanceCustomization, NSApplication, NSButton};
-use objc2_foundation::{NSPoint, NSRect, NSSize, NSString};
+use objc2::{MainThreadMarker, rc::Retained};
+use objc2_app_kit::{
+    NSAppearanceCustomization, NSApplication, NSButton, NSControl, NSSegmentDistribution,
+    NSSegmentSwitchTracking, NSSegmentedControl,
+};
+use objc2_foundation::{NSArray, NSPoint, NSRect, NSSize, NSString};
 
 #[derive(Clone)]
-struct ButtonImage {
+struct ControlImage {
     texture: TextureHandle,
     size: Vec2,
     offset: Vec2,
 }
 
-fn image(ui: &Ui, title: &str, size: Vec2, pressed: bool) -> Option<ButtonImage> {
+impl ControlImage {
+    fn paint(&self, ui: &Ui, rect: Rect) {
+        let mut painter = ui.painter().clone();
+        // AppKit has already applied the disabled appearance.
+        if !ui.is_enabled() {
+            painter.set_opacity(1.);
+        }
+        painter.image(
+            self.texture.id(),
+            Rect::from_min_size(rect.min + self.offset, self.size),
+            Rect::from_min_max(Pos2::ZERO, pos2(1., 1.)),
+            Color32::WHITE,
+        );
+    }
+}
+
+fn control_image(
+    ui: &Ui,
+    kind: &'static str,
+    state: Id,
+    size: Vec2,
+    make: impl FnOnce(MainThreadMarker) -> Retained<NSControl>,
+) -> Option<ControlImage> {
     let main = MainThreadMarker::new()?;
     let app = NSApplication::sharedApplication(main);
     let appearance = app.effectiveAppearance();
     let scale = ui.ctx().pixels_per_point();
     let enabled = ui.is_enabled();
     let id = Id::new((
-        "AppKit push button",
-        title,
+        kind,
+        state,
         appearance.name().to_string(),
         size.x.to_bits(),
         size.y.to_bits(),
         scale.to_bits(),
         enabled,
-        pressed,
     ));
-    if let Some(cached) = ui.data(|d| d.get_temp::<ButtonImage>(id)) {
+    if let Some(cached) = ui.data(|d| d.get_temp::<ControlImage>(id)) {
         return Some(cached);
     }
 
-    // The view is used only for drawing. The dashboard owns hit testing, focus,
-    // accessibility and shortcuts, just as it does for the other sheet controls.
-    let button = unsafe {
-        NSButton::buttonWithTitle_target_action(&NSString::from_str(title), None, None, main)
-    };
-    button.setAppearance(Some(&appearance));
-    button.setEnabled(enabled);
-    button.setHighlighted(pressed);
+    let control = make(main);
+    control.setAppearance(Some(&appearance));
+    control.setEnabled(enabled);
     let alignment = NSRect::new(NSPoint::ZERO, NSSize::new(size.x.into(), size.y.into()));
-    let frame = button.frameForAlignmentRect(alignment);
-    button.setFrame(NSRect::new(NSPoint::ZERO, frame.size));
-    button.layoutSubtreeIfNeeded();
+    let frame = control.frameForAlignmentRect(alignment);
+    control.setFrame(NSRect::new(NSPoint::ZERO, frame.size));
+    control.layoutSubtreeIfNeeded();
     let width = (frame.size.width * f64::from(scale)).ceil() as isize;
     let height = (frame.size.height * f64::from(scale)).ceil() as isize;
     let rep = bitmap_rep(width, height)?;
     rep.setSize(frame.size);
     appearance.performAsCurrentDrawingAppearance(&StackBlock::new(|| {
-        button.cacheDisplayInRect_toBitmapImageRep(button.bounds(), &rep);
+        control.cacheDisplayInRect_toBitmapImageRep(control.bounds(), &rep);
     }));
     let rgba = bitmap_pixels(&rep)?;
     if !rgba.pixels().any(|p| p[3] != 0) {
         return None;
     }
     let texture = ui.ctx().load_texture(
-        "AppKit push button",
+        kind,
         ColorImage::from_rgba_unmultiplied([width as usize, height as usize], rgba.as_raw()),
         TextureOptions::NEAREST,
     );
@@ -66,13 +85,77 @@ fn image(ui: &Ui, title: &str, size: Vec2, pressed: bool) -> Option<ButtonImage>
         frame.origin.x as f32,
         size.y - (frame.origin.y + frame.size.height) as f32,
     );
-    let image = ButtonImage {
+    let image = ControlImage {
         texture,
         size: vec2(frame.size.width as f32, frame.size.height as f32),
         offset,
     };
     ui.data_mut(|d| d.insert_temp(id, image.clone()));
     Some(image)
+}
+
+fn button_image(ui: &Ui, title: &str, size: Vec2, pressed: bool) -> Option<ControlImage> {
+    control_image(
+        ui,
+        "AppKit push button",
+        Id::new((title, pressed)),
+        size,
+        |main| {
+            // These views only draw. The dashboard handles actions and accessibility.
+            let button = unsafe {
+                NSButton::buttonWithTitle_target_action(
+                    &NSString::from_str(title),
+                    None,
+                    None,
+                    main,
+                )
+            };
+            button.setHighlighted(pressed);
+            button.into_super()
+        },
+    )
+}
+
+pub fn draw_segments(
+    ui: &Ui,
+    bounds: Rect,
+    items: &[(&str, &str)],
+    current: &str,
+    pressed: Option<usize>,
+) -> bool {
+    let image = control_image(
+        ui,
+        "AppKit segmented control",
+        Id::new((items, current, pressed)),
+        bounds.size(),
+        |main| {
+            let labels: Vec<_> = items
+                .iter()
+                .map(|(_, title)| NSString::from_str(title))
+                .collect();
+            let labels = NSArray::from_retained_slice(&labels);
+            let control = unsafe {
+                NSSegmentedControl::segmentedControlWithLabels_trackingMode_target_action(
+                    &labels,
+                    NSSegmentSwitchTracking::SelectOne,
+                    None,
+                    None,
+                    main,
+                )
+            };
+            control.setSegmentDistribution(NSSegmentDistribution::FillEqually);
+            let selected = pressed.or_else(|| items.iter().position(|(key, _)| *key == current));
+            control.setSelectedSegment(selected.map_or(-1, |i| i as isize));
+            control.setHighlighted(pressed.is_some());
+            control.into_super()
+        },
+    );
+    if let Some(image) = image {
+        image.paint(ui, bounds);
+        true
+    } else {
+        false
+    }
 }
 
 pub fn standard_button(ui: &mut Ui, title: &str, focus: Color32) -> Option<Response> {
@@ -85,26 +168,17 @@ pub fn standard_button(ui: &mut Ui, title: &str, focus: Color32) -> Option<Respo
             .ceil()
             + 6.,
     );
-    let normal = image(ui, title, size, false)?;
+    let normal = button_image(ui, title, size, false)?;
     let (rect, response) = ui.allocate_exact_size(size, Sense::click());
     let image = if response.is_pointer_button_down_on() {
-        image(ui, title, size, true).unwrap_or(normal)
+        button_image(ui, title, size, true).unwrap_or(normal)
     } else {
         normal
     };
     let enabled = ui.is_enabled();
-    let mut painter = ui.painter().clone();
-    if !enabled {
-        painter.set_opacity(1.);
-    }
-    painter.image(
-        image.texture.id(),
-        Rect::from_min_size(rect.min + image.offset, image.size),
-        Rect::from_min_max(Pos2::ZERO, pos2(1., 1.)),
-        Color32::WHITE,
-    );
+    image.paint(ui, rect);
     if response.has_focus() {
-        painter.rect_stroke(
+        ui.painter().rect_stroke(
             rect.expand(1.),
             6.,
             Stroke::new(3.0_f32, focus),

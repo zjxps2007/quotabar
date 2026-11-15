@@ -26,7 +26,7 @@ use std::{
 };
 
 mod buttons;
-pub use buttons::standard_button;
+pub use buttons::{draw_segments, standard_button};
 
 fn bitmap_rep(
     width: isize,

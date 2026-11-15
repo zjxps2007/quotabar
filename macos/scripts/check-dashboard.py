@@ -2,10 +2,12 @@
 import hashlib
 import json
 import os
+from contextlib import ExitStack
 from pathlib import Path
 import platform
 import plistlib
 import select
+import shutil
 import struct
 import subprocess
 import tempfile
@@ -59,7 +61,7 @@ def wait_for(pipe, name):
             return event[name]
 
 
-def update_receipt(home):
+def update_receipt(home, updates, cleanup):
     """Set up the helper's existing install.json for the just-started packaged app."""
     bundle = MONITOR.parents[2]
     info = plistlib.loads((bundle / "Contents/Info.plist").read_bytes())
@@ -73,8 +75,9 @@ def update_receipt(home):
              "sha256": hashlib.sha256(archive.read_bytes()).hexdigest(),
              "url": f"{repository}/download/v{version}/{archive.name}"}
     release = {"tag": f"v{version}", "version": version, "page": f"{repository}/tag/v{version}", "asset": asset}
-    directory = home / "Library/Application Support/AIUsage Lite/Updates" / str(uuid.uuid4()).upper()
+    directory = updates / str(uuid.uuid4()).upper()
     directory.mkdir(mode=0o700, parents=True)
+    cleanup.callback(shutil.rmtree, directory)
     plan = {"target": bundle.as_uri(), "currentVersion": "0.0.0", "staged": {
         "directory": directory.as_uri(), "update": {"build": int(info["CFBundleVersion"]), "release": release, "asset": asset}}}
     (directory / "install.json").write_text(json.dumps(plan))
@@ -82,7 +85,7 @@ def update_receipt(home):
 
 
 def check_monitor():
-    with tempfile.TemporaryDirectory() as home:
+    with tempfile.TemporaryDirectory() as home, ExitStack() as cleanup:
         home = Path(home).resolve()
         env = {**os.environ, **fixture_environment(), "HOME": str(home), "CFFIXED_USER_HOME": str(home)}
         with subprocess.Popen([MONITOR, "--dashboard-helper", "--demo"], stdin=subprocess.PIPE,
@@ -95,13 +98,20 @@ def check_monitor():
                 if child.poll() is None:
                     child.kill()
         log = home / "monitor.jsonl"
-        transaction, version = update_receipt(home)
+        # The launcher and the installer resolve the current user's Library via
+        # Foundation. Overriding HOME doesn't set that directory on every macOS.
+        monitor_env = {**os.environ, **fixture_environment()}
+        foundation_home = subprocess.check_output(
+            ["swift", "-e", "import Foundation; print(FileManager.default.homeDirectoryForCurrentUser.path)"],
+            env=monitor_env, text=True, timeout=45).strip()
+        updates = Path(foundation_home) / "Library/Application Support/AIUsage Lite/Updates"
+        transaction, version = update_receipt(home, updates, cleanup)
         def events():
             if not log.exists():
                 return []
             return [json.loads(line) for line in log.read_text().splitlines(keepends=True) if line.endswith("\n")]
         with subprocess.Popen([MONITOR, "--demo", "--menu-bar-only", "--memory-probe", "--diagnostics", log,
-                               "--update-ack", transaction.name], env=env) as child:
+                               "--update-ack", transaction.name], env=monitor_env) as child:
             try:
                 deadline = time.monotonic() + 35
                 while not any(e["event"] == "memory-probe-idle" for e in events()):

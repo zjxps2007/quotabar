@@ -718,57 +718,64 @@ pub fn segments<'a>(
         vec2(ui.available_width().min(maximum_width), 22.),
         Sense::hover(),
     );
-    let field = if p.dark {
-        Color32::from_gray(52)
-    } else {
-        Color32::from_gray(241)
-    };
-    ui.painter().rect(
-        bounds,
-        5.,
-        field,
-        Stroke::new(1.0_f32, p.line),
-        StrokeKind::Inside,
-    );
     let width = bounds.width() / items.len() as f32;
-    for (index, &(key, title)) in items.iter().enumerate() {
-        let cell = Rect::from_min_size(
+    let cell_rect = |index: usize| {
+        Rect::from_min_size(
             bounds.min + vec2(index as f32 * width, 0.),
             vec2(width, bounds.height()),
-        );
+        )
+    };
+    let mut pressed = None;
+    let mut focus = None;
+    for (index, &(key, title)) in items.iter().enumerate() {
+        let cell = cell_rect(index);
         let response = ui.interact(cell, ui.auto_id_with(key), Sense::click());
-        let selected = key == current;
         response.widget_info(|| {
-            WidgetInfo::selected(WidgetType::RadioButton, ui.is_enabled(), selected, title)
+            WidgetInfo::selected(
+                WidgetType::RadioButton,
+                ui.is_enabled(),
+                key == current,
+                title,
+            )
         });
-        if selected {
-            let fill = if p.dark {
-                Color32::from_gray(88)
-            } else {
-                p.card
-            };
-            ui.painter().rect(
-                cell,
-                5.,
-                fill,
-                Stroke::new(1.0_f32, p.line),
-                StrokeKind::Inside,
-            );
+        if response.is_pointer_button_down_on() {
+            pressed = Some(index);
         }
         if response.has_focus() {
-            ui.painter()
-                .rect_stroke(cell, 5., Stroke::new(1.0_f32, p.muted), StrokeKind::Inside);
+            focus = Some(cell);
         }
-        ui.painter().text(
-            cell.center(),
-            Align2::CENTER_CENTER,
-            title,
-            FontId::proportional(13.),
-            p.ink,
-        );
         if response.clicked() {
             change = Some(key);
         }
+    }
+    if !crate::mac::draw_segments(ui, bounds, items, current, pressed) {
+        let field = Color32::from_gray(if p.dark { 52 } else { 241 });
+        let border = Stroke::new(1.0_f32, p.line);
+        ui.painter()
+            .rect(bounds, 5., field, border, StrokeKind::Inside);
+        for (index, &(key, title)) in items.iter().enumerate() {
+            let cell = cell_rect(index);
+            if key == current {
+                let fill = if p.dark {
+                    Color32::from_gray(88)
+                } else {
+                    p.card
+                };
+                ui.painter()
+                    .rect(cell, 5., fill, border, StrokeKind::Inside);
+            }
+            ui.painter().text(
+                cell.center(),
+                Align2::CENTER_CENTER,
+                title,
+                FontId::proportional(13.),
+                p.ink,
+            );
+        }
+    }
+    if let Some(cell) = focus {
+        ui.painter()
+            .rect_stroke(cell, 5., Stroke::new(1.0_f32, p.muted), StrokeKind::Inside);
     }
     change
 }

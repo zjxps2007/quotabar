@@ -130,6 +130,21 @@ def exercise(dashboard, executable, folder, library, fixture, observed):
             controls.request("press", "계정 연결")
             controls.request("sheet", expected={"sheet": True})
             observed.append({"connectionSheet": "opened"})
+            for segment, provider, path in (
+                ("파일 가져오기", "codex", Path(env["CODEX_HOME"]) / "auth.json"),
+                ("Gemini", "gemini", Path.home() / ".gemini" / "oauth_creds.json"),
+            ):
+                controls.request("press", segment)
+                time.sleep(0.35)
+                controls.request("press", "연결")
+                request = command("connect")
+                request_id = request.pop("id")
+                UUID(request_id)
+                if request != {"provider": provider, "path": str(path), "alias": ""}:
+                    raise ValueError(f"Unexpected {provider} file connection {request}")
+                observed.append({"fileConnection": request})
+                send({"reply": {"id": request_id, "error": "검증용 연결 오류"}})
+                time.sleep(0.35)
             controls.request("press", "Claude")
             time.sleep(0.35)
             controls.request("attempt", "연결")

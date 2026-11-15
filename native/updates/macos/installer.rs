@@ -147,7 +147,13 @@ pub fn acknowledge_launch() {
         return;
     };
     let target = PathBuf::from(NSBundle::mainBundle().bundlePath().to_string());
-    let _ = acknowledge(&data_root().join("Updates"), &target, transaction);
+    let updates = data_root().join("Updates");
+    if let Err(error) = acknowledge(&updates, &target, transaction) {
+        eprintln!(
+            "Cannot acknowledge update {transaction} in {}: {error}",
+            updates.display()
+        );
+    }
 }
 
 fn acknowledge(updates: &Path, target: &Path, transaction: Uuid) -> io::Result<()> {
