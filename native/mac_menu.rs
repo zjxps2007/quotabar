@@ -680,10 +680,20 @@ impl Status {
         logo.setContentTintColor(Some(&ink));
         view.rounded(18., 18., 24., 24., 24. * 108. / 456., &tile);
         root.addSubview(&logo);
-        view.label("QuotaBar", [50., 22., 180., 18.], 13., true, false);
+        let headline = unsafe {
+            NSFont::preferredFontForTextStyle_options(NSFontTextStyleHeadline, &NSDictionary::new())
+        };
+        view.label(
+            "QuotaBar",
+            [50., 22., 180., 18.],
+            headline.pointSize(),
+            true,
+            false,
+        )
+        .setFont(Some(&headline));
         view.button(
             "새로고침",
-            [286., 16., 29., 28.],
+            [296., 18., 16., 24.],
             REFRESH,
             &self.menus.target,
         );
@@ -691,7 +701,7 @@ impl Status {
             view.label(
                 "미리보기 · 샘플 데이터",
                 [18., 56., 292., 18.],
-                11.,
+                10.,
                 false,
                 true,
             );
@@ -699,7 +709,7 @@ impl Status {
         if accounts.is_empty() {
             view.label(text(&v, "empty"), [18., pre, 294., 16.], 12., false, true);
         } else {
-            view.label("남은 사용량", [18., pre, 294., 16.], 11., true, false);
+            view.label("남은 사용량", [18., pre, 294., 16.], 10., true, false);
             let distance_from_top = panel.contentViewController().and_then(|ctl| {
                 ctl.view().subviews().iter().find_map(|v| {
                     let scroll = v.downcast_ref::<NSScrollView>()?;
@@ -720,8 +730,13 @@ impl Status {
                 m,
             };
             let mut y = 0.;
+            let scale = self
+                .item
+                .button(m)
+                .and_then(|button| button.window())
+                .map_or(1., |window| window.backingScaleFactor());
             for (a, header) in accounts.iter().zip(&headers) {
-                list.account(a, header, y);
+                list.account(a, header, y, scale);
                 y += account_height(a, header.height) + 14.;
             }
             scroll.setDocumentView(Some(&content));
@@ -865,6 +880,7 @@ impl View<'_> {
         b.setFrame(self.rect(x, y, w, h));
         if tag == REFRESH {
             b.setBordered(false);
+            b.setContentTintColor(Some(&NSColor::labelColor()));
             b.setToolTip(Some(&s("새로고침")));
             if let Some(icon) = NSImage::imageWithSystemSymbolName_accessibilityDescription(
                 &s("arrow.clockwise"),
@@ -907,7 +923,7 @@ impl View<'_> {
         self.native.addSubview(&view);
         view
     }
-    fn account(&self, a: &Value, header: &AccountHeader, y: f64) {
+    fn account(&self, a: &Value, header: &AccountHeader, y: f64, scale: f64) {
         let dark = self.dark;
         let width = self.native.bounds().size.width;
         let provider = text(a, "provider");
@@ -930,9 +946,10 @@ impl View<'_> {
             cell.cellSizeForBounds(rect(0., 0., header.width, header.height))
                 .height
         });
+        let label_top = y + (header.height - label_height) / 2.;
         header.label.setFrame(self.rect(
             30.,
-            y + (header.height - label_height) / 2.,
+            (label_top * scale).round() / scale,
             header.width + 4.,
             label_height,
         ));
@@ -951,7 +968,7 @@ impl View<'_> {
         }
         let mut top = y + header.height + 8.;
         if periods(a).is_empty() {
-            self.label("데이터 대기 중", [0., top, 280., 18.], 11., false, true);
+            self.label("데이터 대기 중", [0., top, 280., 18.], 10., false, true);
             top += 23.;
         }
         for w in periods(a) {
@@ -1027,7 +1044,7 @@ impl View<'_> {
                         )
                     )
                 };
-                self.label(&reset, [0., top + 29., width, 14.], 9., false, true)
+                self.label(&reset, [0., top + 31., width, 14.], 9., false, true)
                     .setTextColor(Some(&NSColor::tertiaryLabelColor()));
                 top += 18.;
             }
