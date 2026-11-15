@@ -951,6 +951,10 @@ impl Assets {
         }];
         let (r, response) = ui.allocate_exact_size(Vec2::splat(size), Sense::hover());
         response.widget_info(|| WidgetInfo::labeled(WidgetType::Image, ui.is_enabled(), p));
+        #[cfg(target_os = "macos")]
+        let native = crate::mac::provider_logo(ui.ctx(), p, size * scale);
+        #[cfg(target_os = "macos")]
+        let texture = native.as_ref().unwrap_or(texture);
         ui.painter().image(
             texture.id(),
             Rect::from_center_size(r.center(), Vec2::splat(size * scale)),

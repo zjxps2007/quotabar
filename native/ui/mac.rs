@@ -25,27 +25,75 @@ use std::{
     time::{Duration, Instant},
 };
 
+fn bitmap_pixels(rep: &objc2_app_kit::NSBitmapImageRep) -> Option<image::RgbaImage> {
+    use objc2_app_kit::NSBitmapImageFileType;
+    use objc2_foundation::NSDictionary;
+    // AppKit's encoding takes no options for these in-memory PNGs.
+    let png = unsafe {
+        rep.representationUsingType_properties(NSBitmapImageFileType::PNG, &NSDictionary::new())
+    }?;
+    Some(image::load_from_memory(&png.to_vec()).ok()?.to_rgba8())
+}
+
 fn template_texture(
     ctx: &Context,
     name: &str,
     image: &objc2_app_kit::NSImage,
 ) -> Option<eframe::egui::TextureHandle> {
     use eframe::egui::{Color32, ColorImage, TextureOptions};
-    use objc2_app_kit::{NSBitmapImageFileType, NSBitmapImageRep};
-    use objc2_foundation::NSDictionary;
+    use objc2_app_kit::NSBitmapImageRep;
     let tiff = image.TIFFRepresentation()?;
     let rep = NSBitmapImageRep::imageRepWithData(&tiff)?;
-    // An empty encoding options dictionary takes no typed values.
-    let png = unsafe {
-        rep.representationUsingType_properties(NSBitmapImageFileType::PNG, &NSDictionary::new())
-    }?;
-    let bitmap = image::load_from_memory(&png.to_vec()).ok()?.to_rgba8();
+    let bitmap = bitmap_pixels(&rep)?;
     let size = [bitmap.width() as usize, bitmap.height() as usize];
     let mask = bitmap
         .pixels()
         .map(|p| Color32::from_white_alpha(p[3]))
         .collect();
     Some(ctx.load_texture(name, ColorImage::new(size, mask), TextureOptions::LINEAR))
+}
+
+pub fn provider_logo(
+    ctx: &Context,
+    provider: &str,
+    points: f32,
+) -> Option<eframe::egui::TextureHandle> {
+    use eframe::egui::{ColorImage, Id, TextureHandle, TextureOptions};
+    use objc2::AnyThread;
+    use objc2_app_kit::{
+        NSBitmapImageRep, NSDeviceRGBColorSpace, NSGraphicsContext, NSImageInterpolation,
+    };
+    use objc2_foundation::{NSPoint, NSRect, NSSize};
+
+    let pixels = (points * ctx.pixels_per_point()).round().max(1.) as isize;
+    let key = Id::new(("macOS provider artwork", provider, pixels));
+    if let Some(cached) = ctx.data(|d| d.get_temp::<TextureHandle>(key)) {
+        return Some(cached);
+    }
+    let side = pixels as f64;
+    let source = quotabar::mac_menu::provider_image(provider, side)?;
+    // Allocate the destination at backing resolution. AppKit then selects the
+    // source representation and performs SwiftUI BrandIcon's high-quality resize.
+    let bitmap = unsafe {
+        NSBitmapImageRep::initWithBitmapDataPlanes_pixelsWide_pixelsHigh_bitsPerSample_samplesPerPixel_hasAlpha_isPlanar_colorSpaceName_bytesPerRow_bitsPerPixel(
+            NSBitmapImageRep::alloc(), std::ptr::null_mut(), pixels, pixels, 8, 4, true,
+            false, NSDeviceRGBColorSpace, 0, 0,
+        )
+    }?;
+    let graphics = NSGraphicsContext::graphicsContextWithBitmapImageRep(&bitmap)?;
+    NSGraphicsContext::saveGraphicsState_class();
+    NSGraphicsContext::setCurrentContext(Some(&graphics));
+    graphics.setImageInterpolation(NSImageInterpolation::High);
+    source.drawInRect(NSRect::new(NSPoint::ZERO, NSSize::new(side, side)));
+    NSGraphicsContext::restoreGraphicsState_class();
+    let rgba = bitmap_pixels(&bitmap)?;
+    let texture = ctx.load_texture(
+        provider,
+        ColorImage::from_rgba_unmultiplied([pixels as usize; 2], rgba.as_raw()),
+        TextureOptions::LINEAR,
+    );
+    ctx.data_mut(|d| d.insert_temp(key, texture.clone()));
+    Some(texture)
 }
 
 pub fn menu_preview(

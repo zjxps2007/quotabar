@@ -59,6 +59,14 @@ def exercise(dashboard, executable, folder, library, fixture, observed):
         def command(name):
             return dashboard.wait_for(app.stdout, name)
 
+        def expect_no_command(name):
+            deadline = time.monotonic() + 0.6
+            while (remaining := deadline - time.monotonic()) > 0:
+                if not select.select([app.stdout], [], [], remaining)[0]:
+                    return
+                if name in dashboard.receive(app.stdout, deadline):
+                    raise ValueError(f"Unexpected {name} command")
+
         def route(name):
             value = command("route")["_0"]
             if value != name:
@@ -125,10 +133,7 @@ def exercise(dashboard, executable, folder, library, fixture, observed):
             controls.request("press", "Claude")
             time.sleep(0.35)
             controls.request("attempt", "연결")
-            deadline = time.monotonic() + 0.6
-            while time.monotonic() < deadline and select.select([app.stdout], [], [], max(0, deadline-time.monotonic()))[0]:
-                if "connect" in dashboard.receive(app.stdout, deadline):
-                    raise ValueError("Claude submitted without consent")
+            expect_no_command("connect")
             controls.request("press", consent)
             time.sleep(0.25)
             controls.request("press", "연결")
@@ -164,6 +169,21 @@ def exercise(dashboard, executable, folder, library, fixture, observed):
             if UUID(command("refresh")["_0"]) != UUID(account["id"]):
                 raise ValueError("The account menu refreshed a different account")
             observed.append({"accountMenuRefresh": True})
+            for button in ("취소", "삭제"):
+                controls.request("accountRemove", f"{account['name']} 계정 메뉴")
+                controls.request("sheet", expected={"sheet": True})
+                expect_no_command("remove")
+                controls.request("press", button)
+                controls.request("sheet", expected={"sheet": False})
+                if button == "취소":
+                    expect_no_command("remove")
+                    observed.append({"removeCancelled": True})
+                else:
+                    removed = UUID(command("remove")["_0"])
+                    if removed != UUID(account["id"]):
+                        raise ValueError(f"The confirmation removed a different account: {removed}")
+                    expect_no_command("remove")
+                    observed.append({"removeConfirmed": str(removed)})
             menu("QuotaBar 종료", "quit")
             send({"close": {}})
             if app.wait(timeout=8) != 0:
@@ -232,6 +252,12 @@ def capture_windows(dashboard, program, folder, library, fixture, output, theme)
                 capture(f"connect-{name.lower()}", sheet=True)
             controls.request("press", "취소")
             controls.request("sheet", expected={"sheet": False})
+            account = fixture["settings"]["accounts"][0]
+            controls.request("accountRemove", f"{account['name']} 계정 메뉴")
+            controls.request("sheet", expected={"sheet": True})
+            capture("remove", sheet=True)
+            controls.request("press", "취소")
+            controls.request("sheet", expected={"sheet": False})
         except (OSError, ValueError, KeyError, RuntimeError, EOFError, subprocess.SubprocessError) as error:
             observed["error"] = str(error)
         finally:
@@ -255,7 +281,7 @@ def compare_windows(dashboard, work, original, library):
             results[side][theme] = capture_windows(dashboard, program, work / f"windows-{side}-{theme}",
                                                   library, fixture, output, theme)
     for theme in dashboard.THEMES:
-        for route in (*dashboard.ROUTES, "popover-sample", "popover-empty", "popover-overflow"):
+        for route in (*dashboard.ROUTES, "remove", "popover-sample", "popover-empty", "popover-overflow"):
             name = f"{route}-{theme}"
             lhs, rhs = (dest / side / f"{name}.png" for side in ("original", "rust"))
             if not lhs.is_file() or not rhs.is_file():

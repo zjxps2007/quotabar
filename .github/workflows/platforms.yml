@@ -80,6 +80,7 @@ jobs:
       - name: Native Rust contracts
         run: cargo test --locked --workspace --all-targets
       - name: Self-contained x64 package
+        id: package
         run: ./windows/scripts/package.ps1
       - name: Packaged callback on PowerShell and Git Bash
         run: |
@@ -88,8 +89,11 @@ jobs:
       - name: Packaged Dashboard lifetime and parent crash cleanup
         run: ./windows/scripts/smoke.ps1
       - name: Per-user Windows EXE installer
+        id: installer
+        if: ${{ !cancelled() && steps.package.outcome == 'success' }}
         run: ./windows/scripts/package-installer.ps1
       - name: Install, reinstall, launch and uninstall
+        if: ${{ !cancelled() && steps.installer.outcome == 'success' }}
         run: ./windows/scripts/test-installer.ps1
       - uses: actions/upload-artifact@v7
         if: always()
@@ -112,6 +116,7 @@ jobs:
             artifacts/windows/*-dark.png
           if-no-files-found: error
       - name: Compare original Windows dashboard and tray with the Rust package
+        if: ${{ !cancelled() && steps.package.outcome == 'success' }}
         run: |
           $reference = Join-Path $env:RUNNER_TEMP 'quotabar-reference'
           git worktree add --detach $reference b5b9de048062e50e9ab4973ca48b75d9bf0d0e53

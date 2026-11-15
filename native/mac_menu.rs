@@ -8,8 +8,9 @@ use objc2::{
 };
 use objc2_app_kit::*;
 use objc2_foundation::{
-    NSBundle, NSData, NSDate, NSDateFormatter, NSDateFormatterStyle, NSNotification, NSNumber,
-    NSObject, NSObjectProtocol, NSOperationQueue, NSPoint, NSRect, NSRectEdge, NSSize, NSString,
+    NSAttributedString, NSBundle, NSData, NSDate, NSDateFormatter, NSDateFormatterStyle,
+    NSDictionary, NSNotification, NSNumber, NSObject, NSObjectProtocol, NSOperationQueue, NSPoint,
+    NSRect, NSRectEdge, NSSize, NSString,
 };
 use serde_json::Value;
 use std::{
@@ -120,6 +121,15 @@ fn image(data: &[u8], size: NSSize) -> Option<Retained<NSImage>> {
     let img = NSImage::initWithData(NSImage::alloc(), &NSData::with_bytes(data))?;
     img.setSize(size);
     Some(img)
+}
+
+pub fn provider_image(provider: &str, size: f64) -> Option<Retained<NSImage>> {
+    let bytes: &[u8] = match provider {
+        "Claude" => include_bytes!("../shared/assets/ClaudeLogo.svg"),
+        "Gemini" => include_bytes!("../shared/assets/GeminiLogo.png"),
+        _ => include_bytes!("../shared/assets/CodexLogo.png"),
+    };
+    image(bytes, NSSize::new(size, size))
 }
 
 fn appearance(mode: &str) -> Option<Retained<NSAppearance>> {
@@ -352,18 +362,20 @@ pub fn menu_preview(mode: &str, value: &str) -> Option<Retained<NSImage>> {
     }
 }
 
-fn title_image(mark: Option<&Retained<NSImage>>, font: &NSFont, title: &str) -> Retained<NSImage> {
-    use objc2_foundation::{NSAttributedString, NSDictionary};
-    let black = NSColor::blackColor();
+fn attributed_title(title: &str, font: &NSFont, color: &NSColor) -> Retained<NSAttributedString> {
     let keys = unsafe { [NSFontAttributeName, NSForegroundColorAttributeName] };
-    let attrs = NSDictionary::from_slices(&keys, &[font.as_ref() as &AnyObject, black.as_ref()]);
-    let text = unsafe {
+    let attrs = NSDictionary::from_slices(&keys, &[font.as_ref() as &AnyObject, color.as_ref()]);
+    unsafe {
         NSAttributedString::initWithString_attributes(
             NSAttributedString::alloc(),
             &s(title),
             Some(&attrs),
         )
-    };
+    }
+}
+
+fn title_image(mark: Option<&Retained<NSImage>>, font: &NSFont, title: &str) -> Retained<NSImage> {
+    let text = attributed_title(title, font, &NSColor::blackColor());
     let mark = mark.cloned();
     let logo = mark.as_ref().map_or(NSSize::ZERO, |image| image.size());
     let label = text.size();
@@ -614,11 +626,6 @@ impl Status {
         };
         let height = list_top + list_size + 14. + 20. + 18.;
         let root = NSView::initWithFrame(NSView::alloc(m), rect(0., 0., 330., height));
-        let view = View {
-            native: &root,
-            height,
-            m,
-        };
         let dark = dark.unwrap_or_else(|| {
             use objc2_foundation::NSArray;
             let aqua = s("NSAppearanceNameAqua");
@@ -629,6 +636,12 @@ impl Status {
                 .bestMatchFromAppearancesWithNames(&names)
                 .is_some_and(|name| name == dark_aqua)
         });
+        let view = View {
+            native: &root,
+            height,
+            dark,
+            m,
+        };
         // A SwiftUI popover resolves its content's semantic text and control
         // colors in the vibrant popover material, including when its body is opaque.
         let contrast = NSApplication::sharedApplication(m)
@@ -703,11 +716,12 @@ impl Status {
             let list = View {
                 native: &content,
                 height: list_height,
+                dark,
                 m,
             };
             let mut y = 0.;
             for (a, header) in accounts.iter().zip(&headers) {
-                list.account(a, header, y, dark);
+                list.account(a, header, y);
                 y += account_height(a, header.height) + 14.;
             }
             scroll.setDocumentView(Some(&content));
@@ -793,11 +807,19 @@ fn account_height(a: &Value, header: f64) -> f64 {
 struct View<'a> {
     native: &'a NSView,
     height: f64,
+    dark: bool,
     m: MainThreadMarker,
 }
 impl View<'_> {
     fn rect(&self, x: f64, y: f64, w: f64, h: f64) -> NSRect {
         rect(x, self.height - y - h, w, h)
+    }
+    fn overlay(&self, light: f64, dark: f64) -> Retained<NSColor> {
+        if self.dark {
+            NSColor::whiteColor().colorWithAlphaComponent(dark)
+        } else {
+            NSColor::blackColor().colorWithAlphaComponent(light)
+        }
     }
     fn label(
         &self,
@@ -853,11 +875,13 @@ impl View<'_> {
             }
         } else {
             b.setBordered(false);
-            b.setFont(Some(&NSFont::systemFontOfSize(10.)));
+            let font = NSFont::systemFontOfSize(10.);
+            let ink = NSColor::labelColor();
+            b.setAttributedTitle(&attributed_title(title, &font, &ink));
             b.setWantsLayer(true);
             if let Some(layer) = b.layer() {
                 layer.setCornerRadius(5.);
-                layer.setBackgroundColor(Some(&NSColor::separatorColor().CGColor()));
+                layer.setBackgroundColor(Some(&self.overlay(0.10, 0.26).CGColor()));
             }
         }
         self.native.addSubview(&b);
@@ -883,21 +907,17 @@ impl View<'_> {
         self.native.addSubview(&view);
         view
     }
-    fn account(&self, a: &Value, header: &AccountHeader, y: f64, dark: bool) {
+    fn account(&self, a: &Value, header: &AccountHeader, y: f64) {
+        let dark = self.dark;
         let width = self.native.bounds().size.width;
         let provider = text(a, "provider");
-        let bytes: &[u8] = match provider {
-            "Claude" => include_bytes!("../shared/assets/ClaudeLogo.svg"),
-            "Gemini" => include_bytes!("../shared/assets/GeminiLogo.png"),
-            _ => include_bytes!("../shared/assets/CodexLogo.png"),
-        };
         let size = 24.
             * match provider {
                 "Claude" => 0.75,
                 "Gemini" => 0.82,
                 _ => 1.,
             };
-        if let Some(img) = image(bytes, NSSize::new(size, size)) {
+        if let Some(img) = provider_image(provider, size) {
             self.image(
                 &img,
                 (24. - size) / 2.,
@@ -1028,7 +1048,7 @@ impl View<'_> {
             y + account_height(a, header.height) - 1.,
             width,
             1.,
-            &NSColor::separatorColor(),
+            &self.overlay(0.10, 0.15),
         );
     }
 }

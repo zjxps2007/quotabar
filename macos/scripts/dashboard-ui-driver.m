@@ -151,7 +151,10 @@ static BOOL clickControl(NSWindow *window, NSString *label) {
     else if ([label isEqual:@"아이콘만"]) { x = 609; y = 387; }
     else if ([label isEqual:@"이름 + 잔여량"]) { x = 329; y = 387; }
     else if ([label isEqual:@"Dock에 앱 아이콘 표시"]) { x = w - 83; y = 292; }
-    else if ([label hasSuffix:@" 계정 메뉴"]) { x = w - 68; y = 209; }
+    else if ([label hasSuffix:@" 계정 메뉴"]) {
+        x = w - 68;
+        y = [NSProcessInfo.processInfo.arguments containsObject:@"--demo"] ? 240 : 209;
+    }
     else if ([label hasSuffix:@") 모니터링"]) { x = w - 60; y = 251; }
     else if ([label isEqual:@"Claude"]) { x = w * 0.55; y = 116; }
     else if ([label isEqual:@"Gemini"]) { x = w * 0.81; y = 116; }
@@ -183,20 +186,21 @@ static NSDictionary *perform(NSDictionary *request) {
         NSString *match = [window.effectiveAppearance bestMatchFromAppearancesWithNames:@[NSAppearanceNameAqua, NSAppearanceNameDarkAqua]];
         return @{@"appearance": [match isEqual:NSAppearanceNameDarkAqua] ? @"dark" : @"light"};
     }
-    if ([op isEqual:@"accountRefresh"]) {
-        // Let the application's real menu open, then choose its enabled refresh item.
-        // Tracking runs a nested AppKit event loop, so use its mode to deliver the choice.
+    if ([op isEqual:@"accountRefresh"] || [op isEqual:@"accountRemove"]) {
+        // Choose the item in the application's actual tracking menu, whose
+        // nested event loop runs in NSEventTrackingRunLoopMode.
+        NSString *title = [op isEqual:@"accountRefresh"] ? @"새로고침" : @"계정 삭제…";
         __block id token;
         NSNotificationCenter *center = NSNotificationCenter.defaultCenter;
         token = [center addObserverForName:NSMenuDidBeginTrackingNotification object:nil queue:nil usingBlock:^(NSNotification *notice) {
             NSMenu *menu = notice.object;
-            NSMenuItem *refresh = [menu itemWithTitle:@"새로고침"];
-            if (!refresh || ![menu itemWithTitle:@"계정 삭제…"]) return;
+            if (![menu itemWithTitle:@"새로고침"] || ![menu itemWithTitle:@"계정 삭제…"]) return;
+            NSMenuItem *item = [menu itemWithTitle:title];
             [center removeObserver:token];
             token = nil;
             CFRunLoopPerformBlock(CFRunLoopGetMain(), (__bridge CFStringRef)NSEventTrackingRunLoopMode, ^{
                 [menu update];
-                if (refresh.enabled) [menu performActionForItemAtIndex:[menu indexOfItem:refresh]];
+                if (item.enabled) [menu performActionForItemAtIndex:[menu indexOfItem:item]];
                 [menu cancelTracking];
             });
             CFRunLoopWakeUp(CFRunLoopGetMain());
