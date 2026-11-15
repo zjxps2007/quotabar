@@ -13,7 +13,31 @@ static NSWindow *dashboardWindow(void) {
 
 // Both helpers use this identical WindowServer capture path. Only the current
 // process can supply windows, and the ID must match the selected AppKit window.
-static void captureRegion(NSWindow *root, NSRect target, BOOL popover, NSURL *output, void (^done)(NSDictionary *)) {
+typedef NS_ENUM(NSInteger, CaptureMode) { DashboardWindow, PopoverOnDisplay, PopoverWindow };
+
+// A missing process surface may be returned as opaque black. Require real
+// foreground detail in the header and the button row of the same popover.
+static BOOL hasPopoverDetails(NSBitmapImageRep *rep, CGFloat scale) {
+    NSInteger step = MAX(1, lround(2 * scale)), inset = lround(12 * scale);
+    NSInteger band = MIN(rep.pixelsHigh / 2, lround(44 * scale));
+    for (int end = 0; end < 2; end++) {
+        CGFloat low = 1, high = 0;
+        for (NSInteger y = inset; y < band; y += step) {
+            NSInteger row = end ? rep.pixelsHigh - y - 1 : y;
+            for (NSInteger x = inset; x < rep.pixelsWide - inset; x += step) {
+                NSColor *color = [[rep colorAtX:x y:row] colorUsingColorSpace:NSColorSpace.sRGBColorSpace];
+                if (color.alphaComponent < 0.9) continue;
+                CGFloat value = (color.redComponent + color.greenComponent + color.blueComponent) / 3;
+                low = MIN(low, value);
+                high = MAX(high, value);
+            }
+        }
+        if (high - low < 0.15) return NO;
+    }
+    return YES;
+}
+
+static void captureRegion(NSWindow *root, NSRect target, CaptureMode mode, NSURL *output, void (^done)(NSDictionary *)) {
     if (!root) { done(@{@"pending": @"window"}); return; }
     CGWindowID number = (CGWindowID)root.windowNumber;
     CGFloat scale = root.backingScaleFactor;
@@ -23,13 +47,6 @@ static void captureRegion(NSWindow *root, NSRect target, BOOL popover, NSURL *ou
                                round(NSWidth(target)*scale), round(NSHeight(target)*scale));
     NSScreen *screen = root.screen ?: NSScreen.mainScreen;
     CGDirectDisplayID displayID = [screen.deviceDescription[@"NSScreenNumber"] unsignedIntValue];
-    CGRect displayRegion = CGRectMake(NSMinX(target) - NSMinX(screen.frame), NSMaxY(screen.frame) - NSMaxY(target),
-                                      NSWidth(target), NSHeight(target));
-    if (popover && (!screen || !NSContainsRect(screen.frame, target))) {
-        done(@{@"error": @"popover extends outside desktop", @"view": NSStringFromRect(target),
-               @"display": NSStringFromRect(screen.frame)});
-        return;
-    }
     [SCShareableContent getCurrentProcessShareableContentWithCompletionHandler:^(SCShareableContent *content, NSError *error) {
         if (error) { done(@{@"error": error.localizedDescription}); return; }
         for (SCWindow *item in content.windows) {
@@ -43,20 +60,28 @@ static void captureRegion(NSWindow *root, NSRect target, BOOL popover, NSURL *ou
             config.ignoreShadowsSingleWindow = YES;
             config.includeChildWindows = includeSheet;
             config.colorSpaceName = kCGColorSpaceSRGB;
-            if (popover) {
-                // A popover can share a WindowServer group with the status bar.
-                // Use the view's actual screen coordinates for the display crop.
+            if (mode == PopoverWindow) {
+                config.ignoreGlobalClipSingleWindow = YES;
+            } else if (mode == PopoverOnDisplay) {
+                // Menu extras can be hosted remotely. The process-local NSWindow
+                // origin is then unrelated to its actual WindowServer origin.
                 SCDisplay *matched = nil;
                 for (SCDisplay *display in content.displays) {
                     if (display.displayID == displayID) { matched = display; break; }
                 }
                 if (!matched) { done(@{@"error": @"popover display not available"}); return; }
-                // currentProcessShareableContent contains only this isolated
-                // fixture. Include its related popover and status-item surfaces.
-                filter = [[SCContentFilter alloc] initWithDisplay:matched includingWindows:content.windows];
-                config.sourceRect = displayRegion;
+                CGRect onScreen = CGRectMake(item.frame.origin.x + region.origin.x/scale,
+                                             item.frame.origin.y + region.origin.y/scale,
+                                             NSWidth(target), NSHeight(target));
+                if (!CGRectContainsRect(matched.frame, onScreen)) {
+                    done(@{@"error": @"popover content outside display", @"actual": NSStringFromRect(onScreen),
+                           @"display": NSStringFromRect(matched.frame)}); return;
+                }
+                filter = [[SCContentFilter alloc] initWithDisplay:matched includingWindows:@[item]];
+                config.sourceRect = CGRectOffset(onScreen, -matched.frame.origin.x, -matched.frame.origin.y);
                 config.width = lround(region.size.width);
                 config.height = lround(region.size.height);
+                config.backgroundColor = CGColorGetConstantColor(kCGColorClear);
                 crop.origin = CGPointZero;
             }
             [SCScreenshotManager captureImageWithFilter:filter configuration:config completionHandler:^(CGImageRef frame, NSError *failed) {
@@ -77,7 +102,7 @@ static void captureRegion(NSWindow *root, NSRect target, BOOL popover, NSURL *ou
                     NSColor *sample = [rep colorAtX:edges[i].x y:edges[i].y];
                     if (!sample || sample.alphaComponent < 0.9) {
                         done(@{@"error": @"window capture has a clipped edge", @"view": NSStringFromRect(target),
-                               @"region": NSStringFromRect(displayRegion), @"window": NSStringFromRect(item.frame),
+                               @"region": NSStringFromRect(config.sourceRect), @"window": NSStringFromRect(item.frame),
                                @"edge": NSStringFromPoint(edges[i])});
                         return;
                     }
@@ -90,6 +115,10 @@ static void captureRegion(NSWindow *root, NSRect target, BOOL popover, NSURL *ou
                                @"crop": NSStringFromRect(crop)});
                         return;
                     }
+                }
+                if (mode != DashboardWindow && !hasPopoverDetails(rep, scale)) {
+                    done(@{@"error": @"missing popover header or footer", @"window": NSStringFromRect(item.frame),
+                           @"region": NSStringFromRect(config.sourceRect)}); return;
                 }
                 NSData *png = [rep representationUsingType:NSBitmapImageFileTypePNG properties:@{}];
                 if (![png writeToURL:output atomically:YES]) { done(@{@"error": @"could not save PNG"}); return; }
@@ -105,37 +134,78 @@ static NSDictionary *rectangle(NSRect r) {
     return @{@"x": @(NSMinX(r)), @"y": @(NSMinY(r)), @"width": @(NSWidth(r)), @"height": @(NSHeight(r))};
 }
 
-int QBTestCaptureView(void *rawView, const char *filename) {
-    NSView *view = (__bridge NSView *)rawView;
+static __weak NSPopover *shownPopover;
+static NSPanel *fixtureAnchor;
+
+static NSRect actualViewFrame(NSView *view) {
     NSWindow *window = view.window;
-    if (!window || !NSThread.isMainThread) return 0;
-    NSRect target = [window convertRectToScreen:[view convertRect:view.bounds toView:nil]];
-    NSRect anchored = target;
-    // The test status item can be at the very edge of a small CI display.
-    // Move the real popup onto the display without resizing or redrawing its content.
-    NSScreen *screen = window.screen ?: NSScreen.mainScreen;
-    if (!screen) return 0;
-    NSRect safe = NSInsetRect(screen.visibleFrame, 8, 8);
-    CGFloat x = NSMidX(safe) - NSWidth(target)/2;
-    CGFloat y = MAX(NSMinY(safe), MIN(NSMinY(target), NSMaxY(safe) - NSHeight(target)));
-    [window setFrameOrigin:NSMakePoint(NSMinX(window.frame) + x - NSMinX(target),
-                                       NSMinY(window.frame) + y - NSMinY(target))];
-    [NSRunLoop.mainRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.25]];
-    target = [window convertRectToScreen:[view convertRect:view.bounds toView:nil]];
-    NSURL *file = [NSURL fileURLWithFileSystemRepresentation:filename isDirectory:NO relativeToURL:nil];
-    NSDictionary *position = @{@"display": rectangle(screen.frame), @"anchored": rectangle(anchored),
-                               @"captured": rectangle(target), @"scale": @(window.backingScaleFactor),
-                               @"anchoredFullyOnScreen": @(NSContainsRect(screen.frame, anchored))};
-    NSURL *geometry = [[file URLByDeletingPathExtension] URLByAppendingPathExtension:@"geometry.json"];
-    [[NSJSONSerialization dataWithJSONObject:position options:0 error:NULL] writeToURL:geometry atomically:YES];
+    NSArray *entries = CFBridgingRelease(CGWindowListCopyWindowInfo(kCGWindowListOptionIncludingWindow,
+                                                                    (CGWindowID)window.windowNumber));
+    NSDictionary *entry = entries.firstObject;
+    NSDictionary *bounds = entry[(__bridge NSString *)kCGWindowBounds];
+    CGRect frame;
+    if (!bounds || !CGRectMakeWithDictionaryRepresentation((__bridge CFDictionaryRef)bounds, &frame))
+        return NSZeroRect;
+    NSRect local = [view convertRect:view.bounds toView:nil];
+    CGFloat screenTop = NSMaxY(NSScreen.screens.firstObject.frame);
+    return NSMakeRect(frame.origin.x + NSMinX(local),
+                      screenTop - CGRectGetMinY(frame) - NSHeight(window.frame) + NSMinY(local),
+                      NSWidth(local), NSHeight(local));
+}
+
+static NSDictionary *capturePopoverFrame(NSView *view, CaptureMode mode, NSURL *file) {
     __block NSDictionary *result;
-    captureRegion(window, target, YES, file, ^(NSDictionary *value) {
+    NSRect target = [view.window convertRectToScreen:[view convertRect:view.bounds toView:nil]];
+    captureRegion(view.window, target, mode, file, ^(NSDictionary *value) {
         dispatch_async(dispatch_get_main_queue(), ^{ result = value; });
     });
-    NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:6];
+    NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:3];
     while (!result && deadline.timeIntervalSinceNow > 0)
         [NSRunLoop.mainRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.025]];
-    if (!result[@"width"]) NSLog(@"Popover window capture: %@", result);
+    return result ?: @{@"error": @"popover capture timed out"};
+}
+
+int QBTestCaptureView(void *rawView, const char *filename) {
+    NSView *view = (__bridge NSView *)rawView;
+    NSScreen *screen = view.window.screen ?: NSScreen.mainScreen;
+    if (!view.window || !screen || !NSThread.isMainThread) return 0;
+    NSURL *file = [NSURL fileURLWithFileSystemRepresentation:filename isDirectory:NO relativeToURL:nil];
+    NSRect anchored = actualViewFrame(view);
+    NSString *method = @"status item · display";
+    NSDictionary *result = capturePopoverFrame(view, PopoverOnDisplay, file);
+    NSMutableArray *attempts = [NSMutableArray arrayWithObject:result];
+    NSPopover *popover = shownPopover;
+    if (!result[@"width"] && popover.isShown && popover.contentViewController.view.window == view.window) {
+        // AppKit can re-anchor a shown NSPopover without closing it, replacing its
+        // content controller or changing its size. An ordinary on-display view
+        // avoids the private coordinate system of the hosted menu extra.
+        NSRect area = screen.visibleFrame;
+        NSRect anchor = NSMakeRect(NSMidX(area) - 10, NSMaxY(area) - 32, 20, 20);
+        fixtureAnchor = [[NSPanel alloc] initWithContentRect:anchor
+                      styleMask:NSWindowStyleMaskBorderless | NSWindowStyleMaskNonactivatingPanel
+                      backing:NSBackingStoreBuffered defer:NO];
+        fixtureAnchor.releasedWhenClosed = NO;
+        fixtureAnchor.hidesOnDeactivate = NO;
+        fixtureAnchor.hasShadow = NO;
+        [fixtureAnchor orderFrontRegardless];
+        [popover showRelativeToRect:fixtureAnchor.contentView.bounds ofView:fixtureAnchor.contentView preferredEdge:NSMinYEdge];
+        [NSRunLoop.mainRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.4]];
+        method = @"center anchor · display";
+        result = capturePopoverFrame(view, PopoverOnDisplay, file);
+        [attempts addObject:result];
+    }
+    if (!result[@"width"]) {
+        method = @"desktop-independent popover window";
+        result = capturePopoverFrame(view, PopoverWindow, file);
+        [attempts addObject:result];
+    }
+    NSDictionary *position = @{@"display": rectangle(screen.frame), @"anchored": rectangle(anchored),
+                               @"captured": rectangle(actualViewFrame(view)), @"scale": @(view.window.backingScaleFactor),
+                               @"anchoredFullyOnScreen": @(!NSIsEmptyRect(anchored) && NSContainsRect(screen.frame, anchored)),
+                               @"method": method, @"attempts": attempts};
+    NSURL *geometry = [[file URLByDeletingPathExtension] URLByAppendingPathExtension:@"geometry.json"];
+    [[NSJSONSerialization dataWithJSONObject:position options:0 error:NULL] writeToURL:geometry atomically:YES];
+    if (!result[@"width"]) NSLog(@"Popover window capture: %@", position);
     return result[@"width"] != nil;
 }
 
@@ -314,6 +384,12 @@ static void selectAccountItem(NSDictionary *request, void (^reply)(NSDictionary 
 }
 
 __attribute__((constructor)) static void startDashboardDriver(void) {
+    if (getenv("QUOTABAR_TEST_POPOVER_FRAME")) {
+        @autoreleasepool {
+            [NSNotificationCenter.defaultCenter addObserverForName:NSPopoverDidShowNotification object:nil queue:nil
+                usingBlock:^(NSNotification *note) { shownPopover = note.object; }];
+        }
+    }
     const char *path = getenv("QUOTABAR_TEST_UI_DIRECTORY");
     if (!path) return;
     @autoreleasepool {
@@ -342,7 +418,7 @@ __attribute__((constructor)) static void startDashboardDriver(void) {
                     if ([request[@"op"] isEqual:@"snapshot"]) {
                         NSWindow *window = dashboardWindow();
                         if ([request[@"label"] isEqual:@"sheet"]) window = window.attachedSheet;
-                        captureRegion(window.sheetParent ?: window, window.frame, NO, [dir URLByAppendingPathComponent:@"frame.png"], reply);
+                        captureRegion(window.sheetParent ?: window, window.frame, DashboardWindow, [dir URLByAppendingPathComponent:@"frame.png"], reply);
                         return;
                     }
                     if ([request[@"op"] isEqual:@"accountRefresh"] || [request[@"op"] isEqual:@"accountRemove"]) {

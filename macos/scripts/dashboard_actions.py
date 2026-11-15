@@ -224,7 +224,7 @@ def capture_windows(dashboard, program, folder, library, fixture, output, theme)
             try:
                 observed[route] = controls.request("snapshot", "sheet" if sheet else "dashboard")
                 shutil.copyfile(folder / "frame.png", output / f"{route}-{theme}.png")
-                if route in ("dashboard", "connect-claude"):
+                if route in ("dashboard", "connect-claude", "remove"):
                     # A second frame from the untouched window measures e.g. caret blinking.
                     time.sleep(0.55)
                     controls.request("snapshot", "sheet" if sheet else "dashboard")
