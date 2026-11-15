@@ -308,8 +308,8 @@ impl Dashboard {
                         });
                         let scale = if MAC { 1. } else { ctx.pixels_per_point() };
                         let pixels = (scroll.content_size.y + 56.) * scale;
-                        let measured =
-                            (if MAC { pixels.ceil() } else { pixels.round() } / scale).min(limit);
+                        // SizeToContent reserves the full natural extent of the controls.
+                        let measured = (pixels.ceil() / scale).min(limit);
                         if c.content_height != Some(measured) {
                             c.content_height = Some(measured);
                             ctx.send_viewport_cmd(ViewportCommand::InnerSize(vec2(

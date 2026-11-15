@@ -567,43 +567,38 @@ impl Dashboard {
         p.frame(20).show(ui, |ui| {
             ui.set_width(ui.available_width());
             settings_title(ui, "데이터 저장", "lock.shield", p);
-            ui.add_space(14.);
-            caption(
-                ui,
-                if MAC {
-                    "Codex · Gemini 로그인은 이 Mac의 사용자 전용 파일에 저장됩니다. 키체인 승인창을 사용하지 않으며, 별도 암호화 대신 파일 접근 권한으로 보호됩니다."
-                } else {
-                    "연결 정보는 현재 Windows 사용자만 열 수 있도록 보호됩니다."
-                },
-                p,
-            );
-            if let Some(dir) = self.state.raw["dataDirectory"].as_str() {
-                ui.add_space(6.);
-                caption(ui, format!("데이터 위치: {dir}"), p);
+            #[cfg(windows)]
+            {
+                ui.add_space(14.);
+                caption(ui, "연결 정보는 현재 Windows 사용자만 열 수 있도록 보호됩니다.", p);
+                if let Some(dir) = self.state.raw["dataDirectory"].as_str() {
+                    ui.add_space(6.);
+                    caption(ui, format!("데이터 위치: {dir}"), p);
+                }
             }
             #[cfg(target_os = "macos")]
             {
                 ui.add_space(12.);
-                caption(ui, "설정 위치", p);
+                let notice = "Codex · Gemini 로그인은 이 Mac의 사용자 전용 파일에 저장됩니다. 키체인 승인창을 사용하지 않으며, 별도 암호화 대신 파일 접근 권한으로 보호됩니다.";
+                if crate::mac_text::paragraph(ui, notice, 12., 0., p.ink).is_none() {
+                    label(ui, notice, 12., false, p.ink);
+                }
+                ui.add_space(12.);
+                system_label(ui, "설정 위치", 10., false, p.muted);
+                ui.add_space(12.);
                 ui.add(Label::new(RichText::new(crate::mac::data_path().to_string_lossy()).monospace().size(11.)).selectable(true));
                 ui.add_space(12.);
-            }
-            #[cfg(target_os = "macos")]
-            if ui
-                .add_enabled_ui(!self.state.demo, |ui| {
-                    action(ui, "데이터 폴더 열기", false, p)
-                })
-                .inner
-                .clicked()
-            {
-                crate::mac::open_data();
+                if ui.add_enabled_ui(!self.state.demo, |ui| sheet_button(ui, "데이터 폴더 열기", p)).inner.clicked() {
+                    crate::mac::open_data();
+                }
             }
         });
         ui.add_space(20.);
         p.frame(20).show(ui,|ui|{ui.set_width(ui.available_width());settings_title(ui,"오픈소스 라이선스","doc.text",p);ui.add_space(14.);
             label(ui,"AIUsage · sylearn 및 기여자",12.,true,p.ink);ui.add_space(6.);caption(ui,"Apache License 2.0",p);ui.add_space(12.);
             label(ui,"QuotaBar는 AIUsage의 사용량 조회 코드와 Claude 연결 기능 등을 재사용·수정한 독립 프로젝트입니다.",12.,false,p.ink);
-            ui.add_space(14.);ui.horizontal(|ui|{if sheet_button(ui,"라이선스 및 고지 보기",p).clicked(){self.dialog=Some(Dialog::licenses());}
+            ui.add_space(14.);ui.horizontal(|ui|{if MAC { ui.spacing_mut().item_spacing.x = 16.; }
+                if sheet_button(ui,"라이선스 및 고지 보기",p).clicked(){self.dialog=Some(Dialog::licenses());}
                 ui.hyperlink_to("원본 프로젝트","https://github.com/sylearn/AIUsage");});
         });
     }
