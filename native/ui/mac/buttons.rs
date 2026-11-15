@@ -3,8 +3,9 @@ use block2::StackBlock;
 use eframe::egui::*;
 use objc2::{MainThreadMarker, MainThreadOnly, rc::Retained};
 use objc2_app_kit::{
-    NSAppearanceCustomization, NSApplication, NSButton, NSCellImagePosition, NSControl, NSImage,
-    NSPopUpButton, NSSegmentDistribution, NSSegmentSwitchTracking, NSSegmentedControl,
+    NSAppearanceCustomization, NSApplication, NSButton, NSCellImagePosition, NSColor, NSControl,
+    NSControlSize, NSFont, NSImage, NSPopUpButton, NSSegmentDistribution, NSSegmentSwitchTracking,
+    NSSegmentedControl,
 };
 use objc2_foundation::{NSArray, NSPoint, NSRect, NSSize, NSString};
 
@@ -94,12 +95,23 @@ fn control_image(
     Some(image)
 }
 
-fn push_button(main: MainThreadMarker, title: &str, symbol: Option<&str>) -> Retained<NSButton> {
+fn push_button(
+    main: MainThreadMarker,
+    title: &str,
+    symbol: Option<&str>,
+    control_size: NSControlSize,
+) -> Retained<NSButton> {
     // The native button draws its symbol, bezel and title together; egui owns
     // the dashboard action and its accessible hit target.
     let button = unsafe {
         NSButton::buttonWithTitle_target_action(&NSString::from_str(title), None, None, main)
     };
+    if control_size != NSControlSize::Regular {
+        button.setControlSize(control_size);
+        button.setFont(Some(&NSFont::systemFontOfSize(
+            NSFont::systemFontSizeForControlSize(control_size),
+        )));
+    }
     if let Some(icon) = symbol.and_then(|name| {
         NSImage::imageWithSystemSymbolName_accessibilityDescription(&NSString::from_str(name), None)
     }) {
@@ -113,16 +125,17 @@ fn button_image(
     ui: &Ui,
     title: &str,
     symbol: Option<&str>,
+    control_size: NSControlSize,
     size: Vec2,
     pressed: bool,
 ) -> Option<ControlImage> {
     control_image(
         ui,
         "AppKit push button",
-        Id::new((title, symbol, pressed)),
+        Id::new((title, symbol, control_size, pressed)),
         size,
         |main| {
-            let button = push_button(main, title, symbol);
+            let button = push_button(main, title, symbol, control_size);
             button.setHighlighted(pressed);
             button.into_super()
         },
@@ -175,9 +188,16 @@ fn popup_button(
     main: MainThreadMarker,
     labels: &[impl AsRef<str>],
     selected: usize,
+    dark: bool,
 ) -> Retained<NSPopUpButton> {
     let button =
         NSPopUpButton::initWithFrame_pullsDown(NSPopUpButton::alloc(main), NSRect::ZERO, false);
+    let accent = if dark {
+        NSColor::whiteColor()
+    } else {
+        NSColor::blackColor()
+    };
+    button.setBezelColor(Some(&accent));
     let titles: Vec<_> = labels
         .iter()
         .map(|value| NSString::from_str(value.as_ref()))
@@ -209,7 +229,7 @@ pub fn popup_choice(
         Id::new(title),
         rect.size(),
         |main| {
-            popup_button(main, labels, selected)
+            popup_button(main, labels, selected, ui.visuals().dark_mode)
                 .into_super()
                 .into_super()
         },
@@ -269,7 +289,7 @@ pub fn popup_choice(
             f64::from(rect.height()) * zoom,
         ),
     );
-    let button = popup_button(main, labels, selected);
+    let button = popup_button(main, labels, selected, ui.visuals().dark_mode);
     button.setFrame(button.frameForAlignmentRect(alignment));
     view.addSubview(&button);
     // AppKit tracks the menu synchronously, including Escape, arrow keys and type selection.
@@ -285,14 +305,15 @@ pub fn standard_button(
     ui: &mut Ui,
     title: &str,
     symbol: Option<&str>,
+    control_size: NSControlSize,
     focus: Color32,
 ) -> Option<Response> {
-    let size = if symbol.is_some() {
+    let size = if symbol.is_some() || control_size != NSControlSize::Regular {
         let main = MainThreadMarker::new()?;
-        let key = Id::new(("AppKit button alignment size", title, symbol));
+        let key = Id::new(("AppKit button alignment size", title, symbol, control_size));
         ui.data_mut(|d| {
             *d.get_temp_mut_or_insert_with(key, || {
-                let button = push_button(main, title, symbol);
+                let button = push_button(main, title, symbol, control_size);
                 button.sizeToFit();
                 let size = button.alignmentRectForFrame(button.frame()).size;
                 vec2(size.width as f32, size.height as f32)
@@ -309,10 +330,10 @@ pub fn standard_button(
                 + 6.,
         )
     };
-    let normal = button_image(ui, title, symbol, size, false)?;
+    let normal = button_image(ui, title, symbol, control_size, size, false)?;
     let (rect, response) = ui.allocate_exact_size(size, Sense::click());
     let image = if response.is_pointer_button_down_on() {
-        button_image(ui, title, symbol, size, true).unwrap_or(normal)
+        button_image(ui, title, symbol, control_size, size, true).unwrap_or(normal)
     } else {
         normal
     };

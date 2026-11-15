@@ -645,10 +645,8 @@ impl Dashboard {
         let name = a.control_label(tray_label);
         #[cfg(target_os = "macos")]
         let switch = {
-            let label_width = crate::mac_text::natural_size(ui, tray_label, 10., false)
-                .map_or(54., |size| size.x.ceil());
             ui.allocate_ui_with_layout(
-                vec2(label_width + 8. + 26., 15.),
+                vec2(mini_toggle_width(ui, tray_label), 15.),
                 Layout::left_to_right(Align::Center),
                 |ui| named_toggle(ui, tray_label, &name, a.tray, p.tint(a.provider), p),
             )

@@ -548,7 +548,13 @@ pub fn action_on(ui: &mut Ui, s: &str, primary: bool, p: Palette, backdrop: Colo
     };
     if !primary
         && symbol.is_some()
-        && let Some(response) = crate::mac::standard_button(ui, text, symbol, p.focus_ring)
+        && let Some(response) = crate::mac::standard_button(
+            ui,
+            text,
+            symbol,
+            objc2_app_kit::NSControlSize::Regular,
+            p.focus_ring,
+        )
     {
         return response;
     }
@@ -643,10 +649,28 @@ pub fn action_on(ui: &mut Ui, s: &str, primary: bool, p: Palette, backdrop: Colo
 }
 pub fn sheet_button(ui: &mut Ui, title: &str, p: Palette) -> Response {
     #[cfg(target_os = "macos")]
-    if let Some(response) = crate::mac::standard_button(ui, title, None, p.focus_ring) {
+    if let Some(response) = crate::mac::standard_button(
+        ui,
+        title,
+        None,
+        objc2_app_kit::NSControlSize::Regular,
+        p.focus_ring,
+    ) {
         return response;
     }
     action(ui, title, false, p)
+}
+
+#[cfg(target_os = "macos")]
+pub fn small_button(ui: &mut Ui, title: &str, p: Palette) -> Response {
+    crate::mac::standard_button(
+        ui,
+        title,
+        None,
+        objc2_app_kit::NSControlSize::Small,
+        p.focus_ring,
+    )
+    .unwrap_or_else(|| action(ui, title, false, p))
 }
 
 pub fn action(ui: &mut Ui, s: &str, primary: bool, p: Palette) -> Response {
@@ -882,6 +906,20 @@ pub fn checkbox(ui: &mut Ui, checked: &mut bool, title: &str, size: f32, p: Pale
     );
     response
 }
+#[cfg(target_os = "macos")]
+pub fn mini_toggle_width(ui: &Ui, title: &str) -> f32 {
+    let caption = crate::mac_text::natural_size(ui, title, 10., false).map_or_else(
+        || {
+            ui.painter()
+                .layout_no_wrap(title.into(), FontId::proportional(10.), Color32::WHITE)
+                .size()
+                .x
+        },
+        |size| size.x,
+    );
+    caption.ceil() + 8. + 26.
+}
+
 pub fn named_toggle(
     ui: &mut Ui,
     s: &str,

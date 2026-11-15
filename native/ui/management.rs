@@ -292,34 +292,38 @@ impl Dashboard {
                     };
                     crate::mac::symbol(ui.painter(), icon, name, 11., false, p.muted);
                 }
-                caption(ui, connection, p);
+                system_label(ui, connection, if MAC { 10. } else { 11. }, false, p.muted);
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    ui.allocate_ui_with_layout(
-                        vec2(86., if MAC { 20. } else { 16. }),
-                        Layout::top_down(Align::Min),
-                        |ui| {
-                            if named_toggle(
-                                ui,
-                                "모니터링",
-                                &a.control_label("모니터링"),
-                                a.enabled,
-                                tint,
-                                p,
-                            )
-                            .clicked()
-                            {
-                                self.edit_account(a, &a.name, !a.enabled, a.tray);
-                            }
-                        },
-                    );
-                    if MAC && a.provider == "Codex" {
+                    #[cfg(target_os = "macos")]
+                    let toggle_size = {
+                        ui.spacing_mut().item_spacing.x = 16.;
+                        vec2(mini_toggle_width(ui, "모니터링"), 15.)
+                    };
+                    #[cfg(windows)]
+                    let toggle_size = vec2(86., 16.);
+                    ui.allocate_ui_with_layout(toggle_size, Layout::top_down(Align::Min), |ui| {
+                        if named_toggle(
+                            ui,
+                            "모니터링",
+                            &a.control_label("모니터링"),
+                            a.enabled,
+                            tint,
+                            p,
+                        )
+                        .clicked()
+                        {
+                            self.edit_account(a, &a.name, !a.enabled, a.tray);
+                        }
+                    });
+                    #[cfg(target_os = "macos")]
+                    if a.provider == "Codex" {
                         let login = if a.managed {
                             "다시 로그인…"
                         } else {
                             "앱에서 로그인…"
                         };
                         if ui
-                            .add_enabled_ui(!self.state.demo, |ui| action(ui, login, false, p))
+                            .add_enabled_ui(!self.state.demo, |ui| small_button(ui, login, p))
                             .inner
                             .clicked()
                         {
