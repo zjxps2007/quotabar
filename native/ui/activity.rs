@@ -160,7 +160,7 @@ impl Dashboard {
             ui.horizontal_top(|ui| {
                 let width = cell_width(ui.available_width(), cols, 16.);
                 ui.spacing_mut().item_spacing.x = 16.;
-                let card = p.frame(16);
+                let card = p.frame(16).corner_radius(if MAC { 18 } else { 16 });
                 let content_width = width - card.total_margin().sum().x;
                 for &pr in chunk {
                     card.show(ui, |ui| {
@@ -300,40 +300,43 @@ impl Dashboard {
                 } else {
                     1 + cal.quartiles.iter().filter(|q| n > **q).count()
                 };
-                let alpha = if p.dark {
+                let alpha: f32 = if p.dark {
                     [0., 0.44, 0.62, 0.80, 0.98][level]
                 } else {
                     [0., 0.38, 0.56, 0.74, 0.92][level]
                 };
-                ui.painter().rect_filled(
-                    cell,
-                    radius,
-                    if date > cal.today {
-                        if MAC {
-                            p.ink.gamma_multiply(0.025)
-                        } else {
-                            p.track.gamma_multiply(0.4)
-                        }
+                let track = if date > cal.today {
+                    if MAC {
+                        p.ink.gamma_multiply(0.025)
                     } else {
-                        p.track
-                    },
-                );
-                if level > 0 {
-                    let fill = if MAC {
-                        tint.gamma_multiply(alpha)
-                    } else {
-                        // WPF quantizes brush opacity before premultiplying each channel.
-                        tint.gamma_multiply_u8((alpha * 255.).round() as u8)
-                    };
-                    ui.painter().rect_filled(cell, radius, fill);
+                        p.track.gamma_multiply(0.4)
+                    }
+                } else {
+                    p.track
+                };
+                let border = if date == cal.today {
+                    Stroke::new(1_f32, tint)
+                } else {
+                    Stroke::NONE
+                };
+                #[cfg(windows)]
+                {
+                    // WPF quantizes brush opacity before premultiplying each channel.
+                    let fill =
+                        (level > 0).then(|| tint.gamma_multiply_u8((alpha * 255.).round() as u8));
+                    crate::windows_border::activity_cell(ui, cell, track, fill, border);
                 }
-                if date == cal.today {
-                    ui.painter().rect_stroke(
-                        cell,
-                        radius,
-                        Stroke::new(1.0_f32, tint),
-                        StrokeKind::Inside,
-                    );
+                #[cfg(not(windows))]
+                {
+                    ui.painter().rect_filled(cell, radius, track);
+                    if level > 0 {
+                        ui.painter()
+                            .rect_filled(cell, radius, tint.gamma_multiply(alpha));
+                    }
+                    if border != Stroke::NONE {
+                        ui.painter()
+                            .rect_stroke(cell, radius, border, StrokeKind::Inside);
+                    }
                 }
                 let accessible = !MAC || n > 0 || date == cal.today;
                 let input = if !MAC && date > cal.today {

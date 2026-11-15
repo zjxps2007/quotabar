@@ -30,6 +30,7 @@ enum Face {
     Monospace,
     Underlined,
     Emphasized,
+    Bold,
     TabularDigits,
     RoundedDigits,
 }
@@ -59,6 +60,7 @@ fn attributed(value: &str, size: f64, face: Face) -> CFMutableAttributedString {
     let weight = unsafe {
         match face {
             Face::Regular | Face::Monospace | Face::Underlined => NSFontWeightRegular,
+            Face::Bold => NSFontWeightBold,
             Face::Emphasized if size >= 17. => NSFontWeightBold,
             Face::Emphasized | Face::TabularDigits | Face::RoundedDigits => NSFontWeightSemibold,
         }
@@ -321,6 +323,10 @@ pub fn stacked_label(
     color: Color32,
 ) -> Option<Response> {
     draw_label(ui, text, size, Face::label(heavy), color, LineBox::Stack)
+}
+
+pub fn bold_label(ui: &mut Ui, text: &str, size: f32, color: Color32) -> Option<Response> {
+    draw_label(ui, text, size, Face::Bold, color, LineBox::Stack)
 }
 
 pub fn quota_percent(ui: &mut Ui, text: &str, color: Color32) -> Option<Response> {

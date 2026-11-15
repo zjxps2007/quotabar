@@ -104,6 +104,39 @@ pub fn surface_fill(surface: Color32, foreground: Color32, opacity: f32) -> Colo
     surface.lerp_to_gamma(Color32::from_rgb(r, g, b), opacity * f32::from(a) / 255.)
 }
 
+#[derive(Clone, Copy)]
+pub struct CardSurface {
+    frame: Frame,
+    #[cfg(target_os = "macos")]
+    border: Color32,
+}
+
+impl CardSurface {
+    pub fn total_margin(&self) -> epaint::MarginF32 {
+        self.frame.total_margin()
+    }
+
+    pub fn corner_radius(mut self, radius: u8) -> Self {
+        self.frame = self.frame.corner_radius(radius);
+        self
+    }
+
+    pub fn show<R>(self, ui: &mut Ui, content: impl FnOnce(&mut Ui) -> R) -> InnerResponse<R> {
+        let result = self.frame.show(ui, content);
+        #[cfg(target_os = "macos")]
+        ui.painter().add(
+            epaint::RectShape::stroke(
+                result.response.rect,
+                self.frame.corner_radius,
+                Stroke::new(1_f32, self.border),
+                StrokeKind::Middle,
+            )
+            .with_round_to_pixels(false),
+        );
+        result
+    }
+}
+
 impl Palette {
     pub fn new(ctx: &Context, appearance: &str) -> Self {
         let dark = match appearance {
@@ -243,18 +276,19 @@ impl Palette {
         };
         Color32::from_rgb(rgb[0], rgb[1], rgb[2])
     }
-    pub fn frame(self, pad: i8) -> Frame {
-        Frame::new()
+    pub fn frame(self, pad: i8) -> CardSurface {
+        let frame = Frame::new()
             .fill(self.card)
-            .stroke(Stroke::new(1.0_f32, self.line))
             .corner_radius(16)
-            // SwiftUI's card border overlays the padded content. egui includes
-            // its stroke in the space allocated around that content.
-            .inner_margin(if cfg!(target_os = "macos") {
-                pad - 1
-            } else {
-                pad
-            })
+            .inner_margin(pad);
+        #[cfg(not(target_os = "macos"))]
+        let frame = frame.stroke(Stroke::new(1_f32, self.line));
+        CardSurface {
+            frame,
+            // SwiftUI overlays a centered stroke without reserving layout space.
+            #[cfg(target_os = "macos")]
+            border: self.ink.gamma_multiply(0.07),
+        }
     }
 }
 #[cfg(target_os = "macos")]

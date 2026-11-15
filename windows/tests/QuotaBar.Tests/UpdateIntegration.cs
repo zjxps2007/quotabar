@@ -96,7 +96,13 @@ internal static class UpdateIntegration
                 foreach (string argument in new[] { "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART" }) uninstall.ArgumentList.Add(argument);
                 using var process = Process.Start(uninstall)!; await process.WaitForExitAsync();
             }
-            try { Directory.Delete(root, true); } catch (IOException) { }
+            await Until(() =>
+            {
+                try { Directory.Delete(root, true); return true; }
+                catch (DirectoryNotFoundException) { return true; }
+                catch (IOException) { return false; }
+                catch (UnauthorizedAccessException) { return false; }
+            }, "release temporary update files");
         }
     }
     private static async Task ObserveResident(AppPaths paths, Process monitor)
@@ -116,6 +122,21 @@ internal static class UpdateIntegration
         await monitor.WaitForExitAsync(timeout.Token);
         Suite.Check(monitor.ExitCode == 0);
         await Until(() => UpdateInstaller.ReadResult(UpdateInstaller.ResultPath(paths)) != null, "resident update result", 180);
+        // The helper publishes the result before finishing backup cleanup or
+        // starting the restored monitor. Wait for this fixture's helper only.
+        string helper = Path.Combine(Path.GetDirectoryName(job!)!, "Helper", "QuotaBar.StatusLine.exe");
+        foreach (var process in Process.GetProcessesByName("QuotaBar.StatusLine"))
+        {
+            using (process)
+            {
+                string? executable;
+                try { executable = process.MainModule?.FileName; }
+                catch (InvalidOperationException) { continue; }
+                catch (System.ComponentModel.Win32Exception) { continue; }
+                if (string.Equals(executable, helper, StringComparison.OrdinalIgnoreCase))
+                    await process.WaitForExitAsync(timeout.Token);
+            }
+        }
     }
 
     private static async Task DriveInstaller(StagedUpdate staged, byte[] signature, AppPaths paths,

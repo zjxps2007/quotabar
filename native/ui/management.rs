@@ -610,7 +610,12 @@ impl Dashboard {
             ui.set_width(ui.available_width());
             settings_title(ui, "오픈소스 라이선스", "doc.text", p);
             ui.add_space(if MAC { 12. } else { 14. });
-            label(ui, "AIUsage · sylearn 및 기여자", 12., true, p.ink);
+            let credit = "AIUsage · sylearn 및 기여자";
+            #[cfg(target_os = "macos")]
+            crate::mac_text::bold_label(ui, credit, 12., p.ink)
+                .unwrap_or_else(|| label(ui, credit, 12., true, p.ink));
+            #[cfg(not(target_os = "macos"))]
+            label(ui, credit, 12., true, p.ink);
             ui.add_space(if MAC { 12. } else { 6. });
             system_label(ui, "Apache License 2.0", if MAC { 10. } else { 11. }, false, p.muted);
             ui.add_space(12.);

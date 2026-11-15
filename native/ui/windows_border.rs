@@ -117,7 +117,7 @@ impl Tile {
                     mix(self.pen.r(), self.fill.r()),
                     mix(self.pen.g(), self.fill.g()),
                     mix(self.pen.b(), self.fill.b()),
-                    mix(255, 255),
+                    mix(self.pen.a(), self.fill.a()),
                 ));
             }
         }
@@ -141,10 +141,21 @@ impl BorderRenderer {
         {
             return None;
         }
+        self.rounded(ctx, shape.rect, f32::from(radius.nw), stroke, shape.fill)
+    }
+
+    fn rounded(
+        &mut self,
+        ctx: &Context,
+        rect: Rect,
+        radius: f32,
+        stroke: Stroke,
+        fill: Color32,
+    ) -> Option<Shape> {
         let scale = ctx.pixels_per_point();
-        let r = f32::from(radius.nw) * scale;
+        let r = radius * scale;
         let s = stroke.width * scale;
-        let rect = shape.rect * scale;
+        let rect = rect * scale;
         if rect.width().min(rect.height()) <= s * 2. {
             return None;
         }
@@ -163,7 +174,7 @@ impl BorderRenderer {
             radius: r.to_bits(),
             stroke: s.to_bits(),
             pen: stroke.color,
-            fill: shape.fill,
+            fill,
         };
         let texture = match self.tiles.entry(tile) {
             std::collections::hash_map::Entry::Occupied(entry) => entry.into_mut(),
@@ -193,6 +204,28 @@ impl BorderRenderer {
             }
         }
         Some(Shape::mesh(mesh))
+    }
+}
+
+pub fn activity_cell(ui: &Ui, rect: Rect, track: Color32, fill: Option<Color32>, border: Stroke) {
+    if !rect.is_positive() || !ui.is_rect_visible(rect) {
+        return;
+    }
+    let renderer = ui.ctx().plugin_opt::<BorderRenderer>();
+    let paint = |bounds: Rect, fill: Color32, pen: Stroke| {
+        let shape = renderer
+            .as_ref()
+            .and_then(|r| r.lock().rounded(ui.ctx(), bounds, 2., pen, fill));
+        if let Some(shape) = shape {
+            ui.painter().add(shape);
+        } else {
+            ui.painter().rect(bounds, 2, fill, pen, StrokeKind::Inside);
+        }
+    };
+    paint(rect, track, border);
+    let child = rect.shrink(border.width);
+    if let Some(fill) = fill.filter(|_| child.is_positive()) {
+        paint(child, fill, Stroke::NONE);
     }
 }
 
