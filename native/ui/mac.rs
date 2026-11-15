@@ -457,8 +457,8 @@ impl Dashboard {
         while let Ok(action) = self.app_menu.commands.try_recv() {
             match action {
                 quotabar::mac_menu::REFRESH => self.refresh(),
-                quotabar::mac_menu::DASHBOARD => self.navigate("dashboard", true),
-                quotabar::mac_menu::SETTINGS => self.navigate("settings", true),
+                quotabar::mac_menu::DASHBOARD => self.navigate(ctx, "dashboard", true),
+                quotabar::mac_menu::SETTINGS => self.navigate(ctx, "settings", true),
                 quotabar::mac_menu::QUIT => {
                     self.wire.action("quit", Value::Null);
                 }

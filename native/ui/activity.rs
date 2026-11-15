@@ -128,9 +128,13 @@ impl Dashboard {
                 }
             })
             .response;
-        if self.scroll_activity {
-            anchor.scroll_to_me(Some(Align::Min));
-            self.scroll_activity = false;
+        if let Some(frame) = self.activity_scroll_frame {
+            if ui.ctx().cumulative_frame_nr() >= frame {
+                anchor.scroll_to_me(Some(Align::Min));
+                self.activity_scroll_frame = None;
+            } else {
+                ui.ctx().request_repaint();
+            }
         }
         ui.add_space(if MAC { 24. } else { 16. });
         let status = if !self.state.flag("scanLocalLogs", "scanLocalLogs") {

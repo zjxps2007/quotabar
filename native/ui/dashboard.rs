@@ -121,7 +121,7 @@ impl Dashboard {
                         );
                     }
                     if res.on_hover_cursor(CursorIcon::PointingHand).clicked() {
-                        self.navigate(key, true)
+                        self.navigate(ui.ctx(), key, true)
                     }
                     ui.add_space(5.);
                 }
@@ -421,7 +421,7 @@ impl Dashboard {
                     caption(ui, DESCRIPTION, p);
                     ui.add_space(if MAC { 15. } else { 16. });
                     if action(ui, "계정 관리로 이동", true, p).clicked() {
-                        self.navigate("accounts", true);
+                        self.navigate(ui.ctx(), "accounts", true);
                     }
                     ui.add_space(28.);
                 });
@@ -443,7 +443,7 @@ impl Dashboard {
             });
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 if link(ui, "계정 관리 →", p, p.bg).clicked() {
-                    self.navigate("accounts", true);
+                    self.navigate(ui.ctx(), "accounts", true);
                 }
             });
         });
@@ -585,7 +585,7 @@ impl Dashboard {
                 p.warning,
             );
             if link(ui, "계정 관리에서 확인 →", p, p.card).clicked() {
-                self.navigate("accounts", true);
+                self.navigate(ui.ctx(), "accounts", true);
             }
         } else if a.snapshot["state"] == "stale" || (!MAC && a.snapshot["state"] == "reset") {
             ui.add_space(14.);

@@ -106,7 +106,7 @@ struct Dashboard {
     state: State,
     route: String,
     scroll_top: bool,
-    scroll_activity: bool,
+    activity_scroll_frame: Option<u64>,
     filter: String,
     query: String,
     #[cfg(target_os = "macos")]
@@ -128,12 +128,15 @@ struct Dashboard {
 }
 
 impl Dashboard {
-    fn navigate(&mut self, page: &str, notify: bool) {
+    fn navigate(&mut self, ctx: &egui::Context, page: &str, notify: bool) {
         #[cfg(target_os = "macos")]
         if page == "accounts" && self.route != page {
             self.focus_query = true;
         }
-        self.scroll_activity = page == "activity";
+        // WPF dispatches the activity anchor at Loaded priority, after the
+        // window and its ScrollViewer have measured their final client area.
+        self.activity_scroll_frame = (page == "activity")
+            .then(|| ctx.cumulative_frame_nr() + u64::from(cfg!(windows)));
         self.route = match page {
             "accounts" | "settings" => page,
             _ => "dashboard",
@@ -181,7 +184,7 @@ impl Dashboard {
                         [1120., 810.],
                     )));
                 }
-                self.navigate(&page, true);
+                self.navigate(ctx, &page, true);
                 ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
                 ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
                 ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
@@ -199,6 +202,7 @@ impl Dashboard {
             } => {
                 self.capture_dialog = route.starts_with("connect");
                 self.navigate(
+                    ctx,
                     if self.capture_dialog {
                         "accounts"
                     } else {
@@ -461,7 +465,7 @@ fn main() -> eframe::Result {
             assets,
             route: "dashboard".into(),
             scroll_top: true,
-            scroll_activity: false,
+            activity_scroll_frame: None,
             filter: "전체 Provider".into(),
             query: String::new(),
             #[cfg(target_os = "macos")]
