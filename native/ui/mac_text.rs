@@ -2,6 +2,7 @@ use core_foundation::{
     attributed_string::CFMutableAttributedString,
     base::{CFRange, TCFType},
     boolean::CFBoolean,
+    number::CFNumber,
     string::CFString,
 };
 use core_graphics::{
@@ -13,7 +14,10 @@ use core_graphics::{
 use core_text::{
     font::{CTFont, CTFontRef},
     line::CTLine,
-    string_attributes::{kCTFontAttributeName, kCTForegroundColorFromContextAttributeName},
+    string_attributes::{
+        kCTFontAttributeName, kCTForegroundColorFromContextAttributeName,
+        kCTUnderlineStyleAttributeName,
+    },
 };
 use eframe::egui::{self, epaint::TextShape, *};
 use objc2::rc::Retained;
@@ -23,6 +27,7 @@ use std::collections::HashMap;
 #[derive(Clone, Copy, Hash, Eq, PartialEq)]
 enum Face {
     Regular,
+    Underlined,
     Emphasized,
     RoundedDigits,
 }
@@ -51,7 +56,7 @@ fn attributed(value: &str, size: f64, face: Face) -> CFMutableAttributedString {
     // logical point size so Retina drawing preserves its optical size.
     let weight = unsafe {
         match face {
-            Face::Regular => NSFontWeightRegular,
+            Face::Regular | Face::Underlined => NSFontWeightRegular,
             Face::Emphasized if size >= 17. => NSFontWeightBold,
             Face::Emphasized | Face::RoundedDigits => NSFontWeightSemibold,
         }
@@ -71,6 +76,13 @@ fn attributed(value: &str, size: f64, face: Face) -> CFMutableAttributedString {
     text.replace_str(&CFString::new(value), CFRange::init(0, 0));
     let range = CFRange::init(0, text.char_len());
     text.set_attribute(range, unsafe { kCTFontAttributeName }, &font);
+    if face == Face::Underlined {
+        text.set_attribute(
+            range,
+            unsafe { kCTUnderlineStyleAttributeName },
+            &CFNumber::from(1_i32),
+        );
+    }
     text.set_attribute(
         range,
         unsafe { kCTForegroundColorFromContextAttributeName },
@@ -270,6 +282,36 @@ pub fn stat_value(ui: &mut Ui, text: &str, color: Color32) -> Option<Response> {
     draw_label(ui, text, 28., Face::RoundedDigits, color)
 }
 
+pub fn hyperlink(ui: &mut Ui, title: &str, url: &str, size: f32, color: Color32) -> Response {
+    let native = ui.ctx().plugin_opt::<Renderer>().and_then(|renderer| {
+        let mut renderer = renderer.lock();
+        let run = renderer.run(ui.ctx(), title, size, Face::Underlined, color)?;
+        let height = system_line_height(ui, f64::from(size)).max(run.size.y);
+        let (rect, response) = ui.allocate_exact_size(vec2(run.size.x, height), Sense::click());
+        let top = pos2(rect.left(), rect.center().y - run.size.y * 0.5);
+        ui.painter()
+            .add(run.shape(top, ui.ctx().pixels_per_point(), color));
+        Some(response)
+    });
+    let Some(response) = native else {
+        return ui.hyperlink_to(title, url);
+    };
+    response.widget_info(|| WidgetInfo::labeled(WidgetType::Link, ui.is_enabled(), title));
+    let background = response.clicked_with_open_in_background();
+    if background || response.clicked() {
+        ui.ctx().open_url(OpenUrl {
+            url: url.into(),
+            new_tab: background,
+        });
+    }
+    let response = response.on_hover_cursor(CursorIcon::PointingHand);
+    if ui.style().url_in_tooltip {
+        response.on_hover_text(url)
+    } else {
+        response
+    }
+}
+
 fn draw_label(ui: &mut Ui, text: &str, size: f32, face: Face, color: Color32) -> Option<Response> {
     if text.is_empty() || text.contains('\n') {
         return None;
@@ -334,7 +376,7 @@ fn paragraph_lines(text: &str, size: f32, width: f32) -> Vec<String> {
         };
         lines.push(
             String::from_utf16_lossy(&utf16[chars.location..chars.location + chars.length])
-                .trim_end()
+                .trim_end_matches(['\r', '\n'])
                 .to_owned(),
         );
         next = fragment.location + fragment.length;
@@ -431,6 +473,30 @@ impl egui::Plugin for Renderer {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn link_underline_preserves_the_native_glyph_advances() {
+        let mut key = Key {
+            text: "Google 지원 범위 확인".into(),
+            size: 12.0_f32.to_bits(),
+            scale: 1.0_f32.to_bits(),
+            face: Face::Regular,
+            light_ink: false,
+        };
+        let (plain, size, _) = raster(&key, 4096).unwrap();
+        key.face = Face::Underlined;
+        let (link, underlined_size, _) = raster(&key, 4096).unwrap();
+        assert_eq!(size, underlined_size);
+        assert!(
+            plain
+                .pixels
+                .iter()
+                .zip(link.pixels)
+                .filter(|(a, b)| a.a() < b.a())
+                .count()
+                > 12
+        );
+    }
 
     #[test]
     fn korean_labels_have_distinct_ink_at_both_backing_scales() {

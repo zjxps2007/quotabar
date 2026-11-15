@@ -94,6 +94,14 @@ pub struct Palette {
     pub on: Color32,
     pub warning: Color32,
 }
+
+/// Composite a semantic foreground over an opaque sRGB surface, retaining its
+/// system-provided alpha and rounding only the resulting surface color.
+pub fn surface_fill(surface: Color32, foreground: Color32, opacity: f32) -> Color32 {
+    let [r, g, b, a] = foreground.to_srgba_unmultiplied();
+    surface.lerp_to_gamma(Color32::from_rgb(r, g, b), opacity * f32::from(a) / 255.)
+}
+
 impl Palette {
     pub fn new(ctx: &Context, appearance: &str) -> Self {
         let dark = match appearance {
@@ -135,6 +143,7 @@ impl Palette {
         };
         #[cfg(windows)]
         let (ink, muted, tertiary) = (gray(242, 23), gray(163, 117), gray(163, 117));
+        let card = gray(28, 255);
         Self {
             dark,
             ink,
@@ -144,11 +153,15 @@ impl Palette {
             placeholder,
             #[cfg(target_os = "macos")]
             focus_ring,
-            card: gray(28, 255),
+            card,
             bg: gray(14, 245),
             rail: gray(19, 255),
             line: gray(45, 235),
-            track: gray(42, 240),
+            track: if cfg!(target_os = "macos") {
+                surface_fill(card, ink, 0.06)
+            } else {
+                gray(42, 240)
+            },
             accent: gray(255, 0),
             on: gray(0, 255),
             warning: if dark {

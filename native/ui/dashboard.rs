@@ -174,7 +174,7 @@ impl Dashboard {
                 });
             });
             if self.state.demo {
-                let banner = if MAC { p.bg.lerp_to_gamma(p.ink, 0.06) } else { p.track };
+                let banner = if MAC { surface_fill(p.bg, p.ink, 0.06) } else { p.track };
                 Frame::new().fill(banner).inner_margin(Margin::symmetric(28, 9)).show(ui, |ui| {
                     ui.set_width(ui.available_width());
                     let note = "미리보기 · 샘플 데이터입니다. 실제 계정이나 로그인 파일에 접근하지 않습니다.";

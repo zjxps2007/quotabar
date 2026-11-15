@@ -20,10 +20,17 @@ def write_json(path, value):
     path.write_text(json.dumps(value, ensure_ascii=False), encoding="utf-8")
 
 
-def fixture(home):
+def post_statusline(program, sample, generation, used, env):
+    session = sample.stem.removeprefix("snapshot-")
+    data = {"session_id": session, "rate_limits": {"five_hour": {
+        "used_percentage": used, "resets_at": int(time.time()) + 3600}}}
+    subprocess.run([program, "--claude-statusline", sample.parent.name, generation, sample.parents[1]],
+                   input=json.dumps(data).encode(), env=env, stdout=subprocess.DEVNULL, check=True, timeout=10)
+    assert json.loads(sample.read_bytes())["fiveHour"]["usedPercent"] == used
+
+
+def fixture(home, config, program, env):
     root = home / "Library/Application Support/AIUsage Lite"
-    config = home / "Claude fixture"
-    config.mkdir(parents=True)
     identity = hashlib.sha256(str(config).encode()).hexdigest()
     profiles = root / "ClaudeProfiles" / identity
     profiles.mkdir(parents=True)
@@ -34,8 +41,7 @@ def fixture(home):
     write_json(profiles / "profile.json", profile)
     write_json(config / "settings.json", {"statusLine": {"type": "command", "command": profile["installedCommand"]}})
     sample = profiles / f"snapshot-{session}.json"
-    write_json(sample, dict(schemaVersion=1, profileID=identity, generation=generation, sessionID=session,
-                            receivedAt=now, observedAt=now, fiveHour=dict(usedPercent=37, resetAt=now + 3600)))
+    post_statusline(program, sample, generation, 37, env)
     accounts = []
     for index, account in enumerate(IDS):
         provider = "claude" if index == 0 else ("codex", "gemini")[index % 2]
@@ -60,9 +66,8 @@ def dashboard_probe():
         wire["send"](outgoing, {name: {f"_{i}": v for i, v in enumerate(values)}})
 
     def set_usage(used):
-        saved = json.loads(sample.read_text())
-        saved["fiveHour"]["usedPercent"] = used
-        write_json(sample, saved)
+        saved = json.loads(sample.read_bytes())
+        post_statusline(os.environ["QUOTABAR_TEST_STATUSLINE"], sample, saved["generation"], used, os.environ)
 
     def expect(name, remaining, enabled, failed, members=IDS, marker=None):
         deadline = time.monotonic() + 8
@@ -124,20 +129,33 @@ def compare(dashboard, work, reference):
     subprocess.run(["xcrun", "clang", "-fobjc-arc", "-dynamiclib", "-framework", "Foundation",
                     HERE / "monitor-fixture-home.m", "-o", library], check=True)
     source = work / "home.swift"
-    source.write_text("import Foundation\nprint(NSHomeDirectory())\nprint(FileManager.default.homeDirectoryForCurrentUser.path)\n")
+    source.write_text("""import Foundation
+print(NSHomeDirectory())
+print(FileManager.default.homeDirectoryForCurrentUser.path)
+print(URL(fileURLWithPath: CommandLine.arguments[1]).standardizedFileURL.resolvingSymlinksInPath().path)
+""")
     subprocess.run(["swiftc", source, "-o", probe], check=True)
     results = {}
     for side, executable in (("original", reference), ("rust", dashboard.MONITOR)):
         home = (work / f"{side}-monitor-home").resolve()
         home.mkdir()
-        root, sample = fixture(home)
+        cli = home / "Claude fixture"
+        cli.mkdir()
         result, diagnostics = home / "result.json", home / "diagnostics.jsonl"
-        env = {**os.environ, "DYLD_INSERT_LIBRARIES": str(library), "QUOTABAR_TEST_MONITOR_HOME": str(home),
-               "QUOTABAR_TEST_REFRESH_RESULT": str(result), "QUOTABAR_TEST_SAMPLE": str(sample)}
+        env = {**{k: v for k, v in os.environ.items() if not k.startswith(("ANTHROPIC_", "CLAUDE_CODE_"))},
+               "HOME": str(home), "CFFIXED_USER_HOME": str(home),
+               "CODEX_HOME": str(home / "Codex"), "CLAUDE_CONFIG_DIR": str(cli),
+               "DYLD_INSERT_LIBRARIES": str(library), "QUOTABAR_TEST_MONITOR_HOME": str(home),
+               "QUOTABAR_TEST_REFRESH_RESULT": str(result), "QUOTABAR_TEST_STATUSLINE": str(executable)}
         try:
-            homes = subprocess.check_output([probe], env=env, text=True, timeout=10).splitlines()
-            if homes != [str(home), str(home)]:
-                raise ValueError(f"Fixture home verification failed: {homes}")
+            paths = subprocess.check_output([probe, cli], env=env, text=True, timeout=10).splitlines()
+            if len(paths) != 3 or paths[:2] != [str(home), str(home)] or not cli.samefile(paths[2]):
+                raise ValueError(f"Fixture path verification failed: {paths}")
+            # Both monitors hash Foundation's standardized path. On macOS its
+            # spelling of /var or /tmp can differ from Python's realpath.
+            print(f"{side} Claude fixture: Foundation path differs from realpath = {str(cli) != paths[2]}", flush=True)
+            root, sample = fixture(home, Path(paths[2]), executable, env)
+            env["QUOTABAR_TEST_SAMPLE"] = str(sample)
             bundle = home / "QuotaBar.app"
             shutil.copytree(executable.parents[2], bundle, symlinks=True)
             client = bundle / "Contents/Helpers/QuotaBar Dashboard.app/Contents/MacOS/QuotaBar"

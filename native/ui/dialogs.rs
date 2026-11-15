@@ -820,7 +820,7 @@ impl Connect {
     #[cfg(target_os = "macos")]
     fn connection_help(&mut self, ui: &mut Ui, browser: bool, p: Palette) {
         Frame::new().inner_margin(15).corner_radius(10)
-            .fill(p.card.lerp_to_gamma(p.ink, 0.035))
+            .fill(surface_fill(p.card, p.ink, 0.035))
             .show(ui, |ui| {
                 ui.spacing_mut().item_spacing.y = 10.;
                 let note = |ui: &mut Ui, text: &str, color: Color32| {
@@ -852,10 +852,8 @@ impl Connect {
                     if self.provider == "Gemini" {
                         let orange = if p.dark { Color32::from_rgb(255, 159, 10) } else { Color32::from_rgb(255, 149, 0) };
                         note(ui, "Code Assist Standard · Enterprise 전용. 개인용 Google 로그인은 2026년 6월 18일에 종료되었습니다.", orange);
-                        let link = rich("Google 지원 범위 확인", 12., false, p.accent)
-                            .line_height(Some(crate::mac_text::system_line_height(ui, 12.)))
-                            .underline();
-                        ui.hyperlink_to(link, "https://developers.google.com/gemini-code-assist/docs/deprecations/code-assist-individuals");
+                        crate::mac_text::hyperlink(ui, "Google 지원 범위 확인",
+                            "https://developers.google.com/gemini-code-assist/docs/deprecations/code-assist-individuals", 12., p.accent);
                     }
                     note(ui, if self.provider == "Codex" { "먼저 터미널에서 codex login을 실행하세요." } else { "먼저 Gemini CLI에서 지원되는 계정으로 로그인하세요." }, p.muted);
                 }

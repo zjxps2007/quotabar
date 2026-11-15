@@ -427,7 +427,8 @@ fn main() -> eframe::Result {
         centered: true,
         persist_window: false,
         vsync: true,
-        dithering: !cfg!(windows),
+        // Native control surfaces have a uniform fill at every pixel.
+        dithering: false,
         ..Default::default()
     };
     let create: eframe::AppCreator<'_> = Box::new(move |cc| {
