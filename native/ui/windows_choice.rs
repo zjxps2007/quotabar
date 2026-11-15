@@ -201,6 +201,7 @@ fn choose_presented(
         let mut search = ui
             .data(|d| d.get_temp::<TypeSearch>(search_id))
             .unwrap_or_default();
+        let mut handled_focus_key = false;
         ui.input_mut(|input| {
             let now = input.time;
             let allow_text =
@@ -217,6 +218,17 @@ fn choose_presented(
                     ..
                 } => {
                     let handled = state.key(*key, *modifiers, labels.len() - 1);
+                    if matches!(
+                        key,
+                        Key::ArrowUp
+                            | Key::ArrowDown
+                            | Key::ArrowLeft
+                            | Key::ArrowRight
+                            | Key::Escape
+                            | Key::Tab
+                    ) {
+                        handled_focus_key = handled;
+                    }
                     if handled {
                         search.prefix.clear();
                     } else if !composed
@@ -239,6 +251,11 @@ fn choose_presented(
                 _ => true,
             })
         });
+        if handled_focus_key {
+            // egui schedules directional focus movement before the widget sees
+            // input. The focus-lock filter starts one frame after gaining focus.
+            ui.memory_mut(|m| m.move_focus(FocusDirection::None));
+        }
         ui.data_mut(|d| d.insert_temp(search_id, search));
     }
     if ui.is_enabled() {
@@ -423,4 +440,57 @@ fn choose_presented(
         }
     });
     (state.chosen != selected).then_some(state.chosen)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn first_arrow_after_focus_keeps_keyboard_on_provider() {
+        let ctx = Context::default();
+        let mut selected = 0;
+        let mut path = String::new();
+        let mut frame = |key: Option<Key>| {
+            let input = RawInput {
+                events: key
+                    .into_iter()
+                    .map(|key| Event::Key {
+                        key,
+                        physical_key: Some(key),
+                        pressed: true,
+                        repeat: false,
+                        modifiers: Modifiers::NONE,
+                    })
+                    .collect(),
+                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(400., 300.))),
+                ..Default::default()
+            };
+            let mut provider = Id::NULL;
+            let _ = ctx.run(input, |ctx| {
+                CentralPanel::default().show(ctx, |ui| {
+                    provider = ui.make_persistent_id(Id::new("연결 서비스"));
+                    if let Some(index) = choose(
+                        ui,
+                        "연결 서비스",
+                        220.,
+                        &["Codex", "Claude", "Gemini"],
+                        selected,
+                        13.,
+                    ) {
+                        selected = index;
+                    }
+                    ui.text_edit_singleline(&mut path);
+                });
+            });
+            (provider, selected)
+        };
+        let (provider, _) = frame(None);
+        ctx.memory_mut(|m| m.request_focus(provider));
+        assert_eq!(frame(Some(Key::ArrowDown)).1, 1);
+        assert_eq!(ctx.memory(|m| m.focused()), Some(provider));
+        assert_eq!(frame(Some(Key::Home)).1, 0);
+        frame(Some(Key::Tab));
+        assert_ne!(ctx.memory(|m| m.focused()), Some(provider));
+    }
 }
