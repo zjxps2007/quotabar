@@ -236,7 +236,7 @@ def exercise(dashboard, executable, folder, library, fixture, observed):
 def build_driver(work):
     library = work / "dashboard-ui-driver.dylib"
     subprocess.run(["xcrun", "clang", "-mmacosx-version-min=14.4", "-fobjc-arc", "-fblocks", "-dynamiclib",
-                    "-framework", "AppKit", "-framework", "ScreenCaptureKit", "-framework", "CoreGraphics",
+                    "-framework", "AppKit", "-framework", "ScreenCaptureKit", "-framework", "CoreGraphics", "-framework", "Vision",
                     Path(__file__).with_name("dashboard-ui-driver.m"), "-o", library], check=True)
     return library
 
@@ -297,6 +297,31 @@ def capture_windows(dashboard, program, folder, library, fixture, output, theme)
             capture("remove", sheet=True)
             controls.request("press", "취소")
             controls.request("sheet", expected={"sheet": False})
+            show("settings")
+            time.sleep(0.35)
+            for _ in range(3):
+                controls.request("scrollSettings")
+                time.sleep(0.30)
+            capture("settings-bottom")
+            controls.request("press", "라이선스 및 고지 보기")
+            controls.request("sheet", expected={"sheet": True})
+            journey = []
+            for title, scene, document in ((None, "licenses-notice", "NOTICE"),
+                                           ("Apache License 2.0 전문", "licenses-apache", "LICENSE"),
+                                           ("저작권 및 변경 고지", "licenses-notice", "NOTICE")):
+                if title:
+                    controls.request("press", title)
+                if document == "NOTICE" and journey:
+                    time.sleep(0.6)
+                    controls.request("snapshot", "sheet")
+                else:
+                    capture(scene, sheet=True)
+                    if "error" in observed[scene]:
+                        raise ValueError(observed[scene]["error"])
+                journey.append(controls.request("document", expected={"document": document})["document"])
+            controls.request("press", "닫기")
+            controls.request("sheet", expected={"sheet": False})
+            observed["licenseDocuments"] = [*journey, "closed"]
         except (OSError, ValueError, KeyError, RuntimeError, EOFError, subprocess.SubprocessError) as error:
             observed["error"] = str(error)
         finally:
@@ -320,7 +345,8 @@ def compare_windows(dashboard, work, original, library):
             results[side][theme] = capture_windows(dashboard, program, work / f"windows-{side}-{theme}",
                                                   library, fixture, output, theme)
     for theme in dashboard.THEMES:
-        for route in (*dashboard.ROUTES, "remove", "popover-sample", "popover-empty", "popover-overflow"):
+        for route in (*dashboard.ROUTES, "remove", "popover-sample", "popover-empty", "popover-overflow",
+                      "settings-bottom", "licenses-notice", "licenses-apache"):
             name = f"{route}-{theme}"
             lhs, rhs = (dest / side / f"{name}.png" for side in ("original", "rust"))
             if not lhs.is_file() or not rhs.is_file():
@@ -340,7 +366,9 @@ def compare_windows(dashboard, work, original, library):
                            check=True, timeout=20)
             results["repeatability"][side][repeated.stem] = json.loads(result.read_text())
     (dest / "comparison.json").write_text(json.dumps(results, ensure_ascii=False, indent=2))
-    return all(row["identical"] for row in results["comparisons"].values())
+    documents_match = all(results[side][theme].get("licenseDocuments") == ["NOTICE", "LICENSE", "NOTICE", "closed"]
+                          for side in ("original", "rust") for theme in dashboard.THEMES)
+    return documents_match and all(row["identical"] for row in results["comparisons"].values())
 
 
 def compare(dashboard, work, original, fixture, library):

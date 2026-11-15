@@ -325,7 +325,13 @@ impl Dashboard {
                     Dialog::Licenses { docs, selected } => {
                         #[cfg(windows)]
                         ui.shrink_clip_rect(ui.max_rect());
-                        form_text(ui, "오픈소스 라이선스", 22., true, p.ink);
+                        form_text(
+                            ui,
+                            "오픈소스 라이선스",
+                            if MAC { 17. } else { 22. },
+                            true,
+                            p.ink,
+                        );
                         ui.add_space(16.);
                         #[cfg(target_os = "macos")]
                         {
@@ -349,7 +355,11 @@ impl Dashboard {
                         let height = (ui.available_height() - 48.).max(80.);
                         Frame::new()
                             .fill(if MAC { p.bg } else { p.card })
-                            .stroke(Stroke::new(1.0_f32, p.line))
+                            .stroke(if MAC {
+                                Stroke::NONE
+                            } else {
+                                Stroke::new(1.0_f32, p.line)
+                            })
                             .corner_radius(if MAC { 10 } else { 7 })
                             .inner_margin(if MAC { 16 } else { 14 })
                             .show(ui, |ui| {
@@ -393,7 +403,11 @@ impl Dashboard {
                         ui.add_space(12.);
                         if ui
                             .with_layout(Layout::right_to_left(Align::Min), |ui| {
-                                action_on(ui, "닫기", false, p, p.bg)
+                                if MAC {
+                                    sheet_button(ui, "닫기", p)
+                                } else {
+                                    action_on(ui, "닫기", false, p, p.bg)
+                                }
                             })
                             .inner
                             .clicked()

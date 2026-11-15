@@ -2,6 +2,7 @@
 // threads so the comparison also works without system-wide Accessibility access.
 #import <AppKit/AppKit.h>
 #import <ScreenCaptureKit/ScreenCaptureKit.h>
+#import <Vision/Vision.h>
 #include <math.h>
 #include <stdlib.h>
 
@@ -254,9 +255,11 @@ static id control(NSWindow *window, NSString *name, NSMutableArray *available) {
 static BOOL clickControl(NSWindow *window, NSString *label) {
     // The Dock switch occupies the same part of both windows. Give both helpers
     // one down/up pair so an accessibility action cannot introduce a duplicate.
-    BOOL sheetSegment = window.sheetParent && [@[@"Codex", @"Claude", @"Gemini", @"브라우저 로그인", @"파일 가져오기"] containsObject:label];
+    BOOL sheetSegment = window.sheetParent && [@[@"Codex", @"Claude", @"Gemini", @"브라우저 로그인", @"파일 가져오기",
+                                                @"저작권 및 변경 고지", @"Apache License 2.0 전문"] containsObject:label];
+    BOOL licenseButton = [label isEqual:@"라이선스 및 고지 보기"] || [label isEqual:@"닫기"];
     BOOL popup = [label isEqual:@"Provider 필터"] || [label isEqual:@"자동 새로고침 간격"];
-    if (!getenv("QUOTABAR_TEST_REFERENCE_INPUT") && !sheetSegment && !popup && ![label isEqual:@"Dock에 앱 아이콘 표시"] &&
+    if (!getenv("QUOTABAR_TEST_REFERENCE_INPUT") && !sheetSegment && !popup && !licenseButton && ![label isEqual:@"Dock에 앱 아이콘 표시"] &&
         ![label hasSuffix:@" 계정 메뉴"]) return NO;
     NSView *view = window.contentView;
     CGFloat w = NSWidth(view.bounds), h = NSHeight(view.bounds), x, y;
@@ -281,6 +284,10 @@ static BOOL clickControl(NSWindow *window, NSString *label) {
     else if ([label isEqual:@"Gemini"]) { x = w * 0.81; y = 116; }
     else if ([label isEqual:@"브라우저 로그인"]) { x = w * 0.35; y = 158; }
     else if ([label isEqual:@"파일 가져오기"]) { x = w * 0.75; y = 158; }
+    else if ([label isEqual:@"라이선스 및 고지 보기"]) { x = 318; y = h - 59; }
+    else if ([label isEqual:@"저작권 및 변경 고지"]) { x = w * 0.26; y = 72; }
+    else if ([label isEqual:@"Apache License 2.0 전문"]) { x = w * 0.74; y = 72; }
+    else if ([label isEqual:@"닫기"]) { x = w - 49; y = h - 35; }
     else if ([label hasPrefix:@"이 폴더의 statusLine"]) { x = 50; y = h - 99; }
     else if ([label isEqual:@"연결"]) { x = w - 52; y = h - 42; }
     else if ([label isEqual:@"취소"]) { x = w - 103; y = h - 42; }
@@ -295,10 +302,58 @@ static BOOL clickControl(NSWindow *window, NSString *label) {
     return YES;
 }
 
+static NSDictionary *scrollSettings(NSWindow *window) {
+    NSView *view = window.contentView;
+    NSPoint local = NSMakePoint(NSMidX(view.bounds), NSMidY(view.bounds));
+    NSPoint point = [view convertPoint:local toView:nil];
+    NSPoint screen = [window convertPointToScreen:point];
+    NSEvent *move = [NSEvent mouseEventWithType:NSEventTypeMouseMoved location:point modifierFlags:0
+        timestamp:NSProcessInfo.processInfo.systemUptime windowNumber:window.windowNumber context:nil
+        eventNumber:0 clickCount:0 pressure:0];
+    [window sendEvent:move];
+    CGEventRef wheel = CGEventCreateScrollWheelEvent(NULL, kCGScrollEventUnitPixel, 1, -1800);
+    if (!wheel) return @{@"error": @"could not create a scroll event"};
+    CGEventSetLocation(wheel, CGPointMake(screen.x, NSMaxY(NSScreen.screens.firstObject.frame) - screen.y));
+    CGEventSetIntegerValueField(wheel, kCGMouseEventWindowUnderMousePointer, window.windowNumber);
+    NSEvent *event = [NSEvent eventWithCGEvent:wheel];
+    NSView *hit = [view hitTest:[view convertPoint:local toView:view.superview]] ?: view;
+    [hit scrollWheel:event];
+    CFRelease(wheel);
+    return @{@"scrolled": @YES};
+}
+
+// Read the actual composited sheet. Picker titles alone cannot prove that the
+// body changed, and SwiftUI's text-selection view does not always expose it to AX.
+static NSDictionary *visibleDocument(NSURL *frame) {
+    VNRecognizeTextRequest *request = [VNRecognizeTextRequest new];
+    request.recognitionLanguages = @[@"en-US"];
+    request.recognitionLevel = VNRequestTextRecognitionLevelAccurate;
+    VNImageRequestHandler *reader = [[VNImageRequestHandler alloc] initWithURL:frame options:@{}];
+    NSError *error = nil;
+    if (![reader performRequests:@[request] error:&error]) return @{@"error": error.localizedDescription};
+    NSMutableString *body = [NSMutableString string];
+    for (VNRecognizedTextObservation *line in request.results) {
+        NSString *value = [line topCandidates:1].firstObject.string;
+        if (value) [body appendString:value.lowercaseString];
+    }
+    NSString *letters = [[body componentsSeparatedByCharactersInSet:NSCharacterSet.alphanumericCharacterSet.invertedSet]
+                         componentsJoinedByString:@""];
+    if ([letters containsString:@"copyright2026quotabar"] || [letters containsString:@"previouslydistributedas"])
+        return @{@"document": @"NOTICE"};
+    if ([letters containsString:@"version20january2004"] || [letters containsString:@"termsandconditionsforuse"])
+        return @{@"document": @"LICENSE"};
+    return @{@"error": @"could not identify the visible license document", @"recognized": body};
+}
+
 static NSDictionary *perform(NSDictionary *request) {
     NSWindow *window = dashboardWindow();
     if (!window) return @{@"pending": @"dashboard window"};
     NSString *op = request[@"op"], *label = request[@"label"];
+    if ([op isEqual:@"scrollSettings"]) return scrollSettings(window);
+    if ([op isEqual:@"document"]) {
+        NSURL *dir = [NSURL fileURLWithFileSystemRepresentation:getenv("QUOTABAR_TEST_UI_DIRECTORY") isDirectory:YES relativeToURL:nil];
+        return visibleDocument([dir URLByAppendingPathComponent:@"frame.png"]);
+    }
     if ([op isEqual:@"size"]) {
         [window setContentSize:NSMakeSize(1120, 810)];
         return @{@"resized": @YES};
@@ -338,7 +393,8 @@ static NSDictionary *perform(NSDictionary *request) {
     // SwiftUI's segmented picker can expose its enclosing AppKit control for
     // multiple choices. A real mouse click selects the requested segment.
     if ([op isEqual:@"press"] && [@[@"라이트", @"다크", @"아이콘만", @"이름 + 잔여량", @"Dock에 앱 아이콘 표시",
-                                    @"Codex", @"Claude", @"Gemini", @"브라우저 로그인", @"파일 가져오기"] containsObject:label] &&
+                                    @"Codex", @"Claude", @"Gemini", @"브라우저 로그인", @"파일 가져오기",
+                                    @"저작권 및 변경 고지", @"Apache License 2.0 전문"] containsObject:label] &&
         clickControl(target, label)) return @{@"pressed": label};
     id element = control(target, label, available);
     if (!element && ([op isEqual:@"press"] || [op isEqual:@"attempt"]) && clickControl(target, label))

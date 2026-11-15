@@ -603,7 +603,7 @@ impl Dashboard {
         p.frame(20).show(ui,|ui|{ui.set_width(ui.available_width());settings_title(ui,"오픈소스 라이선스","doc.text",p);ui.add_space(14.);
             label(ui,"AIUsage · sylearn 및 기여자",12.,true,p.ink);ui.add_space(6.);caption(ui,"Apache License 2.0",p);ui.add_space(12.);
             label(ui,"QuotaBar는 AIUsage의 사용량 조회 코드와 Claude 연결 기능 등을 재사용·수정한 독립 프로젝트입니다.",12.,false,p.ink);
-            ui.add_space(14.);ui.horizontal(|ui|{if action(ui,"라이선스 및 고지 보기",false,p).clicked(){self.dialog=Some(Dialog::licenses());}
+            ui.add_space(14.);ui.horizontal(|ui|{if sheet_button(ui,"라이선스 및 고지 보기",p).clicked(){self.dialog=Some(Dialog::licenses());}
                 ui.hyperlink_to("원본 프로젝트","https://github.com/sylearn/AIUsage");});
         });
     }
