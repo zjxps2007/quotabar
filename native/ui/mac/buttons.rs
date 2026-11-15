@@ -119,6 +119,7 @@ fn push_button(
     title: &str,
     symbol: Option<&str>,
     control_size: NSControlSize,
+    font_size: Option<f32>,
 ) -> Retained<NSButton> {
     // The native button draws its symbol, bezel and title together; egui owns
     // the dashboard action and its accessible hit target.
@@ -127,9 +128,12 @@ fn push_button(
     };
     if control_size != NSControlSize::Regular {
         button.setControlSize(control_size);
-        button.setFont(Some(&NSFont::systemFontOfSize(
-            NSFont::systemFontSizeForControlSize(control_size),
-        )));
+    }
+    if let Some(points) = font_size.map(f64::from).or_else(|| {
+        (control_size != NSControlSize::Regular)
+            .then(|| NSFont::systemFontSizeForControlSize(control_size))
+    }) {
+        button.setFont(Some(&NSFont::systemFontOfSize(points)));
     }
     if let Some(icon) = symbol.and_then(|name| {
         NSImage::imageWithSystemSymbolName_accessibilityDescription(&NSString::from_str(name), None)
@@ -145,16 +149,23 @@ fn button_image(
     title: &str,
     symbol: Option<&str>,
     control_size: NSControlSize,
+    font_size: Option<f32>,
     size: Vec2,
     pressed: bool,
 ) -> Option<ControlImage> {
     control_image(
         ui,
         "AppKit push button",
-        Id::new((title, symbol, control_size, pressed)),
+        Id::new((
+            title,
+            symbol,
+            control_size,
+            font_size.map(f32::to_bits),
+            pressed,
+        )),
         size,
         |main| {
-            let button = push_button(main, title, symbol, control_size);
+            let button = push_button(main, title, symbol, control_size, font_size);
             button.setHighlighted(pressed);
             button.into_super()
         },
@@ -362,34 +373,42 @@ pub fn standard_button(
     title: &str,
     symbol: Option<&str>,
     control_size: NSControlSize,
+    font_size: Option<f32>,
     focus: Color32,
 ) -> Option<Response> {
     let size = if symbol.is_some() || control_size != NSControlSize::Regular {
         let main = MainThreadMarker::new()?;
-        let key = Id::new(("AppKit button alignment size", title, symbol, control_size));
+        let key = Id::new((
+            "AppKit button alignment size",
+            title,
+            symbol,
+            control_size,
+            font_size.map(f32::to_bits),
+        ));
         ui.data_mut(|d| {
             *d.get_temp_mut_or_insert_with(key, || {
-                let button = push_button(main, title, symbol, control_size);
+                let button = push_button(main, title, symbol, control_size, font_size);
                 button.sizeToFit();
                 let size = button.alignmentRectForFrame(button.frame()).size;
                 vec2(size.width as f32, size.height as f32)
             })
         })
     } else {
-        let label = crate::mac_text::natural_size(ui, title, 13., false)?;
+        let points = font_size.unwrap_or(13.);
+        let label = crate::mac_text::natural_size(ui, title, points, false)?;
         vec2(
             label.x.ceil() + 16.,
             label
                 .y
-                .max(crate::mac_text::system_line_height(ui, 13.))
+                .max(crate::mac_text::system_line_height(ui, f64::from(points)))
                 .ceil()
                 + 6.,
         )
     };
-    let normal = button_image(ui, title, symbol, control_size, size, false)?;
+    let normal = button_image(ui, title, symbol, control_size, font_size, size, false)?;
     let (rect, response) = ui.allocate_exact_size(size, Sense::click());
     let image = if response.is_pointer_button_down_on() {
-        button_image(ui, title, symbol, control_size, size, true).unwrap_or(normal)
+        button_image(ui, title, symbol, control_size, font_size, size, true).unwrap_or(normal)
     } else {
         normal
     };

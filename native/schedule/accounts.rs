@@ -1,6 +1,6 @@
 //! Account refreshes owned by the macOS monitor's main actor.
 use indexmap::IndexSet;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use uuid::Uuid;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -13,6 +13,7 @@ pub struct Job {
 pub struct Accounts {
     waiting: IndexSet<Uuid>,
     active: HashMap<Uuid, u64>,
+    install_workers: HashSet<u64>,
     generation: u64,
     sleeping: bool,
     installing: bool,
@@ -44,6 +45,7 @@ impl Accounts {
     /// A cancelled request may finish after the same account was enabled or
     /// connected again. Only its current worker may publish results or credentials.
     pub fn finish(&mut self, job: Job) -> bool {
+        self.install_workers.remove(&job.generation);
         if self.active.get(&job.account) == Some(&job.generation) {
             self.active.remove(&job.account);
             true
@@ -66,11 +68,19 @@ impl Accounts {
     }
 
     pub fn set_installing(&mut self, installing: bool) {
-        self.installing = installing;
-        if installing {
-            // The installer waits for in-flight token writes before taking over.
+        if installing && !self.installing {
+            // A subsequent sleep, removal or reconnect can retire a generation from the UI
+            // before its HTTP worker has unwound and finished writing rotated credentials.
+            self.install_workers.extend(self.active.values().copied());
             self.waiting.clear();
+        } else if !installing {
+            self.install_workers.clear();
         }
+        self.installing = installing;
+    }
+
+    pub fn ready_to_install(&self) -> bool {
+        self.installing && self.install_workers.is_empty()
     }
 
     pub fn loading(&self) -> impl Iterator<Item = Uuid> + '_ {
@@ -132,6 +142,11 @@ mod tests {
         assert!(queue.finish(jobs[0]));
         assert!(queue.start_next().is_none());
         queue.set_sleeping(true);
+        assert!(!queue.ready_to_install());
+        assert!(!queue.finish(jobs[1]));
+        assert!(!queue.ready_to_install());
+        assert!(!queue.finish(jobs[2]));
+        assert!(queue.ready_to_install());
         queue.set_installing(false);
         queue.enqueue(accounts[1]);
         assert_eq!(queue.status(), (0, 0, true, false));

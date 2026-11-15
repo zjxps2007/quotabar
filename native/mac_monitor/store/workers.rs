@@ -102,6 +102,8 @@ impl Store {
     fn finish(&self, job: Job, result: Outcome) {
         let mut state = self.state.borrow_mut();
         if !state.queue.finish(job) {
+            drop(state);
+            self.finish_update_if_ready();
             return;
         }
         state.workers.remove(&job.account);
@@ -136,7 +138,7 @@ impl Store {
 
     pub(super) fn finish_update_if_ready(&self) {
         let state = self.state.borrow();
-        if !state.queue.status().3 || !state.workers.is_empty() || self.flushing.replace(true) {
+        if !state.queue.ready_to_install() || self.flushing.replace(true) {
             return;
         }
         drop(state);

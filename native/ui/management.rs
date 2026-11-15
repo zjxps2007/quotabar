@@ -596,7 +596,11 @@ impl Dashboard {
                 ui.add_space(12.);
                 ui.add(Label::new(RichText::new(crate::mac::data_path().to_string_lossy()).monospace().size(11.)).selectable(true));
                 ui.add_space(12.);
-                if ui.add_enabled_ui(!self.state.demo, |ui| sheet_button(ui, "데이터 폴더 열기", p)).inner.clicked() {
+                if ui.add_enabled_ui(!self.state.demo, |ui| {
+                    crate::mac::standard_button(ui, "데이터 폴더 열기", None,
+                        objc2_app_kit::NSControlSize::Regular, Some(12.), p.focus_ring)
+                        .unwrap_or_else(|| action(ui, "데이터 폴더 열기", false, p))
+                }).inner.clicked() {
                     crate::mac::open_data();
                 }
             }
@@ -818,52 +822,72 @@ pub fn segments<'a>(
     items: &[(&'a str, &str)],
     current: &str,
     p: Palette,
-    _maximum_width: f32,
+    maximum_width: f32,
 ) -> Option<&'a str> {
-    let mut change = None;
-    let width = {
-        let max_label = items
-            .iter()
-            .map(|(_, title)| {
-                crate::windows_text::natural_size(ui, title, 12., false)
-                    .unwrap_or_else(|| {
-                        ui.painter()
-                            .layout_no_wrap((*title).to_owned(), FontId::proportional(12.), p.ink)
-                            .size()
-                    })
-                    .x
+    if items.is_empty() {
+        return None;
+    }
+    let font = FontId::proportional(12.);
+    let labels: Vec<_> = items
+        .iter()
+        .map(|&(_, title)| {
+            crate::windows_text::natural_size(ui, title, 12., false).unwrap_or_else(|| {
+                ui.painter()
+                    .layout_no_wrap(title.to_owned(), font.clone(), p.ink)
+                    .size()
             })
-            .fold(0.0_f32, f32::max);
-        max_label + if items.len() == 3 { 30. } else { 26. }
+        })
+        .collect();
+    // WPF's UniformGrid measures the largest ContentPresenter, then arranges equal
+    // cells with a one-DIP border and the Button's horizontal and vertical padding.
+    let appearance = items.len() == 3;
+    let padding = if appearance { 14. } else { 12. };
+    let mut cell = labels
+        .iter()
+        .fold(Vec2::ZERO, |size, &label| size.max(label))
+        + 2. * vec2(padding + 1., 8.);
+    let count = items.len() as f32;
+    let available = (ui.available_width() - 6.).max(0.);
+    let limit = if appearance {
+        available.min(maximum_width)
+    } else {
+        available
     };
-    ui.horizontal(|ui| {
-        Frame::new()
-            .fill(p.track)
-            .inner_margin(3)
-            .corner_radius(9)
-            .show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    ui.spacing_mut().item_spacing.x = 0.;
-                    for &(key, label) in items {
-                        if button_feedback(ui, p.track, p.ink, vec2(12., 5.), |ui| {
-                            ui.add(
-                                Button::new(rich(label, 12., false, p.ink))
-                                    .fill(if current == key { p.card } else { p.track })
-                                    .stroke(if current == key {
-                                        Stroke::new(1.0_f32, p.line)
-                                    } else {
-                                        Stroke::NONE
-                                    })
-                                    .min_size(vec2(width, 32.)),
-                            )
-                        })
-                        .clicked()
-                        {
-                            change = Some(key);
-                        }
-                    }
-                });
-            })
-    });
+    cell.x = cell.x.min(limit / count);
+    let (track, _) = ui.allocate_exact_size(vec2(cell.x * count + 6., cell.y + 6.), Sense::hover());
+    ui.painter().rect_filled(track, 9, p.track);
+    let first = track.min + vec2(3., 3.);
+    let mut change = None;
+    for (index, (&(key, title), measured)) in items.iter().zip(labels).enumerate() {
+        let area = Rect::from_min_size(first + vec2(cell.x * index as f32, 0.), cell);
+        if button_feedback(ui, p.track, p.ink, vec2(padding - 2., 5.), |ui| {
+            let response = ui.interact(
+                area,
+                ui.make_persistent_id(("setting-choice", key)),
+                Sense::click(),
+            );
+            if key == current {
+                ui.painter().rect(
+                    area,
+                    8,
+                    p.card,
+                    Stroke::new(1.0_f32, p.line),
+                    StrokeKind::Inside,
+                );
+            }
+            let origin = area.center() - measured * 0.5;
+            ui.painter()
+                .with_clip_rect(area.intersect(ui.clip_rect()))
+                .text(origin, Align2::LEFT_TOP, title, font.clone(), p.ink);
+            response
+                .widget_info(|| WidgetInfo::labeled(WidgetType::Button, ui.is_enabled(), title));
+            response
+        })
+        .on_hover_cursor(CursorIcon::PointingHand)
+        .clicked()
+        {
+            change = Some(key);
+        }
+    }
     change
 }

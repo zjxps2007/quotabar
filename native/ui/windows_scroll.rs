@@ -36,6 +36,7 @@ pub fn show(ui: &mut Ui, scroll: ScrollArea, palette: Palette, body: impl FnOnce
     let visuals = ui.visuals_mut();
     visuals.extreme_bg_color = Color32::TRANSPARENT;
     visuals.widgets.inactive.bg_fill = Color32::TRANSPARENT;
+    let viewport_origin = ui.available_rect_before_wrap().min;
     let mut area = scroll
         // ScrollToVerticalOffset also applies activity navigation immediately on Windows.
         .animated(false)
@@ -43,9 +44,15 @@ pub fn show(ui: &mut Ui, scroll: ScrollArea, palette: Palette, body: impl FnOnce
             scroll_bar: false,
             ..Default::default()
         })
-        .show(ui, |ui| {
+        .show_viewport(ui, |ui, viewport| {
             *ui.visuals_mut() = original.clone();
-            body(ui);
+            // ScrollViewer arranges the StackPanel in fractional DIPs. Keep that
+            // origin through layout and let DirectWrite and the borders snap at paint time.
+            let bounds =
+                Rect::from_min_size(viewport_origin - viewport.min.to_vec2(), viewport.size());
+            let mut content = ui.new_child(UiBuilder::new().max_rect(bounds));
+            body(&mut content);
+            ui.set_min_size(content.min_size());
         });
     *ui.visuals_mut() = original;
     let view = area.inner_rect;

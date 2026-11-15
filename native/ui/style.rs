@@ -84,7 +84,7 @@ pub struct Palette {
     #[cfg(target_os = "macos")]
     placeholder: Color32,
     #[cfg(target_os = "macos")]
-    focus_ring: Color32,
+    pub(crate) focus_ring: Color32,
     #[cfg(target_os = "macos")]
     pub window_background: Color32,
     pub card: Color32,
@@ -601,6 +601,7 @@ pub fn action_on(ui: &mut Ui, s: &str, primary: bool, p: Palette, backdrop: Colo
             text,
             symbol,
             objc2_app_kit::NSControlSize::Regular,
+            None,
             p.focus_ring,
         )
     {
@@ -702,6 +703,7 @@ pub fn sheet_button(ui: &mut Ui, title: &str, p: Palette) -> Response {
         title,
         None,
         objc2_app_kit::NSControlSize::Regular,
+        None,
         p.focus_ring,
     ) {
         return response;
@@ -716,6 +718,7 @@ pub fn small_button(ui: &mut Ui, title: &str, p: Palette) -> Response {
         title,
         None,
         objc2_app_kit::NSControlSize::Small,
+        None,
         p.focus_ring,
     )
     .unwrap_or_else(|| action(ui, title, false, p))
