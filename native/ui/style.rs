@@ -81,6 +81,10 @@ pub struct Palette {
     pub ink: Color32,
     pub muted: Color32,
     pub tertiary: Color32,
+    #[cfg(target_os = "macos")]
+    placeholder: Color32,
+    #[cfg(target_os = "macos")]
+    focus_ring: Color32,
     pub card: Color32,
     pub bg: Color32,
     pub rail: Color32,
@@ -99,7 +103,7 @@ impl Palette {
         };
         let gray = |d, l| Color32::from_gray(if dark { d } else { l });
         #[cfg(target_os = "macos")]
-        let (ink, muted, tertiary) = {
+        let (ink, muted, tertiary, placeholder, focus_ring) = {
             use block2::StackBlock;
             use objc2::MainThreadMarker;
             use objc2_app_kit::{NSApplication, NSColor};
@@ -109,15 +113,19 @@ impl Palette {
                 MainThreadMarker::new().expect("dashboard UI thread"),
             );
             let appearance = app.effectiveAppearance();
-            let key = Id::new(("AppKit label colors", appearance.name().to_string()));
+            let key = Id::new(("AppKit control colors", appearance.name().to_string()));
             ctx.data(|data| data.get_temp(key)).unwrap_or_else(|| {
-                let colors = Cell::new((gray(220, 39), gray(151, 128), gray(84, 189)));
+                let primary = gray(220, 39);
+                let secondary = gray(151, 128);
+                let tertiary = gray(84, 189);
+                let colors = Cell::new((primary, secondary, tertiary, tertiary, primary));
                 appearance.performAsCurrentDrawingAppearance(&StackBlock::new(|| {
-                    let (primary, secondary, tertiary) = colors.get();
                     colors.set((
                         mac_color(&NSColor::labelColor(), primary),
                         mac_color(&NSColor::secondaryLabelColor(), secondary),
                         mac_color(&NSColor::tertiaryLabelColor(), tertiary),
+                        mac_color(&NSColor::placeholderTextColor(), tertiary),
+                        mac_color(&NSColor::keyboardFocusIndicatorColor(), primary),
                     ));
                 }));
                 let colors = colors.get();
@@ -132,6 +140,10 @@ impl Palette {
             ink,
             muted,
             tertiary,
+            #[cfg(target_os = "macos")]
+            placeholder,
+            #[cfg(target_os = "macos")]
+            focus_ring,
             card: gray(28, 255),
             bg: gray(14, 245),
             rail: gray(19, 255),
@@ -245,13 +257,11 @@ pub fn mac_field(
     width: f32,
     p: Palette,
 ) -> Response {
-    use objc2_app_kit::NSColor;
-    let placeholder = mac_color(&NSColor::placeholderTextColor(), p.muted);
     let background = ui.painter().add(Shape::Noop);
     let field = ui.add(
         TextEdit::singleline(text)
             .id(Id::new(id))
-            .hint_text(rich(hint, 13., false, placeholder))
+            .hint_text(rich(hint, 13., false, p.placeholder))
             .font(FontId::proportional(13.))
             .frame(false)
             .margin(Margin::symmetric(10, 0))
@@ -259,22 +269,31 @@ pub fn mac_field(
             .min_size(vec2(0., 22.))
             .desired_width((width - 20.).max(0.)),
     );
+    // A rounded Dark Aqua editor has a raised bezel within its layout bounds.
+    let (bezel, fill, edge) = if p.dark {
+        (
+            field.rect.shrink(1.),
+            Color32::from_gray(40),
+            Color32::from_gray(59),
+        )
+    } else {
+        (field.rect, p.card, p.line)
+    };
     ui.painter().set(
         background,
         epaint::RectShape::new(
-            field.rect,
+            bezel,
             6.,
-            p.card,
-            Stroke::new(1.0_f32, p.line),
+            fill,
+            Stroke::new(1.0_f32, edge),
             StrokeKind::Inside,
         ),
     );
     if field.has_focus() {
-        let ring = mac_color(&NSColor::keyboardFocusIndicatorColor(), p.ink);
         ui.painter().rect_stroke(
-            field.rect.expand(1.),
+            field.rect,
             6.,
-            Stroke::new(3.0_f32, ring),
+            Stroke::new(4.0_f32, p.focus_ring),
             StrokeKind::Middle,
         );
     }
