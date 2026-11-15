@@ -257,7 +257,7 @@ static BOOL clickControl(NSWindow *window, NSString *label) {
     // one down/up pair so an accessibility action cannot introduce a duplicate.
     BOOL sheetSegment = window.sheetParent && [@[@"Codex", @"Claude", @"Gemini", @"브라우저 로그인", @"파일 가져오기",
                                                 @"저작권 및 변경 고지", @"Apache License 2.0 전문"] containsObject:label];
-    BOOL licenseButton = [label isEqual:@"라이선스 및 고지 보기"] || [label isEqual:@"닫기"];
+    BOOL licenseButton = [label isEqual:@"라이선스 및 고지 보기"] || [label isEqual:@"닫기"] || [label isEqual:@"문서 본문"];
     BOOL popup = [label isEqual:@"Provider 필터"] || [label isEqual:@"자동 새로고침 간격"];
     if (!getenv("QUOTABAR_TEST_REFERENCE_INPUT") && !sheetSegment && !popup && !licenseButton && ![label isEqual:@"Dock에 앱 아이콘 표시"] &&
         ![label hasSuffix:@" 계정 메뉴"]) return NO;
@@ -287,6 +287,7 @@ static BOOL clickControl(NSWindow *window, NSString *label) {
     else if ([label isEqual:@"라이선스 및 고지 보기"]) { x = 318; y = h - 59; }
     else if ([label isEqual:@"저작권 및 변경 고지"]) { x = w * 0.26; y = 72; }
     else if ([label isEqual:@"Apache License 2.0 전문"]) { x = w * 0.74; y = 72; }
+    else if ([label isEqual:@"문서 본문"]) { x = 120; y = 137; }
     else if ([label isEqual:@"닫기"]) { x = w - 49; y = h - 35; }
     else if ([label hasPrefix:@"이 폴더의 statusLine"]) { x = 50; y = h - 99; }
     else if ([label isEqual:@"연결"]) { x = w - 52; y = h - 42; }
@@ -360,6 +361,17 @@ static NSDictionary *perform(NSDictionary *request) {
     }
     if ([op isEqual:@"sheet"])
         return @{@"sheet": @(window.attachedSheet != nil)};
+    if ([op isEqual:@"documentEscape"]) {
+        NSWindow *sheet = window.attachedSheet;
+        if (!sheet) return @{@"error": @"no document sheet"};
+        for (NSNumber *kind in @[@(NSEventTypeKeyDown), @(NSEventTypeKeyUp)]) {
+            NSEvent *key = [NSEvent keyEventWithType:kind.unsignedIntegerValue location:NSZeroPoint modifierFlags:0
+                timestamp:NSProcessInfo.processInfo.systemUptime windowNumber:sheet.windowNumber context:nil
+                characters:@"\x1b" charactersIgnoringModifiers:@"\x1b" isARepeat:NO keyCode:53];
+            [NSApp postEvent:key atStart:NO];
+        }
+        return @{@"key": @"Escape"};
+    }
     if ([op isEqual:@"appearance"]) {
         NSString *match = [window.effectiveAppearance bestMatchFromAppearancesWithNames:@[NSAppearanceNameAqua, NSAppearanceNameDarkAqua]];
         return @{@"appearance": [match isEqual:NSAppearanceNameDarkAqua] ? @"dark" : @"light"};

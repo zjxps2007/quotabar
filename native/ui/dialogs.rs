@@ -85,6 +85,8 @@ pub enum Dialog {
     Licenses {
         docs: Vec<(String, String)>,
         selected: usize,
+        #[cfg(target_os = "macos")]
+        reader: Option<crate::mac::DocumentReader>,
     },
 }
 impl Dialog {
@@ -145,7 +147,12 @@ impl Dialog {
                 docs.push((title, content));
             }
         }
-        Self::Licenses { docs, selected: 0 }
+        Self::Licenses {
+            docs,
+            selected: 0,
+            #[cfg(target_os = "macos")]
+            reader: None,
+        }
     }
 }
 impl Dashboard {
@@ -259,16 +266,22 @@ impl Dashboard {
             if !had_popup && ctx.input_mut(|i| i.consume_key(Modifiers::NONE, Key::Escape)) {
                 close = true;
             }
+            #[cfg(target_os = "macos")]
+            let background = if matches!(&dialog, Dialog::Licenses { .. }) {
+                p.window_background
+            } else {
+                p.card
+            };
+            #[cfg(windows)]
+            let background = p.bg;
             CentralPanel::default()
-                .frame(
-                    Frame::new()
-                        .fill(if MAC { p.card } else { p.bg })
-                        .inner_margin(if matches!(&dialog, Dialog::Licenses { .. }) {
-                            24
-                        } else {
-                            28
-                        }),
-                )
+                .frame(Frame::new().fill(background).inner_margin(
+                    if matches!(&dialog, Dialog::Licenses { .. }) {
+                        24
+                    } else {
+                        28
+                    },
+                ))
                 .show(ctx, |ui| match &mut dialog {
                     Dialog::Connect(c) => {
                         #[cfg(target_os = "macos")]
@@ -322,7 +335,12 @@ impl Dashboard {
                         }
                     }
                     Dialog::Remove { .. } => unreachable!(),
-                    Dialog::Licenses { docs, selected } => {
+                    Dialog::Licenses {
+                        docs,
+                        selected,
+                        #[cfg(target_os = "macos")]
+                        reader,
+                    } => {
                         #[cfg(windows)]
                         ui.shrink_clip_rect(ui.max_rect());
                         form_text(
@@ -352,55 +370,92 @@ impl Dashboard {
                             *selected = index;
                         }
                         ui.add_space(16.);
-                        let height = (ui.available_height() - 48.).max(80.);
-                        Frame::new()
-                            .fill(if MAC { p.bg } else { p.card })
-                            .stroke(if MAC {
-                                Stroke::NONE
-                            } else {
-                                Stroke::new(1.0_f32, p.line)
-                            })
-                            .corner_radius(if MAC { 10 } else { 7 })
-                            .inner_margin(if MAC { 16 } else { 14 })
-                            .show(ui, |ui| {
-                                ScrollArea::vertical()
-                                    .id_salt(*selected)
-                                    .max_height(height - 34.)
-                                    .auto_shrink([false, false])
-                                    .show(ui, |ui| {
-                                        #[cfg(target_os = "macos")]
-                                        let reader = ui.add(
-                                            Label::new(
-                                                RichText::new(&docs[*selected].1)
-                                                    .monospace()
-                                                    .size(12.),
-                                            )
-                                            .selectable(true),
-                                        );
-                                        #[cfg(target_os = "macos")]
-                                        ui.ctx().accesskit_node_builder(reader.id, |node| {
-                                            node.set_label(docs[*selected].0.as_str())
-                                        });
-                                        #[cfg(windows)]
-                                        {
-                                            let mut text = docs[*selected].1.as_str();
+                        #[cfg(target_os = "macos")]
+                        let attached = {
+                            let close_height = crate::mac_text::system_line_height(ui, 13.) + 6.;
+                            let size = vec2(
+                                ui.available_width(),
+                                (ui.available_height() - 16. - close_height).max(80.),
+                            );
+                            let rect = Rect::from_min_size(ui.next_widget_position(), size);
+                            let attached = crate::mac::DocumentReader::show(
+                                reader,
+                                ui.ctx(),
+                                rect,
+                                *selected,
+                                &docs[*selected],
+                            );
+                            if attached {
+                                let (rect, response) = ui.allocate_exact_size(size, Sense::hover());
+                                ui.painter().rect_filled(rect, 10., p.bg);
+                                ui.ctx().accesskit_node_builder(response.id, |node| {
+                                    node.set_role(eframe::egui::accesskit::Role::Document);
+                                    node.set_label(docs[*selected].0.as_str());
+                                    node.set_value(docs[*selected].1.as_str());
+                                    node.set_read_only();
+                                });
+                                close |= reader
+                                    .as_ref()
+                                    .is_some_and(crate::mac::DocumentReader::cancelled);
+                            }
+                            attached
+                        };
+                        #[cfg(windows)]
+                        let attached = false;
+                        if !attached {
+                            let height = (ui.available_height() - 48.).max(80.);
+                            Frame::new()
+                                .fill(if MAC { p.bg } else { p.card })
+                                .stroke(if MAC {
+                                    Stroke::NONE
+                                } else {
+                                    Stroke::new(1.0_f32, p.line)
+                                })
+                                .corner_radius(if MAC { 10 } else { 7 })
+                                .inner_margin(if MAC { 16 } else { 14 })
+                                .show(ui, |ui| {
+                                    ScrollArea::vertical()
+                                        .id_salt(*selected)
+                                        .max_height(height - 34.)
+                                        .auto_shrink([false, false])
+                                        .show(ui, |ui| {
+                                            #[cfg(target_os = "macos")]
                                             let reader = ui.add(
-                                                TextEdit::multiline(&mut text)
-                                                    .font(FontId::monospace(12.))
-                                                    .frame(false)
-                                                    .margin(0.)
-                                                    .id_salt(("license-text", *selected))
-                                                    .desired_width(f32::INFINITY),
+                                                Label::new(
+                                                    RichText::new(&docs[*selected].1)
+                                                        .monospace()
+                                                        .size(12.),
+                                                )
+                                                .selectable(true),
                                             );
+                                            #[cfg(target_os = "macos")]
                                             ui.ctx().accesskit_node_builder(reader.id, |node| {
-                                                node.set_label("라이선스 전문");
-                                                node.set_read_only();
-                                                node.set_value(text);
+                                                node.set_label(docs[*selected].0.as_str())
                                             });
-                                        }
-                                    });
-                            });
-                        ui.add_space(12.);
+                                            #[cfg(windows)]
+                                            {
+                                                let mut text = docs[*selected].1.as_str();
+                                                let reader = ui.add(
+                                                    TextEdit::multiline(&mut text)
+                                                        .font(FontId::monospace(12.))
+                                                        .frame(false)
+                                                        .margin(0.)
+                                                        .id_salt(("license-text", *selected))
+                                                        .desired_width(f32::INFINITY),
+                                                );
+                                                ui.ctx().accesskit_node_builder(
+                                                    reader.id,
+                                                    |node| {
+                                                        node.set_label("라이선스 전문");
+                                                        node.set_read_only();
+                                                        node.set_value(text);
+                                                    },
+                                                );
+                                            }
+                                        });
+                                });
+                        }
+                        ui.add_space(if MAC { 16. } else { 12. });
                         if ui
                             .with_layout(Layout::right_to_left(Align::Min), |ui| {
                                 if MAC {

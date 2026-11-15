@@ -322,6 +322,13 @@ def capture_windows(dashboard, program, folder, library, fixture, output, theme)
             controls.request("press", "닫기")
             controls.request("sheet", expected={"sheet": False})
             observed["licenseDocuments"] = [*journey, "closed"]
+            controls.request("press", "라이선스 및 고지 보기")
+            controls.request("sheet", expected={"sheet": True})
+            controls.request("press", "문서 본문")
+            time.sleep(0.2)
+            controls.request("documentEscape")
+            controls.request("sheet", expected={"sheet": False})
+            observed["licenseEscapeClosed"] = True
         except (OSError, ValueError, KeyError, RuntimeError, EOFError, subprocess.SubprocessError) as error:
             observed["error"] = str(error)
         finally:
@@ -367,6 +374,7 @@ def compare_windows(dashboard, work, original, library):
             results["repeatability"][side][repeated.stem] = json.loads(result.read_text())
     (dest / "comparison.json").write_text(json.dumps(results, ensure_ascii=False, indent=2))
     documents_match = all(results[side][theme].get("licenseDocuments") == ["NOTICE", "LICENSE", "NOTICE", "closed"]
+                          and results[side][theme].get("licenseEscapeClosed") is True
                           for side in ("original", "rust") for theme in dashboard.THEMES)
     return documents_match and all(row["identical"] for row in results["comparisons"].values())
 
