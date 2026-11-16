@@ -468,7 +468,8 @@ pub fn disclosure(
 ) {
     ui.scope(|ui| {
         let header = CollapsingHeader::new(rich(title, size, false, p.muted)).id_salt(key);
-        if cfg!(windows) {
+        #[cfg(windows)]
+        {
             ui.spacing_mut().button_padding = vec2(0., 2.);
             ui.spacing_mut().interact_size.y = 0.;
             ui.spacing_mut().indent = 15.;
@@ -486,8 +487,31 @@ pub fn disclosure(
                     ui.add_space(6.);
                     body(ui);
                 });
-        } else {
-            header.show(ui, body);
+        }
+        #[cfg(target_os = "macos")]
+        {
+            // SwiftUI aligns the disclosed stack with the card's leading edge.
+            ui.spacing_mut().button_padding = Vec2::ZERO;
+            ui.spacing_mut().indent = 12.;
+            ui.spacing_mut().interact_size.y = 22.;
+            header
+                .icon(move |ui, openness, response| {
+                    let center = response.rect.center() - vec2(2., 0.);
+                    let bounds = Rect::from_center_size(center, vec2(9., 9.));
+                    crate::mac::symbol(
+                        ui.painter(),
+                        bounds,
+                        if openness >= 0.5 {
+                            "chevron.down"
+                        } else {
+                            "chevron.right"
+                        },
+                        8.,
+                        true,
+                        p.tertiary,
+                    );
+                })
+                .show_unindented(ui, body);
         }
     });
 }

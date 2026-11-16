@@ -371,6 +371,9 @@ def capture_windows(dashboard, program, folder, library, fixture, output, theme,
                     dashboard.send(app.stdin, {"state": {"_0": contact}})
                     try:
                         controls.request("press", "연결한 로그인 파일")
+                        # AppKit exposes the path before the disclosure animation finishes.
+                        # Let the path settle under the pointer before starting the drag.
+                        time.sleep(0.7)
                         copy_selection("sourcePath", SOURCE_PATH, "source-path-selected")
                     except (TimeoutError, ValueError) as error:
                         observed["sourcePathCopyError"] = str(error)

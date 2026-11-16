@@ -391,13 +391,16 @@ impl Dashboard {
             });
         });
         if !a.path.is_empty() {
-            ui.add_space(14.);
+            ui.add_space(if MAC { 16. } else { 14. });
             let title = if a.provider == "Claude" {
                 "연결한 설정 폴더"
             } else {
                 "연결한 로그인 파일"
             };
-            disclosure(ui, (&a.id, "source"), title, 11., p, |ui| {
+            let size = if MAC { 10. } else { 11. };
+            disclosure(ui, (&a.id, "source"), title, size, p, |ui| {
+                #[cfg(target_os = "macos")]
+                ui.add_space(8.);
                 #[cfg(target_os = "macos")]
                 if let Some(fields) = self.native_selectable_text(ui) {
                     fields.show(ui, crate::mac::TextRole::SourcePath, &a.path);
@@ -420,6 +423,12 @@ impl Dashboard {
                         "CLI가 갱신한 로그인 파일을 읽습니다. 로그인 만료 시 CLI에서 다시 로그인하세요."
                     }
                 };
+                #[cfg(target_os = "macos")]
+                {
+                    ui.add_space(8.);
+                    system_label(ui, detail, 10., false, p.muted);
+                }
+                #[cfg(windows)]
                 caption(ui, detail, p);
             });
         }
