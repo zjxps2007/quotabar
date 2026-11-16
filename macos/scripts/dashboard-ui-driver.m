@@ -403,12 +403,14 @@ static NSDictionary *perform(NSDictionary *request) {
     NSWindow *window = dashboardWindow();
     if (!window) return @{@"pending": @"dashboard window"};
     NSString *op = request[@"op"], *label = request[@"label"];
-    if ([op isEqual:@"selectBanner"] || [op isEqual:@"dismissBanner"]) {
+    if ([op isEqual:@"selectText"] || [op isEqual:@"dismissBanner"]) {
         id message = control(window, label, [NSMutableArray array], YES);
         if (![message respondsToSelector:@selector(accessibilityFrame)]) return @{@"pending": @"message text"};
         NSRect textFrame = [message accessibilityFrame];
         if (NSIsEmptyRect(textFrame)) return @{@"pending": @"message frame"};
-        if ([op isEqual:@"selectBanner"]) {
+        if ([op isEqual:@"selectText"]) {
+            [NSApp activateIgnoringOtherApps:YES];
+            [window makeKeyAndOrderFront:nil];
             [fixturePasteboard(nil, NULL) clearContents];
             CGFloat left = NSMinX(textFrame) + 0.5, right = NSMaxX(textFrame) + 2;
             CGFloat middle = NSMidY(textFrame);
@@ -443,7 +445,7 @@ static NSDictionary *perform(NSDictionary *request) {
         }
         return @{@"clicked": @"dismiss"};
     }
-    if ([op isEqual:@"copyBanner"]) {
+    if ([op isEqual:@"copySelection"]) {
         for (NSNumber *kind in @[@(NSEventTypeKeyDown), @(NSEventTypeKeyUp)]) {
             NSEvent *key = [NSEvent keyEventWithType:kind.unsignedIntegerValue location:NSZeroPoint
                 modifierFlags:NSEventModifierFlagCommand timestamp:NSProcessInfo.processInfo.systemUptime
@@ -453,9 +455,9 @@ static NSDictionary *perform(NSDictionary *request) {
         }
         return @{@"shortcut": @"Command-C"};
     }
-    if ([op isEqual:@"bannerClipboard"]) {
+    if ([op isEqual:@"selectionClipboard"]) {
         NSString *value = [fixturePasteboard(nil, NULL) stringForType:NSPasteboardTypeString];
-        return value ? @{@"text": value} : @{@"pending": @"copied banner text"};
+        return value ? @{@"text": value} : @{@"pending": @"copied text"};
     }
     if ([op isEqual:@"scrollContent"]) return scrollContent(window);
     if ([op isEqual:@"scrollerPosition"] || [op isEqual:@"pageSettings"])

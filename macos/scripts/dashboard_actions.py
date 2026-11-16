@@ -12,6 +12,7 @@ from uuid import UUID
 
 
 BANNER_MESSAGE = "샘플 계정의 연결을 다시 확인하세요."
+ACCOUNT_EMAIL = "account-selection@example.test"
 
 
 class Controls:
@@ -310,6 +311,15 @@ def capture_windows(dashboard, program, folder, library, fixture, output, theme,
             except (ValueError, OSError) as error:
                 observed[route] = {"error": str(error)}
 
+        def copy_selection(key, label, scene):
+            try:
+                controls.request("selectText", label)
+                capture(scene)
+                controls.request("copySelection")
+                observed[key + "Clipboard"] = controls.request("selectionClipboard")
+            except (ValueError, TimeoutError) as error:
+                observed[key + "CopyError"] = str(error)
+
         try:
             dashboard.wait_for(app.stdout, "ready")
             dashboard.send(app.stdin, {"state": {"_0": fixture}})
@@ -318,6 +328,14 @@ def capture_windows(dashboard, program, folder, library, fixture, output, theme,
                 if route == "accounts":
                     controls.request("size")
                 capture(route)
+                if route == "accounts":
+                    account = fixture["settings"]["accounts"][0]
+                    contact = deepcopy(fixture)
+                    contact["snapshots"][1]["email"] = ACCOUNT_EMAIL
+                    dashboard.send(app.stdin, {"state": {"_0": contact}})
+                    copy_selection("accountName", account["name"], "account-name-selected")
+                    copy_selection("accountEmail", ACCOUNT_EMAIL, "account-email-selected")
+                    dashboard.send(app.stdin, {"state": {"_0": fixture}})
                 if route == "dashboard":
                     # AccessKit publishes its first tree on the next UI frame.
                     try:
@@ -327,13 +345,7 @@ def capture_windows(dashboard, program, folder, library, fixture, output, theme,
                     message = BANNER_MESSAGE
                     dashboard.send(app.stdin, {"state": {"_0": {**fixture, "message": message}}})
                     capture("message")
-                    try:
-                        controls.request("selectBanner", message)
-                        capture("message-selected")
-                        controls.request("copyBanner")
-                        observed["messageClipboard"] = controls.request("bannerClipboard")
-                    except (ValueError, TimeoutError) as error:
-                        observed["messageCopyError"] = str(error)
+                    copy_selection("message", message, "message-selected")
                     try:
                         controls.request("dismissBanner", message)
                         observed["messageDismissal"] = dashboard.wait_for(app.stdout, "message")
@@ -449,15 +461,16 @@ def capture_windows(dashboard, program, folder, library, fixture, output, theme,
 def compare_windows(dashboard, work, original, library):
     dest = dashboard.REPORT / "windows"
     results = {"original": {}, "rust": {}, "comparisons": {}, "repeatability": {}}
+    fixtures = {theme: json.loads((dashboard.REPORT / f"fixture-{theme}.json").read_text())
+                for theme in dashboard.THEMES}
     for side, program in (("original", original), ("rust", dashboard.APP)):
         output = dest / side
         output.mkdir(parents=True, exist_ok=True)
-        for theme in dashboard.THEMES:
-            fixture = json.loads((dashboard.REPORT / f"fixture-{theme}.json").read_text())
+        for theme, fixture in fixtures.items():
             results[side][theme] = capture_windows(dashboard, program, work / f"windows-{side}-{theme}",
                                                   library, fixture, output, theme, original)
     for theme in dashboard.THEMES:
-        for route in (*dashboard.ROUTES, "remove", "message", "message-selected", "message-wrapped", "popover-sample", "popover-empty", "popover-overflow",
+        for route in (*dashboard.ROUTES, "remove", "message", "message-selected", "message-wrapped", "account-name-selected", "account-email-selected", "popover-sample", "popover-empty", "popover-overflow",
                       "settings-bottom", "licenses-notice", "licenses-apache", "empty", "activity-empty", "activity"):
             name = f"{route}-{theme}"
             lhs, rhs = (dest / side / f"{name}.png" for side in ("original", "rust"))
@@ -484,6 +497,10 @@ def compare_windows(dashboard, work, original, library):
                           and results[side][theme].get("messageAfterDismissal") == {"found": False, "help": None}
                           and results[side][theme].get("messageClipboard") == {"text": BANNER_MESSAGE}
                           for side in ("original", "rust") for theme in dashboard.THEMES)
+    copied_accounts = all(
+        results[side][theme].get("accountNameClipboard") == {"text": fixture["settings"]["accounts"][0]["name"]}
+        and results[side][theme].get("accountEmailClipboard") == {"text": ACCOUNT_EMAIL}
+        for side in ("original", "rust") for theme, fixture in fixtures.items())
     documents_match = all(results[side][theme].get("licenseDocuments") == ["NOTICE", "LICENSE", "NOTICE", "closed"]
                           and results[side][theme].get("licenseEscapeClosed") is True
                           for side in ("original", "rust") for theme in dashboard.THEMES)
@@ -498,7 +515,7 @@ def compare_windows(dashboard, work, original, library):
                                "unused": {"found": False, "help": None},
                            }
                            for side in ("original", "rust") for theme in dashboard.THEMES)
-    return app_mark_matches and message_matches and documents_match and scroll_matches and activity_matches and all(row["identical"] for row in results["comparisons"].values())
+    return app_mark_matches and message_matches and copied_accounts and documents_match and scroll_matches and activity_matches and all(row["identical"] for row in results["comparisons"].values())
 
 
 def compare(dashboard, work, original, fixture, library):
