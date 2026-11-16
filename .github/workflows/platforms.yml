@@ -29,6 +29,12 @@ jobs:
         with:
           persist-credentials: false
           fetch-depth: 0
+      - name: Inspect the macOS reference switch palette
+        run: swift macos/scripts/inspect-switch.swift artifacts/appkit-switch-samples
+      - uses: actions/upload-artifact@v7
+        with:
+          name: appkit-switch-samples
+          path: artifacts/appkit-switch-samples
       - name: Existing Swift suites and shared contract
         run: bash scripts/test.sh
       - name: Native Rust contracts
