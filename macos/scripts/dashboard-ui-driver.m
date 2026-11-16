@@ -300,7 +300,7 @@ static BOOL clickControl(NSWindow *window, NSString *label) {
     else if ([label isEqual:@"문서 본문"]) { x = 120; y = 137; }
     else if ([label isEqual:@"닫기"]) { x = w - 49; y = h - 35; }
     else if ([label hasPrefix:@"이 폴더의 statusLine"]) { x = 50; y = h - 99; }
-    else if ([label isEqual:@"연결"]) { x = w - 52; y = h - 42; }
+    else if ([label isEqual:@"연결"] || [label isEqual:@"ChatGPT로 로그인"]) { x = w - 52; y = h - 42; }
     else if ([label isEqual:@"취소"]) { x = w - 103; y = h - 42; }
     else return NO;
     NSPoint point = [view convertPoint:NSMakePoint(x, view.isFlipped ? y : h-y) toView:nil];

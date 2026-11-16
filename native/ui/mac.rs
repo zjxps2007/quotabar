@@ -359,14 +359,17 @@ impl Connect {
         self.login_url = None;
         let Some(exe) = mac_login::find(&std::env::var("PATH").unwrap_or_default(), &home()) else {
             self.error = Some(
-                "Codex CLI를 찾지 못했습니다. Codex CLI를 설치하거나 로그인 파일을 가져오세요."
+                "Codex 실행 파일을 찾지 못했습니다. Codex CLI 또는 ChatGPT 데스크톱 앱을 설치한 뒤 다시 시도하세요."
                     .into(),
             );
             return;
         };
         match Attempt::start(&exe, &std::env::temp_dir(), Duration::from_secs(300)) {
             Ok(a) => self.login = Some(a),
-            Err(_) => self.error = Some("Codex 로그인을 시작하지 못했습니다.".into()),
+            Err(_) => {
+                self.error =
+                    Some("Codex 로그인을 시작하지 못했습니다. 설치된 Codex를 확인하세요.".into())
+            }
         }
     }
     pub fn poll(&mut self, wire: &Peer, ctx: &Context) {
@@ -385,15 +388,15 @@ impl Connect {
                     request["replacing"] = json!(id);
                 }
                 let id = wire.action("codexLogin", request);
-                self.pending = Some((id, Instant::now()));
+                self.wait_for_reply(id, ctx);
             }
             other => {
                 self.login.take();
                 self.error = Some(
-                    if matches!(other, Ok(Progress::TimedOut)) {
-                        "로그인 시간이 초과되었습니다. 다시 시도하세요."
-                    } else {
-                        "로그인을 완료하지 못했습니다. 다시 시도하세요."
+                    match other {
+                        Ok(Progress::TimedOut) => "로그인 대기 시간이 지났습니다. 다시 로그인하세요.",
+                        Ok(Progress::Failed) => "로그인이 완료되지 않았습니다. 다른 Codex 로그인 창을 닫고 다시 시도하세요.",
+                        _ => "로그인을 완료하지 못했습니다. 다시 시도하세요.",
                     }
                     .into(),
                 );

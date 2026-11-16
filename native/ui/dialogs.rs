@@ -280,15 +280,16 @@ impl Dashboard {
     }
     pub fn finish_request(&mut self, id: &str, error: Option<String>) {
         if let Some(Dialog::Connect(c)) = &mut self.dialog
+            && c.reply_time_left().is_some()
             && c.pending
                 .as_ref()
                 .is_some_and(|(key, _)| id.eq_ignore_ascii_case(key))
         {
             c.pending = None;
-            if error.is_none() {
-                self.dialog = None;
+            if let Some(message) = error {
+                c.error = Some(c.request_error("connection", &message));
             } else {
-                c.error = error;
+                self.dialog = None;
             }
         }
     }
@@ -678,12 +679,9 @@ impl Dashboard {
         p: Palette,
         browse_requested: &mut bool,
     ) -> bool {
-        if c.pending
-            .as_ref()
-            .is_some_and(|(_, start)| start.elapsed() > Duration::from_secs(30))
-        {
-            c.pending = None;
-            c.error = Some("모니터가 응답하지 않습니다. 다시 시도하세요.".into());
+        if let Some(remaining) = c.reply_time_left() {
+            ui.ctx()
+                .request_repaint_after_for(remaining, ViewportId::ROOT);
         }
         #[cfg(target_os = "macos")]
         c.poll(&self.wire, ui.ctx());
@@ -1021,7 +1019,7 @@ impl Dashboard {
                 "connect",
                 json!({"provider":c.provider.to_ascii_lowercase(),"path":c.path,"alias":c.alias}),
             );
-            c.pending = Some((id, Instant::now()));
+            c.wait_for_reply(id, ui.ctx());
         } else {
             if c.provider == "Claude" {
                 self.wire
@@ -1036,6 +1034,36 @@ impl Dashboard {
     }
 }
 impl Connect {
+    fn request_error(&self, code: &str, message: &str) -> String {
+        // The file form displays localizedDescription. The browser flow displays
+        // ProviderError.message directly, including when the monitor fails to reply.
+        if MAC && !(self.provider == "Codex" && self.browser) {
+            format!("[{code}] {message}")
+        } else {
+            message.to_owned()
+        }
+    }
+
+    pub fn wait_for_reply(&mut self, id: String, ctx: &Context) {
+        self.pending = Some((id, Instant::now()));
+        ctx.request_repaint_of(ViewportId::ROOT);
+    }
+
+    fn reply_time_left(&mut self) -> Option<Duration> {
+        let (_, start) = self.pending.as_ref()?;
+        let remaining = Duration::from_secs(30).saturating_sub(start.elapsed());
+        if remaining.is_zero() {
+            self.pending = None;
+            self.error = Some(self.request_error(
+                "dashboard_timeout",
+                "연결 결과를 받지 못했습니다. 계정 목록을 확인한 뒤 다시 시도하세요.",
+            ));
+            None
+        } else {
+            Some(remaining)
+        }
+    }
+
     #[cfg(target_os = "macos")]
     fn connection_help(&mut self, ui: &mut Ui, browser: bool, p: Palette) {
         Frame::new().inner_margin(15).corner_radius(10)

@@ -16,6 +16,9 @@ ACCOUNT_EMAIL = "account-selection@example.test"
 SOURCE_PATH = "/tmp/QuotaBar 샘플/auth.json"
 DATA_PATH = str(Path.home() / "Library/Application Support/AIUsage Lite")
 CONNECTION_ERROR = "검증용 연결 오류"
+FILE_ERROR_TEXT = "[connection] " + CONNECTION_ERROR
+TIMEOUT_TEXT = "[dashboard_timeout] 연결 결과를 받지 못했습니다. 계정 목록을 확인한 뒤 다시 시도하세요."
+EXITED_LOGIN_TEXT = "로그인이 완료되지 않았습니다. 다른 Codex 로그인 창을 닫고 다시 시도하세요."
 
 
 class Controls:
@@ -24,8 +27,8 @@ class Controls:
         self.child = child
         self.sequence = 0
 
-    def request(self, op, label="", expected=None):
-        deadline = time.monotonic() + 8
+    def request(self, op, label="", expected=None, timeout=8):
+        deadline = time.monotonic() + timeout
         result = None
         while time.monotonic() < deadline:
             self.sequence += 1
@@ -58,6 +61,11 @@ def exercise(dashboard, executable, folder, library, fixture, observed, help_tex
            "QUOTABAR_TEST_PRIVATE_PASTEBOARD": "1"}
     if executable != dashboard.APP:
         env["QUOTABAR_TEST_REFERENCE_INPUT"] = "1"
+    # Exercise an unsuccessful browser login without starting a real CLI or browser.
+    fake_cli = folder / "codex"
+    fake_cli.write_text("#!/bin/sh\nexit 1\n")
+    fake_cli.chmod(0o700)
+    env["PATH"] = str(folder) + os.pathsep + env["PATH"]
     with subprocess.Popen([executable, "--dashboard-helper"], stdin=subprocess.PIPE,
                           stdout=subprocess.PIPE, bufsize=0, env=env) as app:
         controls = Controls(folder, app)
@@ -167,6 +175,9 @@ def exercise(dashboard, executable, folder, library, fixture, observed, help_tex
             controls.request("press", "계정 연결")
             controls.request("sheet", expected={"sheet": True})
             observed.append({"connectionSheet": "opened"})
+            controls.request("press", "ChatGPT로 로그인")
+            controls.request("help", EXITED_LOGIN_TEXT, {"found": True, "help": None})
+            observed.append({"browserLoginExited": EXITED_LOGIN_TEXT})
             for segment, provider, path in (
                 ("파일 가져오기", "codex", Path(env["CODEX_HOME"]) / "auth.json"),
                 ("Gemini", "gemini", Path.home() / ".gemini" / "oauth_creds.json"),
@@ -201,7 +212,7 @@ def exercise(dashboard, executable, folder, library, fixture, observed, help_tex
             time.sleep(0.35)
             controls.request("sheet", expected={"sheet": True})
             try:
-                controls.request("selectText", CONNECTION_ERROR)
+                controls.request("selectText", FILE_ERROR_TEXT)
                 time.sleep(0.7)
                 controls.request("copySelection")
                 help_text["connectionErrorClipboard"] = controls.request("selectionClipboard")
@@ -221,7 +232,17 @@ def exercise(dashboard, executable, folder, library, fixture, observed, help_tex
             next_id = next_request.pop("id")
             if UUID(next_id) == UUID(request_id) or next_request != expected:
                 raise ValueError(f"Unexpected second connection request {next_request}")
+            controls.request("help", TIMEOUT_TEXT, {"found": True, "help": None}, timeout=38)
             send({"reply": {"id": next_id}})
+            time.sleep(0.35)
+            controls.request("sheet", expected={"sheet": True})
+            controls.request("press", "연결")
+            retry = command("connect")
+            retry_id = retry.pop("id")
+            if UUID(retry_id) == UUID(next_id) or retry != expected:
+                raise ValueError(f"Unexpected connection after timeout {retry}")
+            observed.append({"lateReplyIgnoredAndRetryAvailable": TIMEOUT_TEXT})
+            send({"reply": {"id": retry_id}})
             controls.request("sheet", expected={"sheet": False})
             observed.append({"successfulConnectionDismissesSheet": True})
             controls.request("accountRefresh", f"{account['name']} 계정 메뉴", {"selected": "새로고침"})
@@ -563,7 +584,7 @@ def compare(dashboard, work, original, fixture, library):
     results["switchHelpIdentical"] = all(results[side]["help"].get(key) == {"help": value, "found": True}
                                         for side in ("original", "rust") for key, value in expected_help.items())
     results["connectionErrorCopies"] = all(
-        results[side]["help"].get("connectionErrorClipboard") == {"text": CONNECTION_ERROR}
+        results[side]["help"].get("connectionErrorClipboard") == {"text": FILE_ERROR_TEXT}
         for side in ("original", "rust"))
     (dashboard.REPORT / "actions.json").write_text(json.dumps(results, ensure_ascii=False, indent=2))
     return results["identical"] and results["switchHelpIdentical"] and results["connectionErrorCopies"]
