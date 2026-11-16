@@ -1322,17 +1322,16 @@ pub fn mark(ui: &mut Ui, size: f32, p: Palette) {
             return;
         }
     }
-    let painter = ui.painter();
     #[cfg(windows)]
-    painter.rect_filled(r, (size * 108. / 456.).round() as u8, p.accent);
+    crate::windows_border::rounded_rectangle(ui, r, size * 108. / 456., p.accent, Stroke::NONE);
     let s = size / 456.;
     let org = r.center() - vec2(133., 141.) * s;
     for (x, y, h) in [(0., 164., 118.), (100., 80., 202.), (200., 0., 282.)] {
-        painter.rect_filled(
-            Rect::from_min_size(org + vec2(x, y) * s, vec2(66., h) * s),
-            (22. * s).round() as u8,
-            p.on,
-        );
+        let bar = Rect::from_min_size(org + vec2(x, y) * s, vec2(66., h) * s);
+        #[cfg(windows)]
+        crate::windows_border::rounded_rectangle(ui, bar, 22. * s, p.on, Stroke::NONE);
+        #[cfg(target_os = "macos")]
+        ui.painter().rect_filled(bar, 22. * s, p.on);
     }
 }
 #[cfg(target_os = "macos")]

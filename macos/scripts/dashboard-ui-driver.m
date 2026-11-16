@@ -455,6 +455,16 @@ static NSArray *connectionFieldViews(NSWindow *window) {
     return fields;
 }
 
+static NSArray *insertionColor(NSTextView *editor) {
+    __block NSArray *rgb;
+    [editor.effectiveAppearance performAsCurrentDrawingAppearance:^{
+        NSColor *color = [editor.insertionPointColor colorUsingColorSpace:NSColorSpace.sRGBColorSpace];
+        if (color) rgb = @[@(lround(color.redComponent * 255)), @(lround(color.greenComponent * 255)),
+                           @(lround(color.blueComponent * 255))];
+    }];
+    return rgb ?: @[];
+}
+
 static NSDictionary *editConnectionField(NSWindow *sheet, NSDictionary *request) {
     NSString *op = request[@"op"], *label = request[@"label"];
     for (NSTextField *field in connectionFields(sheet)) {
@@ -479,7 +489,7 @@ static NSDictionary *editConnectionField(NSWindow *sheet, NSDictionary *request)
             [editor setMarkedText:value selectedRange:NSMakeRange(value.length, 0) replacementRange:selection];
             if (!editor.hasMarkedText) return @{@"error": @"the field editor did not start composition"};
             [editor insertText:value replacementRange:editor.markedRange];
-            return @{@"value": editor.string, @"marked": @(editor.hasMarkedText)};
+            return @{@"value": editor.string, @"marked": @(editor.hasMarkedText), @"caret": insertionColor(editor)};
         }
         BOOL escape = [request[@"value"] isEqual:@"Escape"];
         NSString *characters = escape ? @"\x1b" : @"\r";

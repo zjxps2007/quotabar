@@ -256,7 +256,9 @@ def exercise(dashboard, executable, folder, library, fixture, observed, help_tex
             alias, path = "검증 계정 🧪", "/tmp/QuotaBar 검증/인증.json"
             for hint, value in ((alias_hint, alias), ("경로", path)):
                 controls.request("focusField", hint)
-                controls.request("editField", hint, {"value": value, "marked": False}, value=value)
+                edited_field = controls.request("editField", hint, value=value)
+                if edited_field != {"value": value, "marked": False, "caret": [0, 0, 0]}:
+                    raise ValueError(f"Unexpected light-mode field after composition: {edited_field}")
             controls.request("fieldKey", "경로", value="Return")
             edited = command("connect")
             edit_id = edited.pop("id")
@@ -624,4 +626,10 @@ def compare(dashboard, work, original, fixture, library):
         results[side]["help"].get("connectionErrorClipboard") == {"text": FILE_ERROR_TEXT}
         for side in ("original", "rust"))
     (dashboard.REPORT / "actions.json").write_text(json.dumps(results, ensure_ascii=False, indent=2))
-    return results["identical"] and results["switchHelpIdentical"] and results["connectionErrorCopies"]
+    def file_fields(side):
+        fields = results[side]["help"].get("connectionFields", {}).get("fields", [])
+        return sorted(fields, key=lambda field: field["placeholder"])
+    original_fields, rust_fields = file_fields("original"), file_fields("rust")
+    results["connectionFieldsIdentical"] = len(original_fields) == 2 and original_fields == rust_fields
+    return (results["identical"] and results["switchHelpIdentical"] and results["connectionErrorCopies"]
+            and results["connectionFieldsIdentical"])

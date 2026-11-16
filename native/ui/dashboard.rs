@@ -257,8 +257,14 @@ impl Dashboard {
                 .exact_width(1. / ctx.pixels_per_point())
                 .resizable(false)
                 .show_separator_line(false)
-                .frame(Frame::new().fill(p.line))
-                .show(ctx, |_| {});
+                .frame(Frame::new().fill(p.bg))
+                .show(ctx, |ui| {
+                    // The sidebar fills the title bar, while SwiftUI's Divider
+                    // starts at the window's content layout rectangle.
+                    let mut rect = ui.max_rect();
+                    rect.min.y += f32::from(titlebar);
+                    ui.painter().rect_filled(rect, 0, p.bg.lerp_to_gamma(p.accent, 0.1));
+                });
         }
         CentralPanel::default().frame(Frame::new().fill(p.bg)).show(ctx, |ui| {
             Frame::new().inner_margin(Margin { left: 28, right: 28, top: 32 + titlebar, bottom: 22 }).show(ui, |ui| {
@@ -272,6 +278,10 @@ impl Dashboard {
                     ui.vertical(|ui| {
                         #[cfg(target_os = "macos")]
                         ui.set_min_height(crate::mac_text::title_stack_height(ui, 25., 12., 5.));
+                        #[cfg(target_os = "macos")]
+                        crate::mac_text::dashboard_heading(ui, title, p.ink)
+                            .unwrap_or_else(|| system_label(ui, title, 25., true, p.ink));
+                        #[cfg(windows)]
                         system_label(ui, title, 25., true, p.ink);
                         ui.add_space(5.);
                         system_label(ui, subtitle, if MAC { 12. } else { 11. }, false, p.muted);

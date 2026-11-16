@@ -207,25 +207,27 @@ impl BorderRenderer {
     }
 }
 
-pub fn activity_cell(ui: &Ui, rect: Rect, track: Color32, fill: Option<Color32>, border: Stroke) {
+pub fn rounded_rectangle(ui: &Ui, rect: Rect, radius: f32, fill: Color32, pen: Stroke) {
     if !rect.is_positive() || !ui.is_rect_visible(rect) {
         return;
     }
-    let renderer = ui.ctx().plugin_opt::<BorderRenderer>();
-    let paint = |bounds: Rect, fill: Color32, pen: Stroke| {
-        let shape = renderer
-            .as_ref()
-            .and_then(|r| r.lock().rounded(ui.ctx(), bounds, 2., pen, fill));
-        if let Some(shape) = shape {
-            ui.painter().add(shape);
-        } else {
-            ui.painter().rect(bounds, 2, fill, pen, StrokeKind::Inside);
-        }
-    };
-    paint(rect, track, border);
+    let shape = ui
+        .ctx()
+        .plugin_opt::<BorderRenderer>()
+        .and_then(|renderer| renderer.lock().rounded(ui.ctx(), rect, radius, pen, fill));
+    if let Some(shape) = shape {
+        ui.painter().add(shape);
+    } else {
+        ui.painter()
+            .rect(rect, radius, fill, pen, StrokeKind::Inside);
+    }
+}
+
+pub fn activity_cell(ui: &Ui, rect: Rect, track: Color32, fill: Option<Color32>, border: Stroke) {
+    rounded_rectangle(ui, rect, 2., track, border);
     let child = rect.shrink(border.width);
     if let Some(fill) = fill.filter(|_| child.is_positive()) {
-        paint(child, fill, Stroke::NONE);
+        rounded_rectangle(ui, child, 2., fill, Stroke::NONE);
     }
 }
 

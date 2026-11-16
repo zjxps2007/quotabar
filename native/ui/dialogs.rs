@@ -795,7 +795,10 @@ impl Dashboard {
             c.error = None;
             #[cfg(target_os = "macos")]
             {
-                c.focus_alias = !ui.memory(|m| m.has_focus(Id::new("connect-path")));
+                c.focus_alias = c.inputs.as_ref().map_or_else(
+                    || !ui.memory(|m| m.has_focus(Id::new("connect-path"))),
+                    |fields| fields.alias_was_editing(),
+                );
             }
         }
         #[cfg(windows)]

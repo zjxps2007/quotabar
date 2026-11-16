@@ -8,7 +8,7 @@ use objc2::{
     sel,
 };
 use objc2_app_kit::{
-    NSAccessibility, NSControl, NSControlTextEditingDelegate, NSFont, NSTextField,
+    NSAccessibility, NSColor, NSControl, NSControlTextEditingDelegate, NSFont, NSTextField,
     NSTextFieldBezelStyle, NSTextFieldDelegate, NSTextInputClient, NSTextView, NSView,
 };
 use objc2_foundation::{NSNotification, NSObject, NSObjectProtocol, NSRect, NSString};
@@ -166,6 +166,10 @@ impl ConnectionFields {
         self.delegate.ivars().command.take()
     }
 
+    pub fn alias_was_editing(&self) -> bool {
+        self.alias.was_editing
+    }
+
     pub fn hide_path(&self) {
         self.path.clip.setHidden(true);
     }
@@ -213,6 +217,12 @@ pub fn connection_input(
         editor.field.setFont(Some(&font));
     }
     if editor.field.isEnabled() != ui.is_enabled() {
+        if !ui.is_enabled()
+            && editor.field.currentEditor().is_some()
+            && let Some(window) = fields.parent.window()
+        {
+            window.makeFirstResponder(None);
+        }
         editor.field.setEnabled(ui.is_enabled());
     }
     editor.sync(value);
@@ -234,5 +244,21 @@ pub fn connection_input(
         && let Some(window) = fields.parent.window()
     {
         window.makeFirstResponder(Some(&editor.field));
+    }
+    if let Some(text_view) = editor
+        .field
+        .currentEditor()
+        .and_then(|text| text.downcast::<NSTextView>().ok())
+    {
+        // SwiftUI applies the sheet's monochrome accent to the insertion point,
+        // independently of the system focus ring.
+        let caret = if palette.dark {
+            NSColor::whiteColor()
+        } else {
+            NSColor::blackColor()
+        };
+        if text_view.insertionPointColor() != caret {
+            text_view.setInsertionPointColor(Some(&caret));
+        }
     }
 }

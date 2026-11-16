@@ -409,6 +409,10 @@ pub fn system_label(
     draw_label(ui, text, size, Face::label(heavy), color, LineBox::System)
 }
 
+pub fn dashboard_heading(ui: &mut Ui, text: &str, color: Color32) -> Option<Response> {
+    draw_label(ui, text, 25., Face::Bold, color, LineBox::CenteredSystem)
+}
+
 pub fn stat_value(ui: &mut Ui, text: &str, color: Color32) -> Option<Response> {
     draw_label(ui, text, 28., Face::RoundedDigits, color, LineBox::Stack)
 }
@@ -477,6 +481,7 @@ enum LineBox {
     Glyphs,
     Centered,
     System,
+    CenteredSystem,
     Stack,
 }
 
@@ -503,7 +508,7 @@ fn draw_label(
     }
     let height = match line_box {
         LineBox::Glyphs | LineBox::Centered => run.size.y,
-        LineBox::System => {
+        LineBox::System | LineBox::CenteredSystem => {
             let scale = f64::from(ui.ctx().pixels_per_point());
             let system = (font_line_height(f64::from(size)) * scale).round() / scale;
             run.size.y.max(system as f32)
@@ -514,7 +519,7 @@ fn draw_label(
     };
     let (rect, response) = ui.allocate_exact_size(vec2(run.size.x, height), Sense::hover());
     let scale = ui.ctx().pixels_per_point();
-    let shape = if matches!(line_box, LineBox::Centered) {
+    let shape = if matches!(line_box, LineBox::Centered | LineBox::CenteredSystem) {
         run.centered_shape(rect.left_center(), scale, color)
     } else {
         run.shape(
