@@ -20,6 +20,7 @@ struct Factories {
     coverage: IDWriteRenderingParams,
     lcd_coverage: IDWriteRenderingParams,
     gamma: [f32; 4],
+    software_gamma: [[u8; 2]; 256],
     contrast: [u8; 256],
     draw: ID2D1Factory,
     images: IWICImagingFactory,
@@ -95,6 +96,7 @@ impl Factories {
                 coverage,
                 lcd_coverage,
                 gamma,
+                software_gamma: software_gamma_table(gamma),
                 contrast,
                 draw: D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, None)?,
                 images: CoCreateInstance(&CLSID_WICImagingFactory, None, CLSCTX_INPROC_SERVER)?,
@@ -209,8 +211,9 @@ impl Factories {
             let scale = f32::from_bits(key.scale);
             let size = [width, height];
             glyphs::mark_dash_runs(&self.write, &layout, run_text).ok()?;
-            let bytes = glyphs::coverage(self, params, &layout, origin, scale, size)
-                .or_else(|| self.bitmap_coverage(&layout, params, origin, fraction, scale, size))?;
+            let rounding = key.subpixel_rounding();
+            let bytes = glyphs::coverage(self, params, &layout, origin, scale, size, rounding)
+                .or_else(|| self.bitmap_coverage(&layout, params, origin, fraction, key, size))?;
             // Include subpixel ink from all three channels, even for a run
             // whose first texture uses the grayscale coverage channel.
             let has_ink = |row: &[u8]| row.chunks_exact(4).any(|pixel| pixel[..3] != [0; 3]);
@@ -219,24 +222,35 @@ impl Factories {
                 .clone()
                 .position(has_ink)
                 .map_or(0..0, |top| top..rows.rposition(has_ink).unwrap() + 1);
-            let colors = key.colors.map(|(ink, backdrop)| {
+            let colors = key.colors.map(|colors| {
+                let ink = colors.ink;
+                let backdrop = colors.backdrop;
                 let channels = [
                     (ink.r(), backdrop.r()),
                     (ink.g(), backdrop.g()),
                     (ink.b(), backdrop.b()),
                 ];
-                channels.map(|(fg, bg)| {
-                    std::array::from_fn::<_, 256, _>(|i| compose_glyph(i as u8, fg, bg, self.gamma))
-                })
+                let lookup = channels.map(|(fg, bg)| {
+                    std::array::from_fn::<_, 256, _>(|i| {
+                        if colors.software {
+                            software_channel(i as u8, fg, bg, &self.software_gamma)
+                        } else {
+                            compose_glyph(i as u8, fg, bg, self.gamma)
+                        }
+                    })
+                });
+                (ink, lookup)
             });
             let mask = bytes
                 .as_chunks::<4>()
                 .0
                 .iter()
                 .map(|px| {
-                    if let Some([red, green, blue]) = &colors {
+                    if let Some((ink, [red, green, blue])) = &colors {
                         if px[..3] == [0, 0, 0] {
                             Color32::TRANSPARENT
+                        } else if px[..3] == [255, 255, 255] {
+                            *ink
                         } else {
                             Color32::from_rgb(
                                 red[px[2] as usize],
@@ -264,7 +278,7 @@ impl Factories {
         params: &IDWriteRenderingParams,
         mut origin: windows_numerics::Vector2,
         fraction: f32,
-        scale: f32,
+        key: &RunKey,
         [width, height]: [usize; 2],
     ) -> Option<Vec<u8>> {
         origin.X -= fraction;
@@ -309,7 +323,7 @@ impl Factories {
             target.Clear(Some(&black));
             target.SetTextRenderingParams(params);
             target.SetTextAntialiasMode(D2D1_TEXT_ANTIALIAS_MODE_CLEARTYPE);
-            if glyphs::draw(&target, &brush, layout, origin, scale).is_err() {
+            if glyphs::draw(&target, &brush, layout, origin, f32::from_bits(key.scale)).is_err() {
                 // An inline object or decoration can require the system renderer.
                 // Restore its default brush before replaying the entire layout.
                 layout
@@ -337,7 +351,7 @@ impl Factories {
             if fraction > 0. {
                 let bgr = params.GetPixelGeometry() == DWRITE_PIXEL_GEOMETRY_BGR;
                 for row in bytes.chunks_exact_mut(width * 4) {
-                    translate_coverage(row, fraction, bgr);
+                    translate_coverage(row, fraction, bgr, key.subpixel_rounding());
                 }
             }
             Some(bytes)
@@ -348,7 +362,7 @@ impl Factories {
 // WPF positions the contrast-adjusted RGB coverage strip before applying
 // foreground gamma. Traverse the BGRA buffer from right to left so that the
 // two source subpixels are still available when writing the destination.
-fn translate_coverage(row: &mut [u8], fraction: f32, bgr: bool) {
+fn translate_coverage(row: &mut [u8], fraction: f32, bgr: bool, rounding: u32) {
     let thirds = fraction * 3.;
     let whole = thirds.floor() as usize;
     let blend = ((thirds - whole as f32) * 65536.) as u32;
@@ -359,7 +373,7 @@ fn translate_coverage(row: &mut [u8], fraction: f32, bgr: bool) {
                 .map_or(0, |j| u32::from(row[index(j)]))
         };
         let value = sample(whole) * (65536 - blend) + sample(whole + 1) * blend;
-        row[index(i)] = ((value + 32768) >> 16) as u8;
+        row[index(i)] = ((value + rounding) >> 16) as u8;
     }
 }
 
@@ -394,6 +408,33 @@ fn compose_glyph(sample: u8, foreground: u8, background: u8, [g1, g2, g3, g4]: [
         as u8
 }
 
+// WPF's software ClearType scan operation uses two byte coefficients for
+// gamma correction and truncates the foreground and destination separately.
+// See CGammaHandler::CalculateGammaTable and CSWGlyphRunPainter::ApplyClearTypeOver.
+fn software_gamma_table([g1, g2, g3, g4]: [f32; 4]) -> [[u8; 2]; 256] {
+    let norm13 = 65536. / (255. * 255.);
+    let norm24 = 256. / 255.;
+    std::array::from_fn(|i| {
+        let a = i as f32 / 255.;
+        let curve = a * (1. - a);
+        let offset = a + curve * ((g2 * norm24) * a + g4 * norm24);
+        let slope = curve * ((g1 * norm13) * a + g3 * norm13);
+        [
+            (255. * offset).round_ties_even() as u8,
+            (255. * slope).round_ties_even() as u8,
+        ]
+    })
+}
+
+fn software_channel(sample: u8, ink: u8, backdrop: u8, gamma: &[[u8; 2]; 256]) -> u8 {
+    // The source brush is an opaque premultiplied color. WPF separately
+    // short-circuits whole pixels with all three coverages zero or full.
+    let combined = (usize::from(sample) * 255) >> 8;
+    let [offset, slope] = gamma[combined].map(u32::from);
+    let coverage = offset + ((slope * u32::from(ink)) >> 8);
+    (((u32::from(ink) * coverage) >> 8) + ((u32::from(backdrop) * (255 - coverage)) >> 8)) as u8
+}
+
 thread_local! {
     static FACTORIES: Option<Factories> = Factories::new().ok();
 }
@@ -409,7 +450,24 @@ struct RunKey {
     semibold: bool,
     line: LineWidth,
     origin: [u8; 2],
-    colors: Option<(Color32, Color32)>,
+    colors: Option<LcdColors>,
+}
+
+#[derive(Clone, Copy, Eq, PartialEq, Hash)]
+struct LcdColors {
+    ink: Color32,
+    backdrop: Color32,
+    software: bool,
+}
+
+impl RunKey {
+    fn subpixel_rounding(&self) -> u32 {
+        if self.colors.is_some_and(|c| c.software) {
+            0
+        } else {
+            32768
+        }
+    }
 }
 
 #[derive(Clone, Copy, Eq, PartialEq, Hash)]
@@ -485,6 +543,7 @@ impl TextRenderer {
         scale: f32,
         max_size: usize,
         backdrop: Option<Color32>,
+        software: bool,
     ) -> Option<Shape> {
         let [section] = text.galley.job.sections.as_slice() else {
             return None;
@@ -513,7 +572,13 @@ impl TextRenderer {
             color = text.fallback_color;
         }
         color = color.gamma_multiply(text.opacity_factor);
-        let colors = backdrop.filter(|_| color.a() == 255).map(|bg| (color, bg));
+        let colors = backdrop
+            .filter(|_| color.a() == 255)
+            .map(|backdrop| LcdColors {
+                ink: color,
+                backdrop,
+                software,
+            });
         let mut shapes = Vec::with_capacity(text.galley.rows.len());
         for row in &text.galley.rows {
             if row.glyphs.is_empty() {
@@ -702,6 +767,32 @@ fn system_cleartype() -> bool {
         && setting(SPI_GETFONTSMOOTHINGTYPE) == FE_FONTSMOOTHINGCLEARTYPE
 }
 
+fn software_text_composition() -> bool {
+    use std::sync::OnceLock;
+    use windows_sys::Win32::{System::Registry::*, UI::WindowsAndMessaging::*};
+    use windows_sys::core::w;
+    // The original uses WPF's default RDP policy. Check the session again
+    // after reconnecting, since a running dashboard can move to the console.
+    if unsafe { GetSystemMetrics(SM_REMOTESESSION) } != 0 {
+        return true;
+    }
+    static DISABLED: OnceLock<bool> = OnceLock::new();
+    *DISABLED.get_or_init(|| unsafe {
+        let mut value = 0u32;
+        let mut size = size_of::<u32>() as u32;
+        RegGetValueW(
+            HKEY_CURRENT_USER,
+            w!(r"Software\Microsoft\Avalon.Graphics"),
+            w!("DisableHWAcceleration"),
+            RRF_RT_REG_DWORD,
+            std::ptr::null_mut(),
+            (&raw mut value).cast(),
+            &mut size,
+        ) == 0
+            && value == 1
+    })
+}
+
 impl egui::Plugin for TextRenderer {
     fn debug_name(&self) -> &'static str {
         "DirectWrite"
@@ -715,6 +806,7 @@ impl egui::Plugin for TextRenderer {
         // ClearType requires a known, opaque screen background. The app's
         // bitmap export and glyphs over images retain their grayscale mask.
         let lcd = !self.bitmap_target && system_cleartype();
+        let software = lcd && software_text_composition();
         let mut layers = ctx.memory(|m| m.layer_ids().collect::<Vec<_>>());
         if !layers.contains(&LayerId::background()) {
             layers.push(LayerId::background());
@@ -763,7 +855,11 @@ impl egui::Plugin for TextRenderer {
                                     && mesh.vertices.iter().all(|v| v.color == first.color)
                                 {
                                     let mut colored = key.clone();
-                                    colored.colors = Some((first.color, backdrop));
+                                    colored.colors = Some(LcdColors {
+                                        ink: first.color,
+                                        backdrop,
+                                        software,
+                                    });
                                     runs.push((index, Label::Mask(mesh.clone(), colored)));
                                 }
                                 surfaces.push(Surface::unknown(ink));
@@ -780,7 +876,7 @@ impl egui::Plugin for TextRenderer {
             for (index, run) in runs {
                 let shape = match run {
                     Label::Text(text, backdrop) => {
-                        self.paint(ctx, &text, scale, max_size, backdrop)
+                        self.paint(ctx, &text, scale, max_size, backdrop, software)
                     }
                     Label::Mask(mut mesh, key) => self.run(ctx, key, max_size).map(|run| {
                         let colored = std::sync::Arc::make_mut(&mut mesh);
@@ -809,11 +905,27 @@ mod tests {
     #[test]
     fn fractional_run_translation_crosses_pixel_boundaries_in_display_order() {
         let mut rgb = [60, 30, 0, 255, 150, 120, 90, 255];
-        translate_coverage(&mut rgb, 0.5, false);
+        translate_coverage(&mut rgb, 0.5, false, 32768);
         assert_eq!(rgb, [15, 0, 0, 255, 105, 75, 45, 255]);
         let mut bgr = [0, 30, 60, 255, 90, 120, 150, 255];
-        translate_coverage(&mut bgr, 0.5, true);
+        translate_coverage(&mut bgr, 0.5, true, 32768);
         assert_eq!(bgr, [0, 0, 15, 255, 45, 75, 105, 255]);
+    }
+
+    #[test]
+    fn partial_lcd_pixels_match_the_software_rendered_wpf_window() {
+        let gamma = software_gamma_table(glyph_gamma(1.75));
+        // Channel pairs sampled on the same glyph edges in the official
+        // license window's light and dark themes over Remote Desktop.
+        let samples = [0, 7, 59, 109, 153, 191, 225, 255];
+        assert_eq!(
+            samples.map(|s| software_channel(s, 23, 255, &gamma)),
+            [254, 250, 216, 184, 152, 114, 71, 23]
+        );
+        assert_eq!(
+            samples.map(|s| software_channel(s, 242, 28, &gamma)),
+            [27, 36, 104, 152, 182, 204, 222, 239]
+        );
     }
 
     #[test]

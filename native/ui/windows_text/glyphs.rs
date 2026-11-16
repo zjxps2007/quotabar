@@ -263,6 +263,7 @@ struct Coverage<'a> {
     factory: &'a super::Factories,
     params: &'a IDWriteRenderingParams,
     bgr: bool,
+    rounding: u32,
     size: [usize; 2],
     pixels: Vec<u8>,
     pen: Option<Pen>,
@@ -358,7 +359,8 @@ impl Coverage<'_> {
                         .unwrap_or(0) as u32
                 };
                 let alpha =
-                    (sample(shift) * (65536 - blend) + sample(shift + 1) * blend + 32768) >> 16;
+                    (sample(shift) * (65536 - blend) + sample(shift + 1) * blend + self.rounding)
+                        >> 16;
                 let channel = if self.bgr { sub % 3 } else { 2 - sub % 3 };
                 let dst = &mut self.pixels[4 * (dst_row + px as usize) + channel];
                 *dst = (alpha + ((255 - alpha) * u32::from(*dst) + 127) / 255) as u8;
@@ -375,6 +377,7 @@ pub(super) fn coverage(
     origin: Vector2,
     scale: f32,
     size: [usize; 2],
+    rounding: u32,
 ) -> Option<Vec<u8>> {
     let geometry = unsafe { params.GetPixelGeometry() };
     if unsafe { params.GetClearTypeLevel() } != 1.
@@ -390,6 +393,7 @@ pub(super) fn coverage(
         params,
         size,
         bgr: geometry == DWRITE_PIXEL_GEOMETRY_BGR,
+        rounding,
         pixels: vec![0; size[0] * size[1] * 4],
         pen: None,
     };

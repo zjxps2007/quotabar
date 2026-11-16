@@ -651,12 +651,6 @@ impl Status {
                 .bestMatchFromAppearancesWithNames(&names)
                 .is_some_and(|name| name == dark_aqua)
         });
-        let view = View {
-            native: &root,
-            height,
-            dark,
-            m,
-        };
         // A SwiftUI popover resolves its content's semantic text and control
         // colors in the vibrant popover material, including when its body is opaque.
         let contrast = NSApplication::sharedApplication(m)
@@ -671,6 +665,14 @@ impl Status {
             (false, false) => "NSAppearanceNameVibrantLight",
         };
         root.setAppearance(NSAppearance::appearanceNamed(&s(material_appearance)).as_deref());
+        let material = root.effectiveAppearance();
+        let view = View {
+            native: &root,
+            material: &material,
+            height,
+            dark,
+            m,
+        };
         let background = if dark { 0.075 } else { 1. };
         root.setWantsLayer(true);
         if let Some(layer) = root.layer() {
@@ -709,7 +711,7 @@ impl Status {
             [50., 22., 180., 18.],
             headline.pointSize(),
             true,
-            false,
+            Ink::Primary,
         )
         .setFont(Some(&headline));
         view.button(
@@ -724,13 +726,25 @@ impl Status {
                 [18., 56., 292., 18.],
                 10.,
                 false,
-                true,
+                Ink::Secondary,
             );
         }
         if accounts.is_empty() {
-            view.label(text(&v, "empty"), [18., pre, 294., 16.], 12., false, true);
+            view.label(
+                text(&v, "empty"),
+                [18., pre, 294., 16.],
+                12.,
+                false,
+                Ink::Secondary,
+            );
         } else {
-            view.label("남은 사용량", [18., pre, 294., 16.], 10., true, false);
+            view.label(
+                "남은 사용량",
+                [18., pre, 294., 16.],
+                10.,
+                true,
+                Ink::Primary,
+            );
             let distance_from_top = panel.contentViewController().and_then(|ctl| {
                 ctl.view().subviews().iter().find_map(|v| {
                     let scroll = v.downcast_ref::<NSScrollView>()?;
@@ -746,6 +760,7 @@ impl Status {
                 NSView::initWithFrame(NSView::alloc(m), rect(0., 0., list_width, list_height));
             let list = View {
                 native: &content,
+                material: &material,
                 height: list_height,
                 dark,
                 m,
@@ -840,8 +855,16 @@ fn account_height(a: &Value, header: f64) -> f64 {
         + if a["error"] == true { 21. } else { 0. }
         + 15.
 }
+enum Ink {
+    Primary,
+    Secondary,
+    Tertiary,
+    Warning,
+}
+
 struct View<'a> {
     native: &'a NSView,
+    material: &'a NSAppearance,
     height: f64,
     dark: bool,
     m: MainThreadMarker,
@@ -863,7 +886,7 @@ impl View<'_> {
         [x, y, w, h]: [f64; 4],
         size: f64,
         bold: bool,
-        muted: bool,
+        ink: Ink,
     ) -> Retained<NSTextField> {
         let t = NSTextField::labelWithString(&s(value), self.m);
         // NSTextFieldCell insets text two points from each horizontal edge.
@@ -874,12 +897,40 @@ impl View<'_> {
             NSFont::systemFontOfSize(size)
         };
         t.setFont(Some(&font));
-        let color = if muted {
-            NSColor::secondaryLabelColor()
-        } else {
-            NSColor::labelColor()
-        };
-        t.setTextColor(Some(&color));
+        match ink {
+            Ink::Primary => t.setTextColor(Some(&NSColor::labelColor())),
+            Ink::Warning => t.setTextColor(Some(&NSColor::systemOrangeColor())),
+            Ink::Secondary | Ink::Tertiary => {
+                let tone = match ink {
+                    Ink::Secondary => NSColor::secondaryLabelColor(),
+                    _ => NSColor::tertiaryLabelColor(),
+                };
+                t.setTextColor(Some(&tone));
+                self.material
+                    .performAsCurrentDrawingAppearance(&block2::StackBlock::new(|| {
+                        let space = NSColorSpace::sRGBColorSpace();
+                        let Some(primary) = NSColor::labelColor().colorUsingColorSpace(&space)
+                        else {
+                            return;
+                        };
+                        let Some(color) = tone.colorUsingColorSpace(&space) else {
+                            return;
+                        };
+                        // The vibrant label colors encode the strength of white or black
+                        // ink as gray. SwiftUI attenuates the rasterized primary glyphs.
+                        let channel = color.redComponent();
+                        let strength = if self.dark { channel } else { 1. - channel };
+                        if primary.alphaComponent() > 0. {
+                            t.setWantsLayer(true);
+                            t.setTextColor(Some(&primary));
+                            t.setAlphaValue(
+                                (strength * color.alphaComponent() / primary.alphaComponent())
+                                    .clamp(0., 1.),
+                            );
+                        }
+                    }));
+            }
+        }
         self.native.addSubview(&t);
         t
     }
@@ -989,12 +1040,24 @@ impl View<'_> {
         }
         let mut top = y + header.height + 8.;
         if periods(a).is_empty() {
-            self.label("데이터 대기 중", [0., top, 280., 18.], 10., false, true);
+            self.label(
+                "데이터 대기 중",
+                [0., top, 280., 18.],
+                10.,
+                false,
+                Ink::Secondary,
+            );
             top += 23.;
         }
         for w in periods(a) {
             let n = w["remaining"].as_f64().unwrap_or(0.).clamp(0., 100.);
-            self.label(text(w, "title"), [0., top, 190., 16.], 11., false, true);
+            self.label(
+                text(w, "title"),
+                [0., top, 190., 16.],
+                11.,
+                false,
+                Ink::Secondary,
+            );
             let percentage = format!("{}% 남음", n.round());
             let font = NSFont::monospacedDigitSystemFontOfSize_weight(11., unsafe {
                 NSFontWeightSemibold
@@ -1010,12 +1073,9 @@ impl View<'_> {
                 [width - fitted, top, fitted, 16.],
                 11.,
                 true,
-                false,
+                if n <= 20. { Ink::Warning } else { Ink::Primary },
             );
             remaining.setFont(Some(&font));
-            if n <= 20. {
-                remaining.setTextColor(Some(&NSColor::systemOrangeColor()));
-            }
             let rgb = match (provider, dark) {
                 ("Claude", false) => (0.659, 0.310, 0.149),
                 ("Claude", true) => (0.902, 0.510, 0.290),
@@ -1072,8 +1132,13 @@ impl View<'_> {
                         )
                     )
                 };
-                self.label(&reset, [0., top + 31., width, 14.], 9., false, true)
-                    .setTextColor(Some(&NSColor::tertiaryLabelColor()));
+                self.label(
+                    &reset,
+                    [0., top + 31., width, 14.],
+                    9.,
+                    false,
+                    Ink::Tertiary,
+                );
                 top += 18.;
             }
             top += 32.;
@@ -1084,9 +1149,8 @@ impl View<'_> {
                 [0., top, width, 18.],
                 10.,
                 false,
-                true,
-            )
-            .setTextColor(Some(&NSColor::systemOrangeColor()));
+                Ink::Warning,
+            );
         }
         self.bar(
             0.,

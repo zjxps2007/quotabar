@@ -14,53 +14,6 @@ private struct ProbeError: Error, CustomStringConvertible {
     init(_ reason: String, line: Int = #line) { description = "check-popover.swift:\(line): \(reason)" }
 }
 
-@MainActor private func compareTextCompositing(_ panel: NSView, fields: [NSTextField], dark: Bool, directory: URL) throws {
-    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-    let labels = fields.filter { $0.textColor == .secondaryLabelColor || $0.textColor == .tertiaryLabelColor }
-    let originals = labels.map { ($0, $0.textColor, $0.alphaValue, $0.wantsLayer) }
-    defer {
-        for (field, color, alpha, layer) in originals {
-            field.textColor = color; field.alphaValue = alpha; field.wantsLayer = layer
-        }
-    }
-    var metadata: [[String: Any]] = []
-    for variant in ["resolved", "solid", "primary-opacity", "opaque-opacity", "isolated"] {
-        for (field, source, _, layer) in originals {
-            field.effectiveAppearance.performAsCurrentDrawingAppearance {
-                guard let color = source?.usingColorSpace(.sRGB),
-                      let primary = NSColor.labelColor.usingColorSpace(.sRGB) else { return }
-                field.wantsLayer = layer
-                field.alphaValue = 1
-                if variant == "resolved" {
-                    field.textColor = color
-                    metadata.append(["title": field.stringValue, "color": [color.redComponent, color.greenComponent, color.blueComponent, color.alphaComponent],
-                                     "primary": [primary.redComponent, primary.greenComponent, primary.blueComponent, primary.alphaComponent],
-                                     "appearance": field.effectiveAppearance.name.rawValue])
-                } else if variant == "solid" {
-                    let background: CGFloat = dark ? 0.075 : 1
-                    func blend(_ component: CGFloat) -> CGFloat { background + (component - background) * color.alphaComponent }
-                    field.textColor = NSColor(srgbRed: blend(color.redComponent), green: blend(color.greenComponent), blue: blend(color.blueComponent), alpha: 1)
-                } else if variant == "isolated" {
-                    field.wantsLayer = true
-                    field.textColor = source
-                } else {
-                    field.wantsLayer = true
-                    let usePrimary = variant == "primary-opacity"
-                    field.textColor = usePrimary ? primary : color.withAlphaComponent(1)
-                    field.alphaValue = usePrimary ? color.alphaComponent / primary.alphaComponent : color.alphaComponent
-                }
-            }
-            field.needsDisplay = true
-        }
-        panel.displayIfNeeded()
-        guard let bitmap = panel.bitmapImageRepForCachingDisplay(in: panel.bounds) else { throw CocoaError(.fileWriteUnknown) }
-        panel.cacheDisplay(in: panel.bounds, to: bitmap)
-        guard let png = bitmap.representation(using: .png, properties: [:]) else { throw CocoaError(.fileWriteUnknown) }
-        try png.write(to: directory.appendingPathComponent(variant + ".png"))
-    }
-    try JSONSerialization.data(withJSONObject: metadata).write(to: directory.appendingPathComponent("labels.json"))
-}
-
 @MainActor private func run() throws {
     let args = CommandLine.arguments
     let state = try Data(contentsOf: URL(fileURLWithPath: args[1]))
@@ -121,10 +74,6 @@ private struct ProbeError: Error, CustomStringConvertible {
     guard let png = bitmap.representation(using: .png, properties: [:]) else { throw CocoaError(.fileWriteUnknown) }
     try png.write(to: output)
     captureVisiblePopover(panel)
-    if let folder = ProcessInfo.processInfo.environment["QUOTABAR_TEST_POPOVER_TEXT"] {
-        try compareTextCompositing(panel, fields: descendants(panel).compactMap { $0 as? NSTextField },
-                                   dark: dark, directory: URL(fileURLWithPath: folder))
-    }
     if accounts.count > 1 {
         func updateAccounts(_ updated: [[String: Any]]) throws -> NSScrollView {
             var value = fixture
