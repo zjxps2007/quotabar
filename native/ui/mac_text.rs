@@ -140,6 +140,7 @@ struct Key {
     face: Face,
     tracking: u32,
     light_ink: bool,
+    ink_alpha: u8,
 }
 
 fn attributed(value: &str, size: f64, face: Face, tracking: f32) -> CFMutableAttributedString {
@@ -239,7 +240,10 @@ fn raster(key: &Key, limit: usize) -> Option<(ColorImage, Vec2, LineMetrics)> {
         &CGSize::new(width as f64, height as f64),
     ));
     canvas.scale(scale, scale);
-    canvas.set_rgb_fill_color(ink, ink, ink, 1.);
+    // Let Quartz composite the semantic label opacity with its glyph coverage
+    // in one pass. Multiplying an 8-bit mask by the label opacity later loses
+    // a level of edge coverage on both light and dark backgrounds.
+    canvas.set_rgb_fill_color(ink, ink, ink, f64::from(key.ink_alpha) / 255.);
     canvas.set_should_antialias(true);
     canvas.set_allows_font_smoothing(true);
     canvas.set_should_smooth_fonts(true);
@@ -311,6 +315,7 @@ impl Renderer {
             face,
             tracking: tracking.to_bits(),
             light_ink: ink > ctx.style().visuals.panel_fill.intensity(),
+            ink_alpha: if color.is_additive() { 255 } else { color.a() },
         };
         let cached = match self.runs.entry(key) {
             std::collections::hash_map::Entry::Occupied(slot) => slot.into_mut(),
@@ -399,11 +404,17 @@ impl Run {
             (pos.x * scale).round() / scale,
             (pos.y * scale).round() / scale,
         );
+        let tint = if color.is_opaque() || color.is_additive() {
+            color
+        } else {
+            let [r, g, b, _] = color.to_srgba_unmultiplied();
+            Color32::from_rgb(r, g, b)
+        };
         Shape::image(
             self.texture.id(),
             Rect::from_min_size(pos, self.texture.size_vec2() / scale),
             Rect::from_min_max(Pos2::ZERO, pos2(1., 1.)),
-            color,
+            tint,
         )
     }
 }
