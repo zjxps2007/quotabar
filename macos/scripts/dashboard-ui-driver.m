@@ -373,11 +373,11 @@ static NSDictionary *settingsScroller(NSWindow *window, BOOL page) {
 
 // Read the actual composited sheet. Picker titles alone cannot prove that the
 // body changed, and SwiftUI's text-selection view does not always expose it to AX.
-static NSDictionary *visibleText(NSURL *frame, BOOL activity) {
+static NSDictionary *visibleText(NSURL *frame, NSString *operation) {
     VNRecognizeTextRequest *request = [VNRecognizeTextRequest new];
     request.recognitionLanguages = @[@"en-US"];
     request.recognitionLevel = VNRequestTextRecognitionLevelAccurate;
-    if (activity) {
+    if (![operation isEqual:@"document"]) {
         request.minimumTextHeight = 0.006;
         request.usesLanguageCorrection = NO;
     }
@@ -391,7 +391,10 @@ static NSDictionary *visibleText(NSURL *frame, BOOL activity) {
     }
     NSString *letters = [[body componentsSeparatedByCharactersInSet:NSCharacterSet.alphanumericCharacterSet.invertedSet]
                          componentsJoinedByString:@""];
-    if (activity) {
+    if ([operation isEqual:@"activityDetail"]) {
+        return @{@"model": @([letters containsString:@"claudefixture"]), @"recognized": body};
+    }
+    if ([operation isEqual:@"activityTotals"]) {
         BOOL claude = [letters containsString:@"560tokens"], codex = [letters containsString:@"810tokens"];
         if (claude && codex) return @{@"claude": @YES, @"codex": @YES};
         return @{@"claude": @(claude), @"codex": @(codex), @"recognized": body};
@@ -631,9 +634,9 @@ static NSDictionary *perform(NSDictionary *request) {
     if ([op isEqual:@"scrollContent"]) return scrollContent(window);
     if ([op isEqual:@"scrollerPosition"] || [op isEqual:@"pageSettings"])
         return settingsScroller(window, [op isEqual:@"pageSettings"]);
-    if ([op isEqual:@"document"] || [op isEqual:@"activityTotals"]) {
+    if ([op isEqual:@"document"] || [op isEqual:@"activityTotals"] || [op isEqual:@"activityDetail"]) {
         NSURL *dir = [NSURL fileURLWithFileSystemRepresentation:getenv("QUOTABAR_TEST_UI_DIRECTORY") isDirectory:YES relativeToURL:nil];
-        return visibleText([dir URLByAppendingPathComponent:@"frame.png"], [op isEqual:@"activityTotals"]);
+        return visibleText([dir URLByAppendingPathComponent:@"frame.png"], op);
     }
     if ([op isEqual:@"size"]) {
         [window setContentSize:NSMakeSize(1120, 810)];
@@ -641,12 +644,12 @@ static NSDictionary *perform(NSDictionary *request) {
     }
     if ([op isEqual:@"sheet"])
         return @{@"sheet": @(window.attachedSheet != nil)};
-    if ([op isEqual:@"documentEscape"]) {
-        NSWindow *sheet = window.attachedSheet;
-        if (!sheet) return @{@"error": @"no document sheet"};
+    if ([op isEqual:@"documentEscape"] || [op isEqual:@"activityEscape"]) {
+        NSWindow *keyWindow = [op isEqual:@"documentEscape"] ? window.attachedSheet : window;
+        if (!keyWindow) return @{@"error": @"no document sheet"};
         for (NSNumber *kind in @[@(NSEventTypeKeyDown), @(NSEventTypeKeyUp)]) {
             NSEvent *key = [NSEvent keyEventWithType:kind.unsignedIntegerValue location:NSZeroPoint modifierFlags:0
-                timestamp:NSProcessInfo.processInfo.systemUptime windowNumber:sheet.windowNumber context:nil
+                timestamp:NSProcessInfo.processInfo.systemUptime windowNumber:keyWindow.windowNumber context:nil
                 characters:@"\x1b" charactersIgnoringModifiers:@"\x1b" isARepeat:NO keyCode:53];
             [NSApp postEvent:key atStart:NO];
         }

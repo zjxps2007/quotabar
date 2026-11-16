@@ -95,6 +95,44 @@ impl Calendar {
         }
     }
 }
+
+#[cfg(target_os = "macos")]
+#[derive(Default)]
+pub(crate) struct DaySelection {
+    active: Option<Id>,
+    hovered: Option<Id>,
+    scanned_at: Value,
+}
+
+#[cfg(target_os = "macos")]
+#[derive(Default)]
+struct DayInput {
+    hovered: Option<Id>,
+    pressed: Option<Id>,
+    active_visible: bool,
+}
+
+#[cfg(target_os = "macos")]
+impl DaySelection {
+    fn update(&mut self, ctx: &Context, input: DayInput, scanned_at: &Value) {
+        let next = if self.scanned_at != *scanned_at || ctx.input(|i| i.key_pressed(Key::Escape)) {
+            None
+        } else if input.pressed.is_some() {
+            input.pressed
+        } else if input.hovered != self.hovered {
+            input.hovered
+        } else {
+            self.active.filter(|_| input.active_visible)
+        };
+        self.hovered = input.hovered;
+        self.scanned_at.clone_from(scanned_at);
+        if self.active != next {
+            self.active = next;
+            ctx.request_repaint();
+        }
+    }
+}
+
 impl Dashboard {
     pub fn activity(&mut self, ui: &mut Ui, p: Palette, viewport_top: f32) {
         let providers: Vec<_> = ["Claude", "Codex"]
@@ -102,6 +140,10 @@ impl Dashboard {
             .filter(|pr| self.state.accounts.iter().any(|a| a.provider == *pr))
             .collect();
         if providers.is_empty() {
+            #[cfg(target_os = "macos")]
+            {
+                self.activity_selection = DaySelection::default();
+            }
             return;
         }
         ui.add_space(10.);
@@ -157,6 +199,10 @@ impl Dashboard {
             None
         };
         if let Some(msg) = status {
+            #[cfg(target_os = "macos")]
+            {
+                self.activity_selection = DaySelection::default();
+            }
             p.frame(20).show(ui, |ui| {
                 ui.set_width(ui.available_width());
                 #[cfg(target_os = "macos")]
@@ -175,6 +221,8 @@ impl Dashboard {
             return;
         }
         let cols = columns(ui.available_width(), 300., 16.);
+        #[cfg(target_os = "macos")]
+        let mut day_input = DayInput::default();
         for (row, chunk) in providers.chunks(cols).enumerate() {
             if row > 0 {
                 ui.add_space(16.);
@@ -190,12 +238,21 @@ impl Dashboard {
                     card.show(ui, |ui| {
                         ui.vertical(|ui| {
                             ui.set_width(content_width);
-                            self.activity_card(ui, pr, p);
+                            self.activity_card(
+                                ui,
+                                pr,
+                                p,
+                                #[cfg(target_os = "macos")]
+                                &mut day_input,
+                            );
                         })
                     });
                 }
             });
         }
+        #[cfg(target_os = "macos")]
+        self.activity_selection
+            .update(ui.ctx(), day_input, &self.state.report["scannedAt"]);
         for w in list(&self.state.report["warnings"]) {
             if let Some(msg) = w.as_str() {
                 ui.add_space(if MAC { 24. } else { 12. });
@@ -234,7 +291,13 @@ impl Dashboard {
             );
         }
     }
-    fn activity_card(&self, ui: &mut Ui, provider: &str, p: Palette) {
+    fn activity_card(
+        &self,
+        ui: &mut Ui,
+        provider: &str,
+        p: Palette,
+        #[cfg(target_os = "macos")] day_input: &mut DayInput,
+    ) {
         let tint = p.tint(provider);
         // WPF measures the header row from its 26-DIP logo. Setting the
         // child spacing after egui allocates the row would retain its 28-DIP minimum.
@@ -400,7 +463,14 @@ impl Dashboard {
                 }
                 #[cfg(target_os = "macos")]
                 {
-                    let highlighted = response.hovered() || response.has_focus();
+                    if response.hovered() {
+                        day_input.hovered = Some(response.id);
+                    }
+                    if response.clicked() {
+                        day_input.pressed = Some(response.id);
+                    }
+                    let highlighted = self.activity_selection.active == Some(response.id);
+                    day_input.active_visible |= highlighted && ui.is_rect_visible(cell);
                     let zoom = if highlighted
                         && !objc2_app_kit::NSWorkspace::sharedWorkspace()
                             .accessibilityDisplayShouldReduceMotion()
@@ -459,62 +529,51 @@ impl Dashboard {
                         node.set_hidden();
                     }
                 });
-                let show = |ui: &mut Ui| {
-                    #[cfg(target_os = "macos")]
-                    {
-                        mac_tooltip(ui, date, &cal, n, tint, p);
-                    }
-                    #[cfg(windows)]
-                    {
-                        label(
-                            ui,
-                            format!("{provider} · {}", date.format("%Y.%m.%d")),
-                            12.,
-                            true,
-                            p.ink,
-                        );
-                        label(
-                            ui,
-                            format!("{} tokens", crate::platform::grouped(n)),
-                            18.,
-                            true,
-                            tint,
-                        );
-                        if let Some(models) = cal.days.get(&date) {
-                            for (model, c) in sorted(models) {
-                                ui.add_space(6.);
-                                label(
-                                    ui,
-                                    format!("{model} · {}", number(c.total())),
-                                    10.,
-                                    false,
-                                    p.muted,
-                                );
-                                label(
-                                    ui,
-                                    format!(
-                                        "입력 {} · 캐시 {} · 출력 {}",
-                                        number(c.input),
-                                        number(c.cached),
-                                        number(c.output)
-                                    ),
-                                    10.,
-                                    false,
-                                    p.muted,
-                                );
-                            }
-                        }
-                    }
-                };
                 #[cfg(target_os = "macos")]
-                if response.hovered() || response.has_focus() || response.clicked() {
-                    Tooltip::for_widget(&response)
-                        .width(304.)
-                        .gap(10.)
-                        .show(show);
+                if self.activity_selection.active == Some(response.id) && ui.is_rect_visible(cell) {
+                    mac_activity_tooltip(ui, &response, date, &cal, tint, p);
                 }
                 #[cfg(windows)]
-                windows_activity_tooltip(&response, p, show);
+                windows_activity_tooltip(&response, p, |ui| {
+                    label(
+                        ui,
+                        format!("{provider} · {}", date.format("%Y.%m.%d")),
+                        12.,
+                        true,
+                        p.ink,
+                    );
+                    label(
+                        ui,
+                        format!("{} tokens", crate::platform::grouped(n)),
+                        18.,
+                        true,
+                        tint,
+                    );
+                    if let Some(models) = cal.days.get(&date) {
+                        for (model, c) in sorted(models) {
+                            ui.add_space(6.);
+                            label(
+                                ui,
+                                format!("{model} · {}", number(c.total())),
+                                10.,
+                                false,
+                                p.muted,
+                            );
+                            label(
+                                ui,
+                                format!(
+                                    "입력 {} · 캐시 {} · 출력 {}",
+                                    number(c.input),
+                                    number(c.cached),
+                                    number(c.output)
+                                ),
+                                10.,
+                                false,
+                                p.muted,
+                            );
+                        }
+                    }
+                });
             }
         }
         ui.add_space(10.);
@@ -637,45 +696,112 @@ fn windows_activity_tooltip(response: &Response, p: Palette, content: impl FnOnc
     }
 }
 #[cfg(target_os = "macos")]
-fn mac_tooltip(
-    ui: &mut Ui,
+fn mac_activity_tooltip(
+    ui: &Ui,
+    cell: &Response,
     date: NaiveDate,
     calendar: &Calendar,
-    total: u64,
     tint: Color32,
     p: Palette,
 ) {
-    ui.set_max_width(278.);
+    let viewport = ui.clip_rect();
+    let width = (viewport.width() - 24.).clamp(220., 304.);
+    let id = cell.id.with("activity details");
+    // SwiftUI measures the actual overlay, preferring the space above the cell.
+    let height = AreaState::load(ui.ctx(), id)
+        .and_then(|state| state.size)
+        .map_or_else(
+            || 90. + 32. * calendar.days.get(&date).map_or(0, |rows| rows.len().min(4)) as f32,
+            |size| size.y,
+        );
+    let left = viewport.left() + 12.;
+    let top = viewport.top() + 12.;
+    let x =
+        (cell.rect.center().x - width / 2.).clamp(left, (viewport.right() - width - 12.).max(left));
+    let above = cell.rect.top() - height - 10.;
+    let y = if above >= top {
+        above
+    } else {
+        (cell.rect.bottom() + 10.).min((viewport.bottom() - height - 12.).max(top))
+    };
+    Area::new(id)
+        .order(Order::Tooltip)
+        .interactable(false)
+        .fixed_pos(pos2(x, y))
+        .show(ui.ctx(), |ui| {
+            let shadow = epaint::Shadow {
+                offset: [0, 9],
+                blur: 44,
+                spread: 0,
+                color: Color32::from_black_alpha(if p.dark { 102 } else { 36 }),
+            };
+            let rect = Frame::new()
+                .corner_radius(12)
+                .inner_margin(Margin::symmetric(13, 11))
+                .fill(p.card)
+                .shadow(shadow)
+                .show(ui, |ui| {
+                    ui.set_width(width - 26.);
+                    ui.spacing_mut().item_spacing = Vec2::ZERO;
+                    ui.spacing_mut().interact_size.y = 0.;
+                    mac_tooltip(ui, date, calendar, tint, p);
+                })
+                .response
+                .rect;
+            ui.painter().rect_stroke(
+                rect,
+                12,
+                Stroke::new(1_f32, p.ink.gamma_multiply(0.07)),
+                StrokeKind::Middle,
+            );
+            let bar = Rect::from_min_max(
+                rect.left_top() + vec2(1., 11.),
+                pos2(rect.left() + 4., rect.bottom() - 11.),
+            );
+            ui.painter().rect_filled(bar, 2., tint);
+        });
+}
+
+#[cfg(target_os = "macos")]
+fn mac_tooltip(ui: &mut Ui, date: NaiveDate, calendar: &Calendar, tint: Color32, p: Palette) {
     ui.horizontal_top(|ui| {
-        label(
+        system_label(
             ui,
-            crate::platform::activity_date(date, "yMMMEd"),
+            &crate::platform::activity_date(date, "yMMMEd"),
             12.,
             true,
             p.ink,
         );
         ui.with_layout(Layout::right_to_left(Align::Min), |ui| {
             if date > calendar.today {
-                label(ui, "아직 도래하지 않은 날짜", 9., false, p.muted);
+                system_label(ui, "아직 도래하지 않은 날짜", 9., false, p.muted);
             } else {
-                ui.vertical(|ui| {
-                    label(ui, "Tokens", 8.5, false, p.muted);
-                    label(ui, crate::platform::grouped(total), 13.5, true, p.ink);
+                ui.with_layout(Layout::top_down(Align::Max), |ui| {
+                    ui.spacing_mut().item_spacing.y = 1.;
+                    system_label(ui, "Tokens", 8.5, false, p.muted);
+                    let total = calendar.totals.get(&date).copied().unwrap_or(0);
+                    system_label(ui, &crate::platform::grouped(total), 13.5, true, p.ink);
                 });
             }
         });
     });
     if let Some(models) = calendar.days.get(&date) {
         ui.add_space(7.);
-        ui.separator();
+        let (divider, _) = ui.allocate_exact_size(
+            vec2(ui.available_width(), 1. / ui.pixels_per_point()),
+            Sense::hover(),
+        );
+        ui.painter().rect_filled(divider, 0., p.line);
         ui.add_space(7.);
         label(ui, format!("모델 {}", models.len()), 9., true, p.muted);
         for (model, counts) in sorted(models).into_iter().take(4) {
             ui.add_space(6.);
             ui.horizontal_top(|ui| {
+                ui.spacing_mut().item_spacing.x = 6.;
                 let (dot, _) = ui.allocate_exact_size(vec2(6., 12.), Sense::hover());
                 ui.painter().circle_filled(dot.center(), 3., tint);
                 ui.vertical(|ui| {
+                    ui.spacing_mut().item_spacing.y = 1.;
                     label(ui, model, 10.5, true, p.ink);
                     let detail = format!(
                         "입력 {} · 출력 {} · 캐시 {}",
@@ -691,6 +817,7 @@ fn mac_tooltip(
             });
         }
         if models.len() > 4 {
+            ui.add_space(6.);
             label(
                 ui,
                 format!("그 외 {}개 모델", models.len() - 4),

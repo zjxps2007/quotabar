@@ -131,6 +131,8 @@ struct Dashboard {
     route: String,
     scroll_top: bool,
     activity_scroll_frame: Option<u64>,
+    #[cfg(target_os = "macos")]
+    activity_selection: activity::DaySelection,
     filter: String,
     query: String,
     #[cfg(target_os = "macos")]
@@ -177,6 +179,10 @@ impl Dashboard {
             self.query.clear();
             self.filter = "전체 Provider".into();
             self.attention = false;
+        }
+        #[cfg(target_os = "macos")]
+        {
+            self.activity_selection = activity::DaySelection::default();
         }
         // WPF dispatches the activity anchor at Loaded priority, after the
         // window and its ScrollViewer have measured their final client area.
@@ -531,6 +537,8 @@ fn main() -> eframe::Result {
             route: "dashboard".into(),
             scroll_top: true,
             activity_scroll_frame: None,
+            #[cfg(target_os = "macos")]
+            activity_selection: activity::DaySelection::default(),
             filter: "전체 Provider".into(),
             query: String::new(),
             #[cfg(target_os = "macos")]

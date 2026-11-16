@@ -578,10 +578,21 @@ def capture_windows(dashboard, program, folder, library, fixture, output, theme,
                 if scene == "activity" and "error" not in observed[scene]:
                     observed["activityTotals"] = controls.request("activityTotals")
                     today = datetime.fromtimestamp(state["demoReport"]["scannedAt"] + 978307200).date()
+                    used = f"Claude {today - timedelta(days=1)}, 240 tokens"
                     observed["activityCells"] = {
-                        "used": controls.request("help", f"Claude {today - timedelta(days=1)}, 240 tokens"),
+                        "used": controls.request("help", used),
                         "unused": controls.request("help", f"Claude {today - timedelta(days=2)}, 0 tokens"),
                     }
+                    try:
+                        controls.request("press", used)
+                        capture("activity-detail")
+                        observed["activityDayOpened"] = controls.request("activityDetail")
+                        controls.request("activityEscape")
+                        time.sleep(0.35)
+                        controls.request("snapshot", "dashboard")
+                        observed["activityDayClosed"] = controls.request("activityDetail")
+                    except (TimeoutError, ValueError) as error:
+                        observed["activityDayError"] = str(error)
             observed["providerSwitches"] = {}
             observed["accessibleProviderSwitches"] = {}
             observed["providerSwitchEvents"] = {}
@@ -709,7 +720,7 @@ def compare_windows(dashboard, work, original, library):
     for theme in dashboard.THEMES:
         for route in (*dashboard.ROUTES, "remove", "message", "message-selected", "message-wrapped", "account-name-selected", "account-email-selected", "popover-sample", "popover-empty", "popover-overflow",
                       "source-path-selected", "settings-path-selected", "settings-bottom", "licenses-notice",
-                      "licenses-apache", "empty", "quota-status", "activity-empty", "activity",
+                      "licenses-apache", "empty", "quota-status", "activity-empty", "activity", "activity-detail",
                       *(f"switch-{provider}-{state}" for provider in PROVIDERS for state in ("on", "off"))):
             name = f"{route}-{theme}"
             lhs, rhs = (dest / side / f"{name}.png" for side in ("original", "rust"))
@@ -758,7 +769,6 @@ def compare_windows(dashboard, work, original, library):
     reopen_matches = all(results[side][theme].get("repeatSettingsShow") == expected_reopen
                          for side in ("original", "rust") for theme in dashboard.THEMES)
     results["repeatSettingsShowIdentical"] = reopen_matches
-    (dest / "comparison.json").write_text(json.dumps(results, ensure_ascii=False, indent=2))
     app_mark_matches = all(results[side][theme].get("appMark") == {"found": True, "help": None}
                            for side in ("original", "rust") for theme in dashboard.THEMES)
     message_matches = all(results[side][theme].get("messageDismissal") == {}
@@ -788,9 +798,14 @@ def compare_windows(dashboard, work, original, library):
     switch_matches = all(results[side][theme].get(kind) == {p: [False, True] for p in PROVIDERS}
                          for side in ("original", "rust") for theme in dashboard.THEMES
                          for kind in ("providerSwitches", "accessibleProviderSwitches"))
+    day_detail_matches = all(results[side][theme].get("activityDayOpened", {}).get("model") is True
+                             and results[side][theme].get("activityDayClosed", {}).get("model") is False
+                             for side in ("original", "rust") for theme in dashboard.THEMES)
+    results["activityDetailIdentical"] = day_detail_matches
+    (dest / "comparison.json").write_text(json.dumps(results, ensure_ascii=False, indent=2))
     return (app_mark_matches and message_matches and copied_accounts and documents_match and scroll_matches
             and activity_matches and switch_matches and frames_match and refresh_matches and manage_matches and reopen_matches
-            and quota_error_matches
+            and quota_error_matches and day_detail_matches
             and all(row["identical"] for row in results["comparisons"].values()))
 
 
