@@ -161,6 +161,8 @@ struct Dashboard {
 
 impl Dashboard {
     fn navigate(&mut self, ctx: &egui::Context, page: &str, notify: bool) {
+        #[cfg(windows)]
+        style::reset_disclosures(ctx);
         #[cfg(target_os = "macos")]
         if notify && page == self.route {
             // Showing an existing SwiftUI page keeps its scroll position. A
@@ -218,6 +220,8 @@ impl Dashboard {
     fn incoming(&mut self, ctx: &egui::Context, frame: &eframe::Frame, event: wire::Event) {
         match event {
             wire::Event::State(value) => {
+                #[cfg(windows)]
+                style::reset_disclosures(ctx);
                 #[cfg(target_os = "macos")]
                 {
                     let theme = value["settings"]["appearance"].as_str().unwrap_or("system");

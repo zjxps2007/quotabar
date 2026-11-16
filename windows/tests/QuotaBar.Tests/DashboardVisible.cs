@@ -46,7 +46,7 @@ internal static partial class DashboardActions
                             captureErrors[side + "/" + scene] = error.Message;
                         }
                         bool bothCaptured = captured.Contains(("original", scene)) && captured.Contains(("candidate", scene));
-                        bool owned = page is not ("dashboard" or "activity" or "accounts" or "settings" or "settings-switch-focus");
+                        bool owned = page is not ("dashboard" or "activity" or "activity-models" or "accounts" or "settings" or "settings-switch-focus");
                         string PrintPath(string build) => Path.Combine(output, "printed", build, scene + ".png");
                         if (owned && !bothCaptured && PrintOwnedClient(window, pid, page == "remove", PrintPath(side)))
                             printed.Add((side, scene));
@@ -71,6 +71,8 @@ internal static partial class DashboardActions
                         if (page == "dashboard" && !SetWindowPos(hwnd, 0, 28, 24, 900, 660, 0x14))
                             throw new Win32Exception();
                         Save(hwnd, page);
+                        if (page == "activity")
+                            CheckActivityDisclosure(window, () => Save(hwnd, "activity-models"));
                         if (page == "settings")
                         {
                             FocusToggle(window, "작업 표시줄에 앱 아이콘 표시");
@@ -148,7 +150,7 @@ internal static partial class DashboardActions
                     Path.Combine(folder, "dashboard-dark.png")).Identical)
                     throw new IOException($"Windows returned the same {side} surface for both themes");
             }
-            const int expectedPairs = 26;
+            const int expectedPairs = 28;
             if (results.Count == expectedPairs)
                 File.WriteAllBytes(Path.Combine(output, "result.json"), Json.Bytes(results));
             else

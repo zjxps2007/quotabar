@@ -21,6 +21,10 @@ fn provider_filter(ui: &mut Ui, filter: &mut String, width: f32) {
 impl Dashboard {
     pub fn accounts(&mut self, ui: &mut Ui, p: Palette) {
         let width = ui.available_width();
+        #[cfg(windows)]
+        let filters = |app: &Dashboard| Id::new((&app.query, &app.filter, app.attention));
+        #[cfg(windows)]
+        let previous_filters = filters(self);
         let matches = |a: &Account, filter: &str, query: &str, attention: bool| {
             (filter == "전체 Provider" || filter == a.provider)
                 && (!attention || a.attention())
@@ -53,13 +57,19 @@ impl Dashboard {
                 );
             }
             #[cfg(windows)]
-            let field = ui.add_sized(
-                [w, 46.],
-                TextEdit::singleline(&mut AccountField(&mut self.query))
-                    .hint_text(rich("계정 이름 또는 이메일 검색", 11., false, p.muted))
-                    .vertical_align(Align::Center)
-                    .margin(Margin::symmetric(11, 15)),
-            );
+            let field = {
+                // The WPF editor and its template each apply the seven-DIP
+                // vertical padding, inside a one-DIP border on either side.
+                let height = crate::windows_text::TextStack::line_height(12.).unwrap_or(16.) + 30.;
+                ui.add(
+                    TextEdit::singleline(&mut AccountField(&mut self.query))
+                        .hint_text(rich("계정 이름 또는 이메일 검색", 11., false, p.muted))
+                        .desired_width((w - 22.).max(0.))
+                        .min_size(vec2(w, height))
+                        .vertical_align(Align::Center)
+                        .margin(Margin::symmetric(11, 8)),
+                )
+            };
             #[cfg(windows)]
             crate::accessibility::text_value(
                 ui,
@@ -85,6 +95,10 @@ impl Dashboard {
                 }
             });
         });
+        #[cfg(windows)]
+        if filters(self) != previous_filters {
+            reset_disclosures(ui.ctx());
+        }
         ui.add_space(18.);
         let rows: Vec<_> = self
             .state

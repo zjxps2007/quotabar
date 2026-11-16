@@ -967,6 +967,9 @@ pub fn section_title(ui: &mut Ui, title: &str, subtitle: &str, p: Palette) {
         ui.add_space(4.);
         stack.advance(4.);
         stack.label(ui, subtitle, 11., false, p.muted);
+        // The parent measures the entire WPF StackPanel in one pass. Individual
+        // label allocations can otherwise shorten it before the next card.
+        ui.expand_to_include_y(stack.top(ui.min_rect().bottom()));
     }
 }
 pub fn columns(width: f32, min: f32, gap: f32) -> usize {

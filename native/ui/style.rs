@@ -501,6 +501,94 @@ pub fn system_label(ui: &mut Ui, text: &str, size: f32, heavy: bool, color: Colo
     label(ui, text, size, heavy, color)
 }
 
+#[cfg(windows)]
+#[derive(Clone, Copy)]
+struct ExpandedDisclosure;
+
+#[cfg(windows)]
+pub fn reset_disclosures(ctx: &Context) {
+    // WPF rebuilds its Expander controls when the page or its data is replaced.
+    ctx.data_mut(|data| data.remove_by_type::<ExpandedDisclosure>());
+}
+
+#[cfg(windows)]
+pub fn disclosure(
+    ui: &mut Ui,
+    key: impl std::hash::Hash,
+    title: &str,
+    size: f32,
+    p: Palette,
+    body: impl FnOnce(&mut Ui),
+) {
+    use crate::windows_text::{MeasuredLabel, TextStack};
+
+    let id = ui.make_persistent_id(key);
+    let was_open = ui.data(|data| data.get_temp::<ExpandedDisclosure>(id).is_some());
+    // The WPF Expander stretches its transparent toggle across the entire card.
+    // Its 10-DIP arrow and natural TextBlock share 2 DIPs of vertical padding.
+    let height = TextStack::line_height(size).unwrap_or(size).max(10.) + 4.;
+    let (_, rect) = ui.allocate_space(vec2(ui.available_width(), height));
+    let response = ui.interact(rect, id, Sense::click());
+    let mut open = was_open ^ response.clicked();
+    if response.enabled() {
+        ui.input_mut(|input| {
+            input.consume_accesskit_action_requests(id, |request| {
+                match request.action {
+                    accesskit::Action::Expand => open = true,
+                    accesskit::Action::Collapse => open = false,
+                    _ => return false,
+                }
+                true
+            })
+        });
+    }
+    if open != was_open {
+        ui.data_mut(|data| {
+            if open {
+                data.insert_temp(id, ExpandedDisclosure);
+            } else {
+                data.remove::<ExpandedDisclosure>(id);
+            }
+        });
+    }
+    response
+        .widget_info(|| WidgetInfo::labeled(WidgetType::CollapsingHeader, ui.is_enabled(), title));
+    ui.ctx().accesskit_node_builder(id, |node| {
+        node.set_expanded(open);
+        if response.enabled() {
+            node.add_action(if open {
+                accesskit::Action::Collapse
+            } else {
+                accesskit::Action::Expand
+            });
+        }
+    });
+    if ui.is_rect_visible(rect) {
+        let center = pos2(rect.left() + 5., rect.center().y);
+        let arrow = [vec2(-4., -4.), vec2(0., 0.), vec2(-4., 4.)];
+        let arrow = arrow.map(|v| center + if open { vec2(-v.y, v.x) } else { v });
+        ui.painter()
+            .add(Shape::line(arrow.to_vec(), Stroke::new(1.2_f32, p.muted)));
+        let origin = pos2(rect.left() + 15., rect.top() + 2.);
+        if let Some(text) = MeasuredLabel::natural(ui, title, size, false) {
+            text.paint(ui.painter(), origin, p.muted);
+        } else {
+            ui.painter().text(
+                origin,
+                Align2::LEFT_TOP,
+                title,
+                FontId::proportional(size),
+                p.muted,
+            );
+        }
+    }
+    if open {
+        ui.add_space(6.);
+        ui.push_id(id, body);
+    }
+}
+
+#[cfg(target_os = "macos")]
 pub fn disclosure(
     ui: &mut Ui,
     key: impl std::hash::Hash,
@@ -511,51 +599,28 @@ pub fn disclosure(
 ) {
     ui.scope(|ui| {
         let header = CollapsingHeader::new(rich(title, size, false, p.muted)).id_salt(key);
-        #[cfg(windows)]
-        {
-            ui.spacing_mut().button_padding = vec2(0., 2.);
-            ui.spacing_mut().interact_size.y = 0.;
-            ui.spacing_mut().indent = 15.;
-            header
-                .icon(move |ui, openness, response| {
-                    let center = response.rect.center() - vec2(4., 0.);
-                    let turn = emath::Rot2::from_angle(openness * std::f32::consts::FRAC_PI_2);
-                    let vertices = [vec2(-2., -4.), vec2(2., 0.), vec2(-2., 4.)];
-                    ui.painter().add(Shape::line(
-                        vertices.map(|v| center + turn * v).to_vec(),
-                        Stroke::new(1.2_f32, p.muted),
-                    ));
-                })
-                .show_unindented(ui, |ui| {
-                    ui.add_space(6.);
-                    body(ui);
-                });
-        }
-        #[cfg(target_os = "macos")]
-        {
-            // SwiftUI aligns the disclosed stack with the card's leading edge.
-            ui.spacing_mut().button_padding = Vec2::ZERO;
-            ui.spacing_mut().indent = 12.;
-            ui.spacing_mut().interact_size.y = 22.;
-            header
-                .icon(move |ui, openness, response| {
-                    let center = response.rect.center() - vec2(2., 0.);
-                    let bounds = Rect::from_center_size(center, vec2(9., 9.));
-                    crate::mac::symbol(
-                        ui.painter(),
-                        bounds,
-                        if openness >= 0.5 {
-                            "chevron.down"
-                        } else {
-                            "chevron.right"
-                        },
-                        8.,
-                        true,
-                        p.tertiary,
-                    );
-                })
-                .show_unindented(ui, body);
-        }
+        // SwiftUI aligns the disclosed stack with the card's leading edge.
+        ui.spacing_mut().button_padding = Vec2::ZERO;
+        ui.spacing_mut().indent = 12.;
+        ui.spacing_mut().interact_size.y = 22.;
+        header
+            .icon(move |ui, openness, response| {
+                let center = response.rect.center() - vec2(2., 0.);
+                let bounds = Rect::from_center_size(center, vec2(9., 9.));
+                crate::mac::symbol(
+                    ui.painter(),
+                    bounds,
+                    if openness >= 0.5 {
+                        "chevron.down"
+                    } else {
+                        "chevron.right"
+                    },
+                    8.,
+                    true,
+                    p.tertiary,
+                );
+            })
+            .show_unindented(ui, body);
     });
 }
 #[cfg(windows)]

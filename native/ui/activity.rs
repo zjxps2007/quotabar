@@ -639,13 +639,19 @@ impl Dashboard {
             |ui| {
                 for (model, c) in sorted(&cal.models).into_iter().take(12) {
                     ui.add_space(8.);
-                    ui.horizontal(|ui| {
-                        label(ui, model, 11., false, tint);
-                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                            label(ui, number(c.total()), 11., true, p.ink)
-                        });
-                    });
-                    caption(ui, c.detail(), p);
+                    ui.allocate_ui_with_layout(
+                        vec2(ui.available_width(), 0.),
+                        Layout::right_to_left(Align::Center),
+                        |ui| {
+                            ui.spacing_mut().item_spacing.x = 0.;
+                            label(ui, number(c.total()), 11., true, p.ink);
+                            ui.with_layout(Layout::top_down(Align::Min), |ui| {
+                                label(ui, model, 11., false, tint)
+                            });
+                        },
+                    );
+                    ui.add_space(4.);
+                    label(ui, c.detail(), 10., false, p.muted);
                 }
             },
         );
@@ -656,6 +662,14 @@ impl Dashboard {
 use crate::mac_text::calendar_label;
 #[cfg(windows)]
 fn calendar_label(ui: &Ui, at: Pos2, align: Align2, text: &str, size: f32, color: Color32) {
+    // Month and weekday labels sit in vertically centered WPF Grid cells.
+    // Measure the TextBlock before aligning it, including at fractional DPI.
+    if let Some(run) = crate::windows_text::MeasuredLabel::natural(ui, text, size, false) {
+        let origin = align.anchor_size(at, run.size).min;
+        if run.paint(ui.painter(), origin, color).is_some() {
+            return;
+        }
+    }
     ui.painter()
         .text(at, align, text, FontId::proportional(size), color);
 }

@@ -32,6 +32,20 @@ internal static partial class DashboardActions
                 Expect(child, "route");
                 int pid = child.Pid ?? throw new IOException("Dashboard exited at startup");
                 var window = Window(pid, "QuotaBar");
+                child.Send(Message.Create("show", "activity"));
+                Expect(child, "route");
+                CheckActivityDisclosure(window);
+                var (_, expanded) = ActivityDisclosure(window);
+                expanded.Expand();
+                Wait(() => expanded.Current.ExpandCollapseState == ExpandCollapseState.Expanded ? window : null, "활동 펼침 상태");
+                child.Send(Message.Create("state", sample with { Scanning = true }));
+                Wait(() => window.FindFirst(TreeScope.Descendants,
+                    new PropertyCondition(AutomationElement.NameProperty, "업데이트 중…")), "갱신된 활동 화면");
+                Suite.Check(ActivityDisclosure(window).Pattern.Current.ExpandCollapseState == ExpandCollapseState.Collapsed,
+                    "The refreshed dashboard should recreate the collapsed model list");
+                child.Send(Message.Create("state", sample));
+                child.Send(Message.Create("show", "dashboard"));
+                Expect(child, "route");
                 Wait(() => window.FindFirst(TreeScope.Descendants, new PropertyCondition(
                     AutomationElement.NameProperty, "17% 남음")), "16.5% quota rounded to 17%");
                 var alias = CheckToolTip(window, first.Name, first.Name);
@@ -314,6 +328,40 @@ internal static partial class DashboardActions
         return Wait(() => parent.FindFirst(TreeScope.Descendants, new AndCondition(
             new PropertyCondition(AutomationElement.NameProperty, name),
             new PropertyCondition(AutomationElement.HelpTextProperty, help))), name + " 도움말");
+    }
+
+    private static (AutomationElement, ExpandCollapsePattern Pattern) ActivityDisclosure(AutomationElement window)
+    {
+        const string title = "모델별 사용량";
+        var patternAvailable = new PropertyCondition(AutomationElement.IsExpandCollapsePatternAvailableProperty, true);
+        var header = Wait(() => window.FindFirst(TreeScope.Descendants, new AndCondition(
+            new PropertyCondition(AutomationElement.NameProperty, title), patternAvailable)), title);
+        return (header, (ExpandCollapsePattern)header.GetCurrentPattern(ExpandCollapsePattern.Pattern));
+    }
+
+    private static void CheckActivityDisclosure(AutomationElement window, Action? onExpanded = null)
+    {
+        var (header, pattern) = ActivityDisclosure(window);
+        var bounds = header.Current.BoundingRectangle;
+        Suite.Check(bounds.Width > 200 && bounds.Height > 0, "Collapsed model usage header should span the calendar card");
+        Wait(() => pattern.Current.ExpandCollapseState == ExpandCollapseState.Collapsed ? header : null, "닫힌 모델별 사용량");
+        pattern.Expand();
+        var model = new PropertyCondition(AutomationElement.NameProperty, "claude-sonnet-4-6");
+        var modelLabel = Wait(() => pattern.Current.ExpandCollapseState == ExpandCollapseState.Expanded
+            ? window.FindFirst(TreeScope.Descendants, model) : null, "펼친 Claude 모델별 사용량");
+        var detail = Wait(() => window.FindAll(TreeScope.Descendants, new PropertyCondition(
+                AutomationElement.ControlTypeProperty, ControlType.Text)).Cast<AutomationElement>()
+            .FirstOrDefault(node => node.Current.Name.StartsWith("입력 ", StringComparison.Ordinal)
+                && node.Current.Name.Contains("캐시 입력", StringComparison.Ordinal)), "모델별 입력·캐시·출력");
+        var modelBounds = modelLabel.Current.BoundingRectangle;
+        var detailBounds = detail.Current.BoundingRectangle;
+        Suite.Check(detailBounds.Height < modelBounds.Height && detailBounds.Top > modelBounds.Bottom,
+            "Model token details should use a smaller font below the model name with a visible gap");
+        onExpanded?.Invoke();
+        pattern.Collapse();
+        Wait(() => pattern.Current.ExpandCollapseState == ExpandCollapseState.Collapsed
+            && window.FindFirst(TreeScope.Descendants, model) == null ? header : null, "모델별 사용량 접기");
+        Console.WriteLine("PASS full-width activity disclosure and Windows UI Automation expand/collapse");
     }
 
     private static void Press(AutomationElement parent, string label)
