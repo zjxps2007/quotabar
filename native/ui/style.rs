@@ -528,7 +528,13 @@ pub fn disclosure(
     // Its 10-DIP arrow and natural TextBlock share 2 DIPs of vertical padding.
     let height = TextStack::line_height(size).unwrap_or(size).max(10.) + 4.;
     let (_, rect) = ui.allocate_space(vec2(ui.available_width(), height));
-    let response = ui.interact(rect, id, Sense::click());
+    let mut response = ui.interact(rect, id, Sense::click());
+    if response.clicked_by(PointerButton::Primary)
+        || (response.is_pointer_button_down_on() && ui.input(|i| i.pointer.primary_down()))
+    {
+        response.request_focus();
+    }
+    control_pressed(ui, &mut response, false);
     let mut open = was_open ^ response.clicked();
     if response.enabled() {
         ui.input_mut(|input| {

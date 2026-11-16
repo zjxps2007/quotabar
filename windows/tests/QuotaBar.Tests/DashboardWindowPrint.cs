@@ -26,7 +26,7 @@ internal static partial class DashboardActions
         finally { if (previous != 0) SetThreadDpiAwarenessContext(previous); }
     }
 
-    private static bool PrintOwnedClient(nint window, int pid, bool confirmation, string destination)
+    private static bool TryPrintClient(nint window, int pid, bool confirmation, string destination)
     {
         var name = new StringBuilder(32);
         GetWindowThreadProcessId(window, out int owner);

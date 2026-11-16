@@ -46,9 +46,8 @@ internal static partial class DashboardActions
                             captureErrors[side + "/" + scene] = error.Message;
                         }
                         bool bothCaptured = captured.Contains(("original", scene)) && captured.Contains(("candidate", scene));
-                        bool owned = page is not ("dashboard" or "activity" or "activity-models" or "accounts" or "settings" or "settings-switch-focus");
                         string PrintPath(string build) => Path.Combine(output, "printed", build, scene + ".png");
-                        if (owned && !bothCaptured && PrintOwnedClient(window, pid, page == "remove", PrintPath(side)))
+                        if (!bothCaptured && TryPrintClient(window, pid, page == "remove", PrintPath(side)))
                             printed.Add((side, scene));
                         if (side != "candidate") return;
                         if (!bothCaptured)
@@ -174,10 +173,16 @@ internal static partial class DashboardActions
         };
         start.ArgumentList.Add(window.ToString());
         start.ArgumentList.Add(destination);
-        using var process = Process.Start(start)!;
-        var detail = process.StandardError.ReadToEndAsync();
-        if (!process.WaitForExit(10000)) { process.Kill(true); throw new TimeoutException("Window capture timed out"); }
-        if (process.ExitCode != 0 || !File.Exists(destination))
-            throw new IOException($"Windows could not capture {Path.GetFileName(destination)}. {detail.GetAwaiter().GetResult().Trim()}");
+        for (int attempt = 0; ; attempt++)
+        {
+            using var process = Process.Start(start)!;
+            var detail = process.StandardError.ReadToEndAsync();
+            if (!process.WaitForExit(10000)) { process.Kill(true); throw new TimeoutException("Window capture timed out"); }
+            if (process.ExitCode == 0 && File.Exists(destination)) return;
+            string error = detail.GetAwaiter().GetResult().Trim();
+            // If the capture helper terminated without a diagnostic, retry the same live window once.
+            if (attempt == 0 && process.ExitCode != 0 && error.Length == 0) continue;
+            throw new IOException($"Windows could not capture {Path.GetFileName(destination)} (exit {process.ExitCode}). {error}");
+        }
     }
 }

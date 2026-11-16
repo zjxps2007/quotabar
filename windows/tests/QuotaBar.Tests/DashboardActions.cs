@@ -34,6 +34,7 @@ internal static partial class DashboardActions
                 var window = Window(pid, "QuotaBar");
                 child.Send(Message.Create("show", "activity"));
                 Expect(child, "route");
+                if (includeKeyboard) CheckDisclosureClickAndSpace(window);
                 CheckActivityDisclosure(window);
                 var (_, expanded) = ActivityDisclosure(window);
                 expanded.Expand();
@@ -352,6 +353,35 @@ internal static partial class DashboardActions
         var header = Wait(() => window.FindFirst(TreeScope.Descendants, new AndCondition(
             new PropertyCondition(AutomationElement.NameProperty, title), patternAvailable)), title);
         return (header, (ExpandCollapsePattern)header.GetCurrentPattern(ExpandCollapsePattern.Pattern));
+    }
+
+    [DllImport("user32.dll")]
+    private static extern void mouse_event(uint flags, int dx, int dy, uint data, nuint extraInfo);
+
+    private static void CheckDisclosureClickAndSpace(AutomationElement window)
+    {
+        var (header, pattern) = ActivityDisclosure(window);
+        var bounds = header.Current.BoundingRectangle;
+        var point = new System.Drawing.Point((int)bounds.Right - 12, (int)(bounds.Top + bounds.Height / 2));
+        DashboardLifecycle.WithParkedCursor(() =>
+        {
+            GetWindowThreadProcessId(GetForegroundWindow(), out int foreground);
+            var hit = AutomationElement.FromPoint(new System.Windows.Point(point.X, point.Y));
+            if (foreground != window.Current.ProcessId || hit.Current.ProcessId != foreground
+                || System.Windows.Forms.Cursor.Position != point)
+                throw new InvalidOperationException("Model disclosure is not under the pointer in the active test window");
+            mouse_event(0x02, 0, 0, 0, 0); // MOUSEEVENTF_LEFTDOWN
+            mouse_event(0x04, 0, 0, 0, 0); // MOUSEEVENTF_LEFTUP
+            Wait(() => pattern.Current.ExpandCollapseState == ExpandCollapseState.Expanded ? header : null, "모델 목록 클릭");
+            SendSpace(header, () =>
+            {
+                Thread.Sleep(100);
+                Suite.Check(pattern.Current.ExpandCollapseState == ExpandCollapseState.Expanded, "Space collapsed the list before release");
+            });
+            Wait(() => pattern.Current.ExpandCollapseState == ExpandCollapseState.Collapsed ? header : null, "Space로 모델 목록 접기");
+            return true;
+        }, anchor: point);
+        Console.WriteLine("PASS click the model disclosure and collapse it on Space release");
     }
 
     private static void CheckActivityDisclosure(AutomationElement window, Action? onExpanded = null)
