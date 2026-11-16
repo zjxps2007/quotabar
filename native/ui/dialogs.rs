@@ -40,7 +40,7 @@ fn sheet_picker_label(ui: &mut Ui, title: &str, p: Palette) {
 fn gap_after_single_line(ui: &mut Ui, drawn_height: f32, vertical_padding: f32, gap: f32) {
     // WPF stacks the natural line boxes before rounding the final window to pixels.
     // The selector and editor have already rounded their own font layout.
-    let correction = crate::windows_text::line_height(13.)
+    let correction = crate::windows_text::TextStack::line_height(13.)
         .map_or(0., |line| line + vertical_padding - drawn_height);
     ui.add_space(gap + correction);
 }
@@ -141,38 +141,41 @@ fn full_button(ui: &mut Ui, title: &str, primary: bool, p: Palette, _top: Option
     let fill = if primary { p.accent } else { p.card };
     let ink = if primary { p.on } else { p.ink };
     let stroke = Stroke::new(1.0_f32, if primary { p.accent } else { p.line });
-    #[cfg(windows)]
-    let button = |ui: &mut Ui| {
-        let font = FontId::proportional(13.);
-        let label = ui.painter().layout_no_wrap(title.into(), font, ink);
-        let content =
-            crate::windows_text::natural_size(ui, title, 13., false).unwrap_or(label.size());
-        let size = vec2(ui.available_width(), content.y + 16.);
-        let (allocated, response) = ui.allocate_exact_size(size, Sense::click());
-        // The dialog's right inset is a whole number of DIPs measured from
-        // the physical client edge, which can fall between egui grid positions.
-        let scale = ui.ctx().pixels_per_point();
-        let client_right = (ui.ctx().content_rect().right() * scale).round() / scale;
-        let right = client_right - (client_right - allocated.right()).round();
-        let top = _top.unwrap_or(allocated.top());
-        let rect = Rect::from_min_max(pos2(allocated.left(), top), pos2(right, top + size.y));
-        ui.painter().rect(rect, 8, fill, stroke, StrokeKind::Inside);
-        ui.painter()
-            .galley(rect.center() - content * 0.5, label, ink);
-        response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, ui.is_enabled(), title));
-        response
-    };
-    #[cfg(target_os = "macos")]
-    let button = |ui: &mut Ui| {
+    button_feedback(ui, p.bg, ink, vec2(10., 5.), |ui| {
+        #[cfg(windows)]
+        if let Some(top) = _top {
+            let font = FontId::proportional(13.);
+            let label = ui.painter().layout_no_wrap(title.into(), font, ink);
+            let content =
+                crate::windows_text::natural_size(ui, title, 13., false).unwrap_or(label.size());
+            let size = vec2(ui.available_width(), content.y + 16.);
+            let (allocated, response) = ui.allocate_exact_size(size, Sense::click());
+            // The dialog's right inset is a whole number of DIPs measured from
+            // the physical client edge, which can fall between egui grid positions.
+            let scale = ui.ctx().pixels_per_point();
+            let client_right = (ui.ctx().content_rect().right() * scale).round() / scale;
+            let right = client_right - (client_right - allocated.right()).round();
+            let rect = Rect::from_min_max(pos2(allocated.left(), top), pos2(right, top + size.y));
+            ui.painter().rect(rect, 8, fill, stroke, StrokeKind::Inside);
+            ui.painter()
+                .galley(rect.center() - content * 0.5, label, ink);
+            response
+                .widget_info(|| WidgetInfo::labeled(WidgetType::Button, ui.is_enabled(), title));
+            return response;
+        }
+        #[cfg(windows)]
+        let height = crate::windows_text::line_height(13.).unwrap_or(17.) + 16.;
+        #[cfg(target_os = "macos")]
+        let height = 32.;
         ui.add_sized(
-            [ui.available_width(), 32.],
-            Button::new(rich(title, 12., false, ink))
-                .corner_radius(7)
+            [ui.available_width(), height],
+            Button::new(rich(title, if MAC { 12. } else { 13. }, false, ink))
+                .corner_radius(if MAC { 7 } else { 8 })
                 .fill(fill)
                 .stroke(stroke),
         )
-    };
-    button_feedback(ui, p.bg, ink, vec2(10., 5.), button).clicked()
+    })
+    .clicked()
 }
 
 pub struct Connect {
@@ -455,7 +458,7 @@ impl Dashboard {
                             #[cfg(windows)]
                             let top = ui.next_widget_position().y;
                             #[cfg(windows)]
-                            let stack = crate::windows_text::TextStack::new(top);
+                            let stack = crate::windows_text::TextStack::begin(ui);
                             close |= self.connect_panel(
                                 ui,
                                 c,
@@ -750,7 +753,7 @@ impl Dashboard {
             "계정 연결"
         };
         #[cfg(windows)]
-        let control_line = crate::windows_text::line_height(13.).unwrap_or(17.);
+        let control_line = crate::windows_text::TextStack::line_height(13.).unwrap_or(17.);
         #[cfg(windows)]
         let form_text = |ui: &mut Ui, title: &str, size, semibold, color| {
             stack.label(ui, title, size, semibold, color)
@@ -966,10 +969,7 @@ impl Dashboard {
                             .font(FontId::proportional(13.))
                             .margin(Margin::symmetric(19, 17));
                         #[cfg(windows)]
-                        let editor = editor.min_size(vec2(
-                            0.,
-                            crate::windows_text::line_height(13.).unwrap_or(17.) + 34.,
-                        ));
+                        let editor = editor.min_size(vec2(0., control_line + 34.));
                         let field = ui.add(editor);
                         let height = field.rect.height();
                         crate::accessibility::text_value(ui, field, &mut c.path, "경로");

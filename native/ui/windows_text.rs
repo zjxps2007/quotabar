@@ -27,13 +27,18 @@ struct Factories {
 }
 
 impl Factories {
-    fn line_box(&self, size: f32, semibold: bool) -> Option<(f32, f32)> {
+    fn line_box(&self, size: f32, semibold: bool, scale: f32, stacked: bool) -> Option<(f32, f32)> {
         let m = self.line_metrics[usize::from(semibold)]?;
-        // TextFormatter measures line spacing and ascent separately in 1/300 DIP.
-        let units = f64::from(size) * 300. / f64::from(m.designUnitsPerEm);
-        let dip = |design: i32| ((f64::from(design) * units).round_ties_even() / 300.) as f32;
         let height = i32::from(m.ascent) + i32::from(m.descent) + i32::from(m.lineGap);
-        Some((dip(height), dip(i32::from(m.ascent))))
+        if !stacked {
+            let unit = size / f32::from(m.designUnitsPerEm);
+            return Some((height as f32 * unit, f32::from(m.ascent) * unit));
+        }
+        // TextFormatter measures line spacing and ascent separately in 1/300 DIP.
+        let units = f64::from(size / scale) * 300. / f64::from(m.designUnitsPerEm);
+        let pixels =
+            |design: i32| ((f64::from(design) * units).round_ties_even() / 300.) as f32 * scale;
+        Some((pixels(height), pixels(i32::from(m.ascent))))
     }
     fn line_metrics(write: &IDWriteFactory) -> [Option<DWRITE_FONT_METRICS>; 2] {
         let family = unsafe {
@@ -132,13 +137,10 @@ impl Factories {
             // WPF's TextBlock uses the family baseline and line spacing across
             // fallback runs. DirectWrite's default combines the largest ascent and
             // descent from different faces, making mixed Korean/Latin rows taller.
-            if let Some((height, baseline)) = self.line_box(size / scale, key.semibold) {
+            if let Some((height, baseline)) = self.line_box(size, key.semibold, scale, key.stacked)
+            {
                 format
-                    .SetLineSpacing(
-                        DWRITE_LINE_SPACING_METHOD_UNIFORM,
-                        height * scale,
-                        baseline * scale,
-                    )
+                    .SetLineSpacing(DWRITE_LINE_SPACING_METHOD_UNIFORM, height, baseline)
                     .ok()?;
             }
             let width = match key.line {
@@ -444,7 +446,7 @@ thread_local! {
     static FACTORIES: Option<Factories> = Factories::new().ok();
 }
 pub fn line_height(size: f32) -> Option<f32> {
-    FACTORIES.with(|f| Some(f.as_ref()?.line_box(size, false)?.0))
+    FACTORIES.with(|f| Some(f.as_ref()?.line_box(size, false, 1., false)?.0))
 }
 
 #[derive(Clone, Eq, PartialEq, Hash)]
@@ -453,6 +455,7 @@ struct RunKey {
     pixels: u32,
     scale: u32,
     semibold: bool,
+    stacked: bool,
     line: LineWidth,
     origin: RasterOrigin,
     colors: Option<LcdColors>,
@@ -487,8 +490,15 @@ enum LineWidth {
 pub struct TextStack(std::cell::Cell<f64>);
 
 impl TextStack {
-    pub fn new(top: f32) -> Self {
-        Self(std::cell::Cell::new(f64::from(top)))
+    pub fn begin(ui: &Ui) -> Self {
+        if let Some(renderer) = ui.ctx().plugin_opt::<TextRenderer>() {
+            renderer.lock().stacked_viewport = Some(ui.ctx().viewport_id());
+        }
+        Self(std::cell::Cell::new(f64::from(ui.next_widget_position().y)))
+    }
+
+    pub fn line_height(size: f32) -> Option<f32> {
+        FACTORIES.with(|f| Some(f.as_ref()?.line_box(size, false, 1., true)?.0))
     }
 
     pub fn top(&self, allocated: f32) -> f32 {
@@ -535,9 +545,10 @@ struct RasterOrigin {
     y_bits: u32,
 }
 
-fn raster_origin(position: Pos2, scale: f32) -> (Pos2, RasterOrigin) {
+fn raster_origin(position: Pos2, scale: f32, stacked: bool) -> (Pos2, RasterOrigin) {
     let x = (position.x * scale * 64.).round() as i32;
     let y = position.y * scale;
+    let y = if stacked { y } else { (y * 64.).round() / 64. };
     let top = y.floor();
     (
         pos2(x.div_euclid(64) as f32 / scale, top / scale),
@@ -571,6 +582,9 @@ pub struct TextRenderer {
     runs: HashMap<RunKey, CachedRun>,
     pass: u64,
     pub bitmap_target: bool,
+    // Only a viewport that laid out a natural stack in this pass can use its
+    // unrounded paint origins. Other widgets retain their own allocation grid.
+    stacked_viewport: Option<ViewportId>,
 }
 
 impl TextRenderer {
@@ -635,17 +649,19 @@ impl TextRenderer {
                 backdrop,
                 software,
             });
+        let stacked = self.stacked_viewport == Some(ctx.viewport_id());
         let mut shapes = Vec::with_capacity(text.galley.rows.len());
         for row in &text.galley.rows {
             if row.glyphs.is_empty() {
                 continue;
             }
-            let (start, origin) = raster_origin(text.pos + row.pos.to_vec2(), scale);
+            let (start, origin) = raster_origin(text.pos + row.pos.to_vec2(), scale, stacked);
             let key = RunKey {
                 text: row.glyphs.iter().map(|glyph| glyph.chr).collect(),
                 pixels: (format.font_id.size * scale).to_bits(),
                 scale: scale.to_bits(),
                 semibold,
+                stacked,
                 line: LineWidth::Natural,
                 origin,
                 colors,
@@ -675,17 +691,18 @@ pub fn text_block(ui: &mut Ui, text: &str, size: f32, semibold: bool, color: Col
 
 pub fn natural_size(ui: &Ui, text: &str, size: f32, semibold: bool) -> Option<Vec2> {
     let scale = ui.ctx().pixels_per_point();
+    let renderer = ui.ctx().plugin_opt::<TextRenderer>()?;
+    let mut renderer = renderer.lock();
     let key = RunKey {
         text: text.into(),
         pixels: (size * scale).to_bits(),
         scale: scale.to_bits(),
         semibold,
+        stacked: renderer.stacked_viewport == Some(ui.ctx().viewport_id()),
         line: LineWidth::Natural,
         origin: RasterOrigin::default(),
         colors: None,
     };
-    let renderer = ui.ctx().plugin_opt::<TextRenderer>()?;
-    let mut renderer = renderer.lock();
     Some(
         renderer
             .run(ui.ctx(), key, ui.input(|i| i.max_texture_side))?
@@ -714,17 +731,18 @@ pub fn draw_label(
         (true, LabelLayout::SingleLine) => LineWidth::Ellipsis((width * scale).to_bits()),
         (true, _) => LineWidth::Wrap((width * scale).to_bits()),
     };
+    let renderer = ui.ctx().plugin_opt::<TextRenderer>()?;
+    let mut renderer = renderer.lock();
     let mut key = RunKey {
         text: text.into(),
         pixels: (size * scale).to_bits(),
         scale: scale.to_bits(),
         semibold,
+        stacked: renderer.stacked_viewport == Some(ui.ctx().viewport_id()),
         line,
         origin: RasterOrigin::default(),
         colors: None,
     };
-    let renderer = ui.ctx().plugin_opt::<TextRenderer>()?;
-    let mut renderer = renderer.lock();
     let measured = renderer.run(ui.ctx(), key.clone(), max_size)?.layout_size;
     // WPF measures TextBlocks before arranging their parent. Retain the
     // fractional natural size across stacked rows, independently of the bitmap.
@@ -739,7 +757,7 @@ pub fn draw_label(
     if let LabelLayout::Stacked(stack) = layout {
         pos.y = stack.top(pos.y);
     }
-    let (start, origin) = raster_origin(pos, scale);
+    let (start, origin) = raster_origin(pos, scale, key.stacked);
     key.origin = origin;
     let run = renderer.run(ui.ctx(), key, max_size)?;
     let mut painter = ui.painter().clone();
@@ -958,6 +976,9 @@ impl egui::Plugin for TextRenderer {
                 }
             }
         }
+        if self.stacked_viewport == Some(ctx.viewport_id()) {
+            self.stacked_viewport = None;
+        }
     }
 }
 
@@ -1027,7 +1048,7 @@ mod tests {
     fn wrapped_help_and_consent_keep_the_original_device_baselines() {
         let _apartment = Apartment::open();
         let factories = Factories::new().unwrap();
-        let stack = TextStack::new(28.);
+        let stack = TextStack(std::cell::Cell::new(28.));
         // Title, subtitle, provider, path caption, editor and browse button.
         for (size, bold) in [
             (24., true),
@@ -1037,13 +1058,13 @@ mod tests {
             (13., false),
             (13., false),
         ] {
-            stack.advance(factories.line_box(size, bold).unwrap().0);
+            stack.advance(factories.line_box(size, bold, 1., true).unwrap().0);
         }
         let help = stack.top(281.375);
-        let (height, ascent) = factories.line_box(12., false).unwrap();
+        let (height, ascent) = factories.line_box(12., false, 1., true).unwrap();
         stack.advance(2. * height);
         let consent = stack.top(328.28125);
-        let (_, checkbox_ascent) = factories.line_box(13., false).unwrap();
+        let (_, checkbox_ascent) = factories.line_box(13., false, 1., true).unwrap();
         // Absolute WPF GlyphRun baselines from the official connection dialog,
         // in 1/300 DIP. At 150% they fall at 441.5, 465.44 and 513.495 pixels.
         for scale in [1., 1.25, 1.5, 1.75, 2.] {
@@ -1052,7 +1073,7 @@ mod tests {
                 (help, height + ascent, 93088),
                 (consent, checkbox_ascent, 102699),
             ] {
-                let (pos, origin) = raster_origin(pos2(0., top), scale);
+                let (pos, origin) = raster_origin(pos2(0., top), scale, true);
                 let baseline = (pos.y * scale).round()
                     + (f32::from_bits(origin.y_bits) + offset * scale).round();
                 assert_eq!(
@@ -1064,6 +1085,32 @@ mod tests {
     }
 
     #[test]
+    fn reopening_another_dialog_restores_its_native_line_spacing() {
+        let _apartment = Apartment::open();
+        let ctx = Context::default();
+        ctx.add_plugin(TextRenderer::default());
+        // Connection and license dialogs reuse the same viewport. The second
+        // dialog must recover its ordinary glyph layout, including cached runs.
+        let measure = |stacked| {
+            let mut height = 0.;
+            let _ = ctx.run(Default::default(), |ctx| {
+                CentralPanel::default().show(ctx, |ui| {
+                    if stacked {
+                        TextStack::begin(ui);
+                    }
+                    height = natural_size(ui, "LicenseDocument", 13., false).unwrap().y;
+                });
+            });
+            height
+        };
+        let ordinary = measure(false);
+        assert_eq!(ordinary, line_height(13.).unwrap());
+        assert_eq!(measure(true), TextStack::line_height(13.).unwrap());
+        assert_ne!(ordinary, TextStack::line_height(13.).unwrap());
+        assert_eq!(measure(false), ordinary);
+    }
+
+    #[test]
     fn adjacent_text_blocks_keep_cleartype_over_their_unpainted_padding() {
         let _apartment = Apartment::open();
         let ctx = Context::default();
@@ -1072,12 +1119,13 @@ mod tests {
         for scale in [1.0_f32, 1.5] {
             let mut measure = |text: &str, size: f32, bold: bool, top: f32| {
                 let pos = pos2(28., top);
-                let (start, origin) = raster_origin(pos, scale);
+                let (start, origin) = raster_origin(pos, scale, false);
                 let key = RunKey {
                     text: text.into(),
                     pixels: (size * scale).to_bits(),
                     scale: scale.to_bits(),
                     semibold: bold,
+                    stacked: false,
                     line: LineWidth::Natural,
                     origin,
                     colors: None,
@@ -1122,6 +1170,7 @@ mod tests {
                 pixels: 13_f32.to_bits(),
                 scale: 1_f32.to_bits(),
                 semibold: false,
+                stacked: false,
                 line: LineWidth::Natural,
                 origin: RasterOrigin::default(),
                 colors: None,
@@ -1160,6 +1209,7 @@ mod tests {
             pixels: 13_f32.to_bits(),
             scale: 1_f32.to_bits(),
             semibold: false,
+            stacked: false,
             line: LineWidth::Natural,
             origin: RasterOrigin::default(),
             colors: None,
@@ -1190,6 +1240,7 @@ mod tests {
                 pixels: pixels.to_bits(),
                 scale: (pixels / 13.).to_bits(),
                 semibold: false,
+                stacked: false,
                 line: LineWidth::Natural,
                 origin: RasterOrigin::default(),
                 colors: None,
