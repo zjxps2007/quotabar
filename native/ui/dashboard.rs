@@ -536,20 +536,7 @@ impl Dashboard {
                     // A SwiftUI HStack centers each complete card, including its
                     // background. Give the grid its intrinsic height before painting.
                     let id = ui.make_persistent_id(("stat tile height", symbol));
-                    let height = ui.data(|d| d.get_temp::<f32>(id)).unwrap_or_default();
-                    ui.allocate_ui_with_layout(
-                        vec2(w, height),
-                        Layout::top_down(Align::Min),
-                        |ui| {
-                            let measured = card.show(ui, content).response.rect.height();
-                            if measured != height {
-                                ui.data_mut(|d| d.insert_temp(id, measured));
-                                ui.ctx().request_discard(
-                                    "Align statistics cards with their measured heights",
-                                );
-                            }
-                        },
-                    );
+                    card.show_centered_in_grid(ui, id, w, content);
                 }
                 #[cfg(windows)]
                 card.show(ui, content);
@@ -638,33 +625,52 @@ impl Dashboard {
         });
         ui.add_space(if MAC { 24. } else { 16. });
         let columns = columns(ui.available_width(), 290., 14.);
+        let w = cell_width(ui.available_width(), columns, 14.);
         let accounts = self.state.accounts.clone();
         for chunk in accounts.chunks(columns) {
-            ui.horizontal_top(|ui| {
-                let w = cell_width(ui.available_width(), columns, 14.);
+            let cards = |ui: &mut Ui| {
                 ui.spacing_mut().item_spacing.x = 14.;
                 let card = p.frame(20);
                 let content_width = (w - card.total_margin().sum().x).max(1.);
                 for a in chunk {
-                    let _card = card.show(ui, |ui| {
+                    let content = |ui: &mut Ui| {
                         ui.vertical(|ui| {
                             ui.set_width(content_width);
                             self.quota_card(ui, p, a);
                         })
-                    });
+                    };
+                    #[cfg(windows)]
+                    card.show(ui, content);
+                    #[cfg(target_os = "macos")]
+                    let drawn = card.show_centered_in_grid(
+                        ui,
+                        ui.make_persistent_id(("quota card height", &a.id)),
+                        w,
+                        content,
+                    );
                     #[cfg(target_os = "macos")]
                     if !a.enabled {
                         // SwiftUI applies opacity to the entire card after compositing
                         // its background, border, labels and switch.
                         let border = 1. / ui.pixels_per_point();
                         ui.painter().rect_filled(
-                            _card.response.rect.expand(border),
+                            drawn.response.rect.expand(border),
                             0.,
                             p.bg.gamma_multiply(0.35),
                         );
                     }
                 }
-            });
+            };
+            #[cfg(target_os = "macos")]
+            Grid::new(("dashboard account row", &chunk[0].id))
+                .num_columns(columns)
+                .spacing(vec2(14., 0.))
+                .min_col_width(w)
+                .max_col_width(w)
+                .min_row_height(0.)
+                .show(ui, cards);
+            #[cfg(windows)]
+            ui.horizontal_top(cards);
             ui.add_space(14.);
         }
         self.activity(ui, p, viewport_top);
@@ -828,7 +834,7 @@ impl Dashboard {
                     p.warning,
                 );
                 ui.add_space(6.);
-                crate::mac_text::caption_button(ui, MANAGE, p.tint(a.provider))
+                crate::mac_text::caption_button(ui, MANAGE, p.system_link)
             };
             #[cfg(windows)]
             let button = {

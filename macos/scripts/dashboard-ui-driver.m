@@ -242,7 +242,7 @@ static id control(NSWindow *window, NSString *name, NSMutableArray *available, B
         if ([seen containsObject:node]) continue;
         [seen addObject:node];
         NSString *role = [node respondsToSelector:@selector(accessibilityRole)] ? [node accessibilityRole] : nil;
-        if (lookingForHelp || [@[NSAccessibilityButtonRole, NSAccessibilityRadioButtonRole, NSAccessibilityCheckBoxRole,
+        if (lookingForHelp || [@[NSAccessibilityButtonRole, NSAccessibilityLinkRole, NSAccessibilityRadioButtonRole, NSAccessibilityCheckBoxRole,
               NSAccessibilityPopUpButtonRole, NSAccessibilityDisclosureTriangleRole, @"AXSwitch"] containsObject:role ?: @""]) {
             for (NSString *label in names(node)) {
                 if ([label isEqual:name] || ([name isEqual:@"계정 연결"] && [label hasPrefix:@"+"] && [label hasSuffix:name]))
@@ -406,6 +406,30 @@ static NSDictionary *visibleText(NSURL *frame, NSString *operation) {
     return @{@"error": @"could not identify the visible license document", @"recognized": body};
 }
 
+// The reference's SwiftUI link can be folded into its card's AX group.
+// When it has no separate frame, click the text in the actual window capture.
+static NSDictionary *clickVisibleText(NSWindow *window, NSString *label) {
+    NSURL *dir = [NSURL fileURLWithFileSystemRepresentation:getenv("QUOTABAR_TEST_UI_DIRECTORY") isDirectory:YES relativeToURL:nil];
+    VNRecognizeTextRequest *read = [VNRecognizeTextRequest new];
+    read.recognitionLanguages = @[@"ko-KR", @"en-US"];
+    read.recognitionLevel = VNRequestTextRecognitionLevelAccurate;
+    read.minimumTextHeight = 0.005;
+    read.usesLanguageCorrection = NO;
+    VNImageRequestHandler *reader = [[VNImageRequestHandler alloc] initWithURL:[dir URLByAppendingPathComponent:@"frame.png"] options:@{}];
+    NSError *error = nil;
+    if (![reader performRequests:@[read] error:&error]) return @{@"error": error.localizedDescription};
+    NSCharacterSet *skip = NSCharacterSet.alphanumericCharacterSet.invertedSet;
+    NSString *wanted = [[label componentsSeparatedByCharactersInSet:skip] componentsJoinedByString:@""];
+    for (VNRecognizedTextObservation *line in read.results) {
+        NSString *text = [line topCandidates:1].firstObject.string;
+        if (![[[text componentsSeparatedByCharactersInSet:skip] componentsJoinedByString:@""] containsString:wanted]) continue;
+        CGRect box = line.boundingBox;
+        postClick(window, NSMakePoint(CGRectGetMidX(box) * NSWidth(window.frame), CGRectGetMidY(box) * NSHeight(window.frame)));
+        return @{@"input": @"mouse", @"target": @"visible text", @"text": text};
+    }
+    return @{@"error": @"link text unavailable in the accessibility tree and captured window", @"label": label};
+}
+
 static NSDictionary *selectionStyle(NSWindow *window) {
     NSMutableDictionary *result = [NSMutableDictionary dictionary];
     NSResponder *responder = window.firstResponder;
@@ -524,6 +548,10 @@ static NSDictionary *perform(NSDictionary *request) {
         NSRect usable = (window.screen ?: NSScreen.mainScreen).visibleFrame;
         NSRect frame = NSMakeRect(NSMinX(usable) + 12, NSMinY(usable) + 4,
                                   MIN(940, NSWidth(usable) - 24), MIN(668, NSHeight(usable) - 8));
+        NSDictionary *reference = request[@"value"];
+        if ([reference isKindOfClass:NSDictionary.class])
+            frame = NSMakeRect([reference[@"x"] doubleValue], [reference[@"y"] doubleValue],
+                               [reference[@"width"] doubleValue], [reference[@"height"] doubleValue]);
         [window setFrame:frame display:YES];
         return @{@"frame": rectangle(window.frame), @"savedFrame": window.stringWithSavedFrame};
     }
@@ -693,11 +721,13 @@ static NSDictionary *perform(NSDictionary *request) {
         clickControl(target, label)) return @{@"pressed": label};
     BOOL lookingForHelp = [op isEqual:@"help"];
     BOOL lookingForElement = [op isEqual:@"present"];
-    id element = control(target, label, available, lookingForHelp || lookingForElement);
-    if ([op isEqual:@"clickButton"]) {
-        if (![element respondsToSelector:@selector(accessibilityFrame)])
+    BOOL lookingForLink = [op isEqual:@"clickLink"];
+    id element = control(target, label, available, lookingForHelp || lookingForElement || lookingForLink);
+    if ([op isEqual:@"clickButton"] || lookingForLink) {
+        if (![element respondsToSelector:@selector(accessibilityFrame)] && !lookingForLink)
             return @{@"pending": @"accessible button", @"label": label, @"available": available};
-        NSRect frame = [target convertRectFromScreen:[element accessibilityFrame]];
+        NSRect frame = [element respondsToSelector:@selector(accessibilityFrame)] ? [target convertRectFromScreen:[element accessibilityFrame]] : NSZeroRect;
+        if (lookingForLink && NSIsEmptyRect(frame)) return clickVisibleText(target, label);
         if (NSIsEmptyRect(frame)) return @{@"pending": @"button frame"};
         postClick(target, NSMakePoint(NSMidX(frame), NSMidY(frame)));
         return @{@"frame": rectangle(frame)};

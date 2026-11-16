@@ -558,10 +558,13 @@ def capture_windows(dashboard, program, folder, library, fixture, output, theme,
             show("dashboard")
             capture("quota-status")
             try:
-                controls.request("press", "계정 관리에서 확인 →")
+                observed["quotaErrorLinkClick"] = controls.request("clickLink", "계정 관리에서 확인 →")
                 observed["quotaErrorNavigation"] = commands_after_input(dashboard, app.stdout, "route")
             except (TimeoutError, ValueError) as error:
                 observed["quotaErrorNavigation"] = {"error": str(error)}
+            # Either possible route after clicking the link can transition to Settings.
+            # Later scenes should still exercise the dashboard if this input fails.
+            show("settings")
             for scene, state in activity_fixtures(fixture):
                 if scene != "empty":
                     show("accounts")
@@ -684,7 +687,10 @@ def compare_window_placement(dashboard, work, original, library, fixture):
                     # window visible without publishing a navigation change.
                     observed[phase] = controls.request("windowPlacement")
                     if phase == "fresh":
-                        observed["moved"] = controls.request("moveDashboard")
+                        # The Dock's visible frame can move between launches. Drive both
+                        # windows to the very same coordinates before reopening them.
+                        target = results["original"].get("moved", {}).get("frame")
+                        observed["moved"] = controls.request("moveDashboard", value=target)
                 except (OSError, ValueError, RuntimeError, TimeoutError, EOFError, subprocess.SubprocessError) as error:
                     observed["error"] = str(error)
                     break

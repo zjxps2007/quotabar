@@ -89,6 +89,8 @@ pub struct Palette {
     #[cfg(target_os = "macos")]
     pub(crate) focus_ring: Color32,
     #[cfg(target_os = "macos")]
+    pub system_link: Color32,
+    #[cfg(target_os = "macos")]
     pub window_background: Color32,
     pub card: Color32,
     pub bg: Color32,
@@ -124,6 +126,28 @@ impl CardSurface {
         self
     }
 
+    #[cfg(target_os = "macos")]
+    pub fn show_centered_in_grid<R>(
+        self,
+        ui: &mut Ui,
+        id: Id,
+        width: f32,
+        content: impl FnOnce(&mut Ui) -> R,
+    ) -> InnerResponse<R> {
+        let height = ui.data(|d| d.get_temp::<f32>(id)).unwrap_or_default();
+        ui.allocate_ui_with_layout(vec2(width, height), Layout::top_down(Align::Min), |ui| {
+            let result = self.show(ui, content);
+            let measured = result.response.rect.height();
+            if measured != height {
+                ui.data_mut(|d| d.insert_temp(id, measured));
+                ui.ctx()
+                    .request_discard("Center cards using their intrinsic heights");
+            }
+            result
+        })
+        .inner
+    }
+
     pub fn show<R>(self, ui: &mut Ui, content: impl FnOnce(&mut Ui) -> R) -> InnerResponse<R> {
         let result = self.frame.show(ui, content);
         #[cfg(target_os = "macos")]
@@ -155,7 +179,7 @@ impl Palette {
         };
         let gray = |d, l| Color32::from_gray(if dark { d } else { l });
         #[cfg(target_os = "macos")]
-        let (ink, muted, tertiary, placeholder, focus_ring, warning) = {
+        let (ink, muted, tertiary, placeholder, focus_ring, warning, system_link) = {
             use block2::StackBlock;
             use objc2::MainThreadMarker;
             use objc2_app_kit::{NSApplication, NSColor};
@@ -175,7 +199,14 @@ impl Palette {
                 } else {
                     Color32::from_rgb(255, 149, 0)
                 };
-                let colors = Cell::new((primary, secondary, tertiary, tertiary, primary, orange));
+                let link = if dark {
+                    Color32::from_rgb(65, 156, 255)
+                } else {
+                    Color32::from_rgb(0, 104, 218)
+                };
+                let colors = Cell::new((
+                    primary, secondary, tertiary, tertiary, primary, orange, link,
+                ));
                 appearance.performAsCurrentDrawingAppearance(&StackBlock::new(|| {
                     colors.set((
                         mac_color(&NSColor::labelColor(), primary),
@@ -184,6 +215,7 @@ impl Palette {
                         mac_color(&NSColor::placeholderTextColor(), tertiary),
                         mac_color(&NSColor::keyboardFocusIndicatorColor(), primary),
                         mac_color(&NSColor::systemOrangeColor(), orange),
+                        mac_color(&NSColor::linkColor(), link),
                     ));
                 }));
                 let colors = colors.get();
@@ -203,6 +235,8 @@ impl Palette {
             placeholder,
             #[cfg(target_os = "macos")]
             focus_ring,
+            #[cfg(target_os = "macos")]
+            system_link,
             #[cfg(target_os = "macos")]
             // The exposed SwiftUI sheet surface in Dark Aqua and Aqua.
             window_background: gray(30, 236),
