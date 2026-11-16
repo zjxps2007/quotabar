@@ -25,6 +25,8 @@ fn keyboard_cues(ui: &Ui, response: &Response) -> bool {
     let mut cues = ui
         .data(|d| d.get_temp::<KeyboardCues>(id))
         .unwrap_or_default();
+    // WPF creates the focus visual on a real focus change. UI Automation may
+    // request focus again on the selected field while delivering a handled key.
     if response.gained_focus() {
         cues.visible = cues.last_input_keyboard;
     }
@@ -34,12 +36,6 @@ fn keyboard_cues(ui: &Ui, response: &Response) -> bool {
                 Event::PointerButton { pressed: true, .. } => {
                     cues.last_input_keyboard = false;
                     cues.visible = false;
-                }
-                Event::AccessKitActionRequest(r)
-                    if r.action == accesskit::Action::Focus
-                        && r.target == response.id.value().into() =>
-                {
-                    cues.visible = cues.last_input_keyboard;
                 }
                 Event::Key {
                     key, pressed: true, ..
@@ -531,8 +527,13 @@ mod tests {
             (provider, selected)
         };
         let (provider, _) = frame(vec![]);
-        ctx.memory_mut(|m| m.request_focus(provider));
-        assert_eq!(frame(vec![key(Key::ArrowDown)]).1, 1);
+        let focus = Event::AccessKitActionRequest(accesskit::ActionRequest {
+            action: accesskit::Action::Focus,
+            target: provider.value().into(),
+            data: None,
+        });
+        frame(vec![focus.clone()]);
+        assert_eq!(frame(vec![key(Key::ArrowDown), focus.clone()]).1, 1);
         let shows_keyboard_cues = || {
             ctx.data(|d| {
                 d.get_temp::<KeyboardCues>(provider.with("keyboard focus visual"))
@@ -540,19 +541,27 @@ mod tests {
                     .visible
             })
         };
-        assert!(!shows_keyboard_cues());
+        assert!(
+            !shows_keyboard_cues(),
+            "selecting and refocusing in one frame"
+        );
+        frame(vec![focus.clone()]);
+        frame(vec![]);
+        assert!(
+            !shows_keyboard_cues(),
+            "refocusing the same selection later"
+        );
         assert_eq!(ctx.memory(|m| m.focused()), Some(provider));
         assert_eq!(frame(vec![key(Key::Home)]).1, 0);
         frame(vec![key(Key::Tab)]);
         assert!(shows_keyboard_cues());
         assert_ne!(ctx.memory(|m| m.focused()), Some(provider));
 
-        let focus = Event::AccessKitActionRequest(accesskit::ActionRequest {
-            action: accesskit::Action::Focus,
-            target: provider.value().into(),
-            data: None,
-        });
         assert_eq!(frame(vec![focus, key(Key::ArrowDown)]).1, 1);
+        assert!(
+            shows_keyboard_cues(),
+            "switching back from another field after Tab"
+        );
         assert_eq!(ctx.memory(|m| m.focused()), Some(provider));
         frame(vec![key(Key::Home)]);
         frame(vec![key(Key::F4), key(Key::ArrowDown), key(Key::Escape)]);

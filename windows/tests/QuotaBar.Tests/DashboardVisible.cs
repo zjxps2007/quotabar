@@ -97,6 +97,10 @@ internal static partial class DashboardActions
                             TypeKey(selector, "{DOWN}");
                             Wait(() => Reader("Apache License"), "read-only Apache license");
                             Save(licenseHwnd, "licenses-apache");
+                            selector.SetFocus();
+                            Wait(() => selector.Current.HasKeyboardFocus && Reader("Apache License") is not null ? selector : null,
+                                "refocused Apache license selector");
+                            Save(licenseHwnd, "licenses-apache-refocus");
                             Press(licenses, "닫기");
                             Wait(() => !IsWindow(licenseHwnd) ? window : null, "닫힌 라이선스 창");
                         }
@@ -142,17 +146,18 @@ internal static partial class DashboardActions
                     Path.Combine(folder, "dashboard-dark.png")).Identical)
                     throw new IOException($"Windows returned the same {side} surface for both themes");
             }
-            if (results.Count == 22)
+            const int expectedPairs = 24;
+            if (results.Count == expectedPairs)
                 File.WriteAllBytes(Path.Combine(output, "result.json"), Json.Bytes(results));
             else
                 File.WriteAllBytes(Path.Combine(output, "result.json"), Json.Bytes(new
                 {
-                    status = "inconclusive", reason = $"Windows captured {results.Count} of 22 comparable pairs.",
+                    status = "inconclusive", reason = $"Windows captured {results.Count} of {expectedPairs} comparable pairs.",
                     comparisons = results, captureErrors
                 }));
             File.WriteAllBytes(Path.Combine(output, "capture-methods.json"), Json.Bytes(captureMethods));
             foreach (var (scene, frame) in results) Console.WriteLine($"Window {scene}: {frame.ChangedPixels:N0} different pixels, {frame.Width}×{frame.Height}");
-            return results.Count == 22 && results.Values.All(v => v.Identical);
+            return results.Count == expectedPairs && results.Values.All(v => v.Identical);
         });
     }
 
