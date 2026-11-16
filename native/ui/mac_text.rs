@@ -1004,6 +1004,7 @@ mod tests {
             face: Face::Regular,
             tracking: 0,
             light_ink: false,
+            ink_alpha: 255,
         };
         let (plain, size, _) = raster(&key, 4096).unwrap();
         key.face = Face::Underlined;
@@ -1031,6 +1032,7 @@ mod tests {
                     face: Face::label(heavy),
                     tracking: 0,
                     light_ink,
+                    ink_alpha: 255,
                 };
                 let (image, bounds, _) = raster(&key, 4096).unwrap();
                 assert!(bounds.x > 0. && bounds.y > 0.);
