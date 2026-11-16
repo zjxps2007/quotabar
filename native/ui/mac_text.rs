@@ -29,6 +29,7 @@ use std::collections::HashMap;
 #[derive(Clone, Copy, Hash, Eq, PartialEq)]
 pub enum PreferredFont {
     Body,
+    Callout,
     Title3Bold,
     SubheadlineSemibold,
     Caption,
@@ -39,12 +40,13 @@ pub enum PreferredFont {
 impl PreferredFont {
     fn base(self) -> Retained<NSFont> {
         use objc2_app_kit::{
-            NSFontTextStyleBody, NSFontTextStyleCaption1, NSFontTextStyleCaption2,
-            NSFontTextStyleSubheadline, NSFontTextStyleTitle3,
+            NSFontTextStyleBody, NSFontTextStyleCallout, NSFontTextStyleCaption1,
+            NSFontTextStyleCaption2, NSFontTextStyleSubheadline, NSFontTextStyleTitle3,
         };
         unsafe {
             let style = match self {
                 Self::Body => NSFontTextStyleBody,
+                Self::Callout => NSFontTextStyleCallout,
                 Self::Title3Bold => NSFontTextStyleTitle3,
                 Self::SubheadlineSemibold => NSFontTextStyleSubheadline,
                 Self::Caption | Self::CaptionSemibold => NSFontTextStyleCaption1,
@@ -534,17 +536,61 @@ pub fn quota_percent(ui: &mut Ui, text: &str, color: Color32) -> Option<Response
     draw_label(ui, text, 11., Face::TabularDigits, color, LineBox::Stack)
 }
 
+pub fn symbol_label(ui: &mut Ui, name: &str, text: &str, style: PreferredFont, color: Color32) {
+    let font = style.base();
+    let points = font.pointSize() as f32;
+    let line = PreferredFont::metrics(&font, ui).height;
+    let height =
+        crate::mac::symbol_size(ui.ctx(), name, points, false).map_or(line, |s| s.y.max(line));
+    ui.allocate_ui_with_layout(
+        vec2(ui.available_width(), height),
+        Layout::left_to_right(Align::Center),
+        |ui| {
+            crate::mac::intrinsic_symbol(ui, name, points, false, color);
+            preferred_label(ui, text, style, color);
+        },
+    );
+}
+
 pub fn plain_button(ui: &mut Ui, title: &str, color: Color32) -> Response {
     let points = NSFont::systemFontSize() as f32;
+    text_button(
+        ui,
+        title,
+        color,
+        Face::Regular,
+        points,
+        system_line_height(ui, f64::from(points)),
+    )
+}
+
+pub fn caption_button(ui: &mut Ui, title: &str, color: Color32) -> Response {
+    let style = PreferredFont::Caption;
+    let font = style.base();
+    text_button(
+        ui,
+        title,
+        color,
+        Face::Preferred(style),
+        font.pointSize() as f32,
+        PreferredFont::metrics(&font, ui).height,
+    )
+}
+
+fn text_button(
+    ui: &mut Ui,
+    title: &str,
+    color: Color32,
+    face: Face,
+    points: f32,
+    height: f32,
+) -> Response {
     let native = ui.ctx().plugin_opt::<Renderer>().and_then(|renderer| {
         use eframe::emath::GuiRounding;
         let mut renderer = renderer.lock();
-        let run = renderer.run(ui.ctx(), title, points, Face::Regular, color)?;
+        let run = renderer.run(ui.ctx(), title, points, face, color)?;
         let scale = ui.pixels_per_point();
-        let size = vec2(
-            (run.size.x * scale).ceil() / scale,
-            system_line_height(ui, f64::from(points)),
-        );
+        let size = vec2((run.size.x * scale).ceil() / scale, height);
         let (id, slot) = ui.allocate_space(size);
         let rect = Rect::from_min_size(slot.min.round_to_pixels(scale), size);
         let response = ui.interact(rect, id, Sense::click());

@@ -379,6 +379,19 @@ def activity_fixtures(fixture):
     yield "activity", state
 
 
+def quota_status_fixture(fixture):
+    state = deepcopy(fixture)
+    paused = state["settings"]["accounts"][0]
+    paused["enabled"] = False
+    key = str(UUID(int=2))
+    state["settings"]["accounts"].append({
+        **paused, "id": key, "identity": key, "name": "Claude 대기 계정", "provider": "claude", "enabled": True,
+    })
+    state["snapshots"].extend([key, {**state["snapshots"][1], "windows": [], "state": "waiting"}])
+    state["errors"] = [key, CONNECTION_ERROR]
+    return state
+
+
 def capture_windows(dashboard, program, folder, library, fixture, output, theme, pixel_reader):
     folder.mkdir()
     env = {**os.environ, **dashboard.fixture_environment(), "DYLD_INSERT_LIBRARIES": str(library),
@@ -541,6 +554,14 @@ def capture_windows(dashboard, program, folder, library, fixture, output, theme,
             controls.request("documentEscape")
             controls.request("sheet", expected={"sheet": False})
             observed["licenseEscapeClosed"] = True
+            dashboard.send(app.stdin, {"state": {"_0": quota_status_fixture(fixture)}})
+            show("dashboard")
+            capture("quota-status")
+            try:
+                controls.request("press", "계정 관리에서 확인 →")
+                observed["quotaErrorNavigation"] = commands_after_input(dashboard, app.stdout, "route")
+            except (TimeoutError, ValueError) as error:
+                observed["quotaErrorNavigation"] = {"error": str(error)}
             for scene, state in activity_fixtures(fixture):
                 if scene != "empty":
                     show("accounts")
@@ -688,7 +709,7 @@ def compare_windows(dashboard, work, original, library):
     for theme in dashboard.THEMES:
         for route in (*dashboard.ROUTES, "remove", "message", "message-selected", "message-wrapped", "account-name-selected", "account-email-selected", "popover-sample", "popover-empty", "popover-overflow",
                       "source-path-selected", "settings-path-selected", "settings-bottom", "licenses-notice",
-                      "licenses-apache", "empty", "activity-empty", "activity",
+                      "licenses-apache", "empty", "quota-status", "activity-empty", "activity",
                       *(f"switch-{provider}-{state}" for provider in PROVIDERS for state in ("on", "off"))):
             name = f"{route}-{theme}"
             lhs, rhs = (dest / side / f"{name}.png" for side in ("original", "rust"))
@@ -730,6 +751,9 @@ def compare_windows(dashboard, work, original, library):
                            and expected.get("click") == expected.get("press") == [{"_0": "accounts"}])
     results["refreshButtonsIdentical"] = refresh_matches
     results["manageAccountsButtonsIdentical"] = manage_matches
+    quota_error_matches = all(results[side][theme].get("quotaErrorNavigation") == [{"_0": "accounts"}]
+                              for side in ("original", "rust") for theme in dashboard.THEMES)
+    results["quotaErrorNavigationIdentical"] = quota_error_matches
     expected_reopen = {"before": {"position": "bottom"}, "routes": [], "after": {"position": "bottom"}}
     reopen_matches = all(results[side][theme].get("repeatSettingsShow") == expected_reopen
                          for side in ("original", "rust") for theme in dashboard.THEMES)
@@ -766,6 +790,7 @@ def compare_windows(dashboard, work, original, library):
                          for kind in ("providerSwitches", "accessibleProviderSwitches"))
     return (app_mark_matches and message_matches and copied_accounts and documents_match and scroll_matches
             and activity_matches and switch_matches and frames_match and refresh_matches and manage_matches and reopen_matches
+            and quota_error_matches
             and all(row["identical"] for row in results["comparisons"].values()))
 
 

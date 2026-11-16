@@ -1,3 +1,5 @@
+#[cfg(target_os = "macos")]
+use crate::mac_text::{PreferredFont, preferred_label, symbol_label};
 use crate::{Dashboard, model::*, style::*};
 #[cfg(windows)]
 use chrono::Datelike;
@@ -557,20 +559,9 @@ impl Dashboard {
                     }
                     #[cfg(target_os = "macos")]
                     {
-                        use crate::mac_text::PreferredFont;
-                        crate::mac_text::preferred_label(
-                            ui,
-                            TITLE,
-                            PreferredFont::Title3Bold,
-                            p.ink,
-                        );
+                        preferred_label(ui, TITLE, PreferredFont::Title3Bold, p.ink);
                         ui.add_space(15.);
-                        crate::mac_text::preferred_label(
-                            ui,
-                            DESCRIPTION,
-                            PreferredFont::Body,
-                            p.muted,
-                        );
+                        preferred_label(ui, DESCRIPTION, PreferredFont::Body, p.muted);
                     }
                     ui.add_space(if MAC { 15. } else { 16. });
                     if action(ui, "계정 관리로 이동", true, p).clicked() {
@@ -614,12 +605,23 @@ impl Dashboard {
                 let card = p.frame(20);
                 let content_width = (w - card.total_margin().sum().x).max(1.);
                 for a in chunk {
-                    card.show(ui, |ui| {
+                    let _card = card.show(ui, |ui| {
                         ui.vertical(|ui| {
                             ui.set_width(content_width);
                             self.quota_card(ui, p, a);
                         })
                     });
+                    #[cfg(target_os = "macos")]
+                    if !a.enabled {
+                        // SwiftUI applies opacity to the entire card after compositing
+                        // its background, border, labels and switch.
+                        let border = 1. / ui.pixels_per_point();
+                        ui.painter().rect_filled(
+                            _card.response.rect.expand(border),
+                            0.,
+                            p.bg.gamma_multiply(0.35),
+                        );
+                    }
                 }
             });
             ui.add_space(14.);
@@ -628,6 +630,7 @@ impl Dashboard {
     }
     fn quota_card(&mut self, ui: &mut Ui, p: Palette, a: &Account) {
         ui.spacing_mut().interact_size.y = 0.;
+        #[cfg(windows)]
         if !a.enabled {
             ui.set_opacity(0.65);
         }
@@ -680,12 +683,30 @@ impl Dashboard {
         });
         if !a.enabled {
             ui.add_space(if MAC { 17. } else { 24. });
-            caption(ui, "모니터링 일시 정지", p);
-            if !MAC {
+            #[cfg(target_os = "macos")]
+            symbol_label(
+                ui,
+                "pause.circle",
+                "모니터링 일시 정지",
+                PreferredFont::Callout,
+                p.muted,
+            );
+            #[cfg(windows)]
+            {
+                caption(ui, "모니터링 일시 정지", p);
                 ui.add_space(24.);
             }
         } else if a.windows().is_empty() {
             ui.add_space(if MAC { 26. } else { 24. });
+            #[cfg(target_os = "macos")]
+            symbol_label(
+                ui,
+                "clock",
+                a.quota_message(),
+                PreferredFont::Callout,
+                p.muted,
+            );
+            #[cfg(windows)]
             caption(ui, a.quota_message(), p);
             ui.add_space(if MAC { 9. } else { 20. });
         } else {
@@ -753,30 +774,40 @@ impl Dashboard {
             }
         }
         if a.error.is_some() {
-            ui.add_space(14.);
-            label(
-                ui,
-                "최신 사용량을 확인하지 못했습니다.",
-                11.,
-                false,
-                p.warning,
-            );
-            if link(ui, "계정 관리에서 확인 →", p, p.card).clicked() {
+            ui.add_space(if MAC { 17. } else { 14. });
+            const ERROR: &str = "최신 사용량을 확인하지 못했습니다.";
+            const MANAGE: &str = "계정 관리에서 확인 →";
+            #[cfg(target_os = "macos")]
+            let button = {
+                symbol_label(
+                    ui,
+                    "exclamationmark.circle",
+                    ERROR,
+                    PreferredFont::Caption,
+                    p.warning,
+                );
+                ui.add_space(6.);
+                crate::mac_text::caption_button(ui, MANAGE, p.tint(a.provider))
+            };
+            #[cfg(windows)]
+            let button = {
+                label(ui, ERROR, 11., false, p.warning);
+                link(ui, MANAGE, p, p.card)
+            };
+            if button.clicked() {
                 self.navigate(ui.ctx(), "accounts", true);
             }
         } else if a.snapshot["state"] == "stale" || (!MAC && a.snapshot["state"] == "reset") {
-            ui.add_space(14.);
-            label(
-                ui,
-                if a.snapshot["state"] == "stale" {
-                    "이전 스냅샷 · Claude에서 메시지를 보내면 갱신됩니다."
-                } else {
-                    "리셋 이후 새 응답을 기다리고 있습니다."
-                },
-                11.,
-                false,
-                p.warning,
-            );
+            ui.add_space(if MAC { 17. } else { 14. });
+            let note = if a.snapshot["state"] == "stale" {
+                "이전 스냅샷 · Claude에서 메시지를 보내면 갱신됩니다."
+            } else {
+                "리셋 이후 새 응답을 기다리고 있습니다."
+            };
+            #[cfg(target_os = "macos")]
+            preferred_label(ui, note, PreferredFont::Caption, p.warning);
+            #[cfg(windows)]
+            label(ui, note, 11., false, p.warning);
         }
         if !a.snapshot.is_null() {
             ui.add_space(17.);
@@ -876,8 +907,7 @@ impl Dashboard {
 pub fn section_title(ui: &mut Ui, title: &str, subtitle: &str, p: Palette) {
     #[cfg(target_os = "macos")]
     {
-        use crate::mac_text::{PreferredFont, preferred_label, stacked_label};
-        if stacked_label(ui, title, 15., true, p.ink).is_none() {
+        if crate::mac_text::stacked_label(ui, title, 15., true, p.ink).is_none() {
             system_label(ui, title, 15., true, p.ink);
         }
         ui.add_space(4.);
