@@ -167,6 +167,8 @@ def exercise(dashboard, executable, folder, library, fixture, observed, help_tex
                 edited_search = controls.request("editField", search_hint, value=term)
                 if edited_search["value"] != term or edited_search["marked"]:
                     raise ValueError(f"Search composition did not commit: {edited_search}")
+                if matches:
+                    help_text["searchFields"] = controls.request("editableFields")
                 controls.request("help", monitor_label, monitor_help if matches else {"help": None, "found": False})
                 observed.append({"searchMatchesAccount": matches})
             menu("Dashboard 열기", "route", "dashboard")
@@ -204,7 +206,7 @@ def exercise(dashboard, executable, folder, library, fixture, observed, help_tex
                 controls.request("press", segment)
                 time.sleep(0.35)
                 if provider == "gemini":
-                    help_text["connectionFields"] = controls.request("connectionFields")
+                    help_text["connectionFields"] = controls.request("editableFields")
                 controls.request("press", "연결")
                 request = command("connect")
                 request_id = request.pop("id")
@@ -283,7 +285,7 @@ def exercise(dashboard, executable, folder, library, fixture, observed, help_tex
             if edited != {"provider": "gemini", "path": path, "alias": alias}:
                 raise ValueError(f"Unexpected connection after editing both native fields: {edited}")
             observed.append({"composedTextAndReturn": edited})
-            fields = controls.request("connectionFields")["fields"]
+            fields = controls.request("editableFields")["fields"]
             enabled = {field["placeholder"]: field["enabled"] for field in fields}
             if enabled != {alias_hint: False, "경로": True}:
                 raise ValueError(f"Unexpected editors during a pending connection: {fields}")
@@ -385,7 +387,7 @@ def capture_windows(dashboard, program, folder, library, fixture, output, theme,
             try:
                 observed[route] = controls.request("snapshot", "sheet" if sheet else "dashboard")
                 shutil.copyfile(folder / "frame.png", output / f"{route}-{theme}.png")
-                if route in ("dashboard", "connect-claude", "remove"):
+                if route in ("dashboard", "accounts", "connect-claude", "connect-gemini", "remove"):
                     # A second frame from the untouched window measures e.g. caret blinking.
                     time.sleep(0.55)
                     controls.request("snapshot", "sheet" if sheet else "dashboard")
@@ -418,6 +420,9 @@ def capture_windows(dashboard, program, folder, library, fixture, output, theme,
                     contact = deepcopy(fixture)
                     contact["snapshots"][1]["email"] = ACCOUNT_EMAIL
                     dashboard.send(app.stdin, {"state": {"_0": contact}})
+                    # The new email row moves the name. Wait for the updated
+                    # card before using its accessibility frame for the drag.
+                    controls.request("present", ACCOUNT_EMAIL, {"found": True})
                     copy_selection("accountName", account["name"], "account-name-selected")
                     copy_selection("accountEmail", ACCOUNT_EMAIL, "account-email-selected")
                     contact["settings"]["accounts"][0]["sourcePath"] = SOURCE_PATH
@@ -642,11 +647,17 @@ def compare(dashboard, work, original, fixture, library):
     results["connectionErrorCopies"] = all(
         results[side]["help"].get("connectionErrorClipboard") == {"text": FILE_ERROR_TEXT}
         for side in ("original", "rust"))
+
+    def fields_match(name, count):
+        def ordered(side):
+            fields = results[side]["help"].get(name, {}).get("fields", [])
+            return sorted(fields, key=lambda field: field["placeholder"])
+
+        original = ordered("original")
+        return len(original) == count and original == ordered("rust")
+
+    results["connectionFieldsIdentical"] = fields_match("connectionFields", 2)
+    results["searchFieldIdentical"] = fields_match("searchFields", 1)
     (dashboard.REPORT / "actions.json").write_text(json.dumps(results, ensure_ascii=False, indent=2))
-    def file_fields(side):
-        fields = results[side]["help"].get("connectionFields", {}).get("fields", [])
-        return sorted(fields, key=lambda field: field["placeholder"])
-    original_fields, rust_fields = file_fields("original"), file_fields("rust")
-    results["connectionFieldsIdentical"] = len(original_fields) == 2 and original_fields == rust_fields
     return (results["identical"] and results["switchHelpIdentical"] and results["connectionErrorCopies"]
-            and results["connectionFieldsIdentical"])
+            and results["connectionFieldsIdentical"] and results["searchFieldIdentical"])

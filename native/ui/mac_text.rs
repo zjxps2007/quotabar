@@ -431,6 +431,22 @@ pub fn bold_label(ui: &mut Ui, text: &str, size: f32, color: Color32) -> Option<
     draw_label(ui, text, size, Face::Bold, color, LineBox::Stack)
 }
 
+pub fn preferred_label(
+    ui: &mut Ui,
+    text: &str,
+    style: &objc2_app_kit::NSFontTextStyle,
+    bold: bool,
+    color: Color32,
+) -> Response {
+    let font = unsafe {
+        NSFont::preferredFontForTextStyle_options(style, &objc2_foundation::NSDictionary::new())
+    };
+    let size = font.pointSize() as f32;
+    let face = if bold { Face::Bold } else { Face::Regular };
+    draw_label(ui, text, size, face, color, LineBox::Stack)
+        .unwrap_or_else(|| ui.label(crate::style::rich(text, size, bold, color)))
+}
+
 pub fn quota_percent(ui: &mut Ui, text: &str, color: Color32) -> Option<Response> {
     draw_label(ui, text, 11., Face::TabularDigits, color, LineBox::Stack)
 }

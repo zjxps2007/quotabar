@@ -539,10 +539,9 @@ impl Dashboard {
                         },
                     );
                     ui.add_space(15.);
+                    const TITLE: &str = "첫 번째 계정을 연결하세요";
                     const DESCRIPTION: &str =
                         "Codex, Claude, Gemini의 잔여량을 나란히 확인할 수 있습니다.";
-                    let title =
-                        |ui: &mut Ui| label(ui, "첫 번째 계정을 연결하세요", 18., true, p.ink);
                     #[cfg(windows)]
                     {
                         // WPF centers the stack and left-aligns both TextBlocks inside it.
@@ -551,13 +550,22 @@ impl Dashboard {
                         ui.allocate_ui_with_layout(
                             vec2(width, 0.),
                             Layout::top_down(Align::Min),
-                            title,
+                            |ui| label(ui, TITLE, 18., true, p.ink),
                         );
+                        ui.add_space(10.);
+                        caption(ui, DESCRIPTION, p);
                     }
                     #[cfg(target_os = "macos")]
-                    title(ui);
-                    ui.add_space(if MAC { 15. } else { 10. });
-                    caption(ui, DESCRIPTION, p);
+                    {
+                        use objc2_app_kit::{NSFontTextStyleBody, NSFontTextStyleTitle3};
+                        crate::mac_text::preferred_label(
+                            ui, TITLE, unsafe { NSFontTextStyleTitle3 }, true, p.ink,
+                        );
+                        ui.add_space(15.);
+                        crate::mac_text::preferred_label(
+                            ui, DESCRIPTION, unsafe { NSFontTextStyleBody }, false, p.muted,
+                        );
+                    }
                     ui.add_space(if MAC { 15. } else { 16. });
                     if action(ui, "계정 관리로 이동", true, p).clicked() {
                         self.navigate(ui.ctx(), "accounts", true);

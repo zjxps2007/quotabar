@@ -1,5 +1,5 @@
 use eframe::egui::{self, epaint::TextShape, *};
-use std::collections::HashMap;
+use std::{collections::HashMap, ops::Range};
 use windows::{
     Win32::{
         Graphics::{
@@ -102,7 +102,7 @@ impl Factories {
         }
     }
 
-    fn render(&self, key: &RunKey, max_size: usize) -> Option<(ColorImage, Vec2)> {
+    fn render(&self, key: &RunKey, max_size: usize) -> Option<(ColorImage, Vec2, Range<usize>)> {
         let size = f32::from_bits(key.pixels);
         let weight = if key.semibold {
             DWRITE_FONT_WEIGHT_SEMI_BOLD
@@ -211,6 +211,14 @@ impl Factories {
             glyphs::mark_dash_runs(&self.write, &layout, run_text).ok()?;
             let bytes = glyphs::coverage(self, params, &layout, origin, scale, size)
                 .or_else(|| self.bitmap_coverage(&layout, params, origin, fraction, scale, size))?;
+            // Include subpixel ink from all three channels, even for a run
+            // whose first texture uses the grayscale coverage channel.
+            let has_ink = |row: &[u8]| row.chunks_exact(4).any(|pixel| pixel[..3] != [0; 3]);
+            let mut rows = bytes.chunks_exact(width * 4);
+            let ink_rows = rows
+                .clone()
+                .position(has_ink)
+                .map_or(0..0, |top| top..rows.rposition(has_ink).unwrap() + 1);
             let colors = key.colors.map(|(ink, backdrop)| {
                 let channels = [
                     (ink.r(), backdrop.r()),
@@ -245,6 +253,7 @@ impl Factories {
             Some((
                 ColorImage::new([width, height], mask),
                 vec2(metrics.widthIncludingTrailingWhitespace, metrics.height),
+                ink_rows,
             ))
         }
     }
@@ -428,7 +437,19 @@ fn raster_origin(position: Pos2, scale: f32) -> (Pos2, [u8; 2]) {
 struct CachedRun {
     texture: TextureHandle,
     layout_size: Vec2,
+    ink_rows: Range<usize>,
     last_pass: u64,
+}
+
+impl CachedRun {
+    fn ink_bounds(&self, texture_rect: Rect) -> Rect {
+        let row_height = texture_rect.height() / self.texture.size_vec2().y;
+        Rect::from_x_y_ranges(
+            texture_rect.x_range(),
+            (texture_rect.top() + self.ink_rows.start as f32 * row_height)
+                ..=(texture_rect.top() + self.ink_rows.end as f32 * row_height),
+        )
+    }
 }
 
 #[derive(Default)]
@@ -443,11 +464,12 @@ impl TextRenderer {
         let run = match self.runs.entry(key) {
             std::collections::hash_map::Entry::Occupied(e) => e.into_mut(),
             std::collections::hash_map::Entry::Vacant(e) => {
-                let (image, layout_size) =
+                let (image, layout_size, ink_rows) =
                     FACTORIES.with(|f| f.as_ref()?.render(e.key(), max_size))?;
                 e.insert(CachedRun {
                     texture: ctx.load_texture("DirectWrite text", image, TextureOptions::NEAREST),
                     layout_size,
+                    ink_rows,
                     last_pass: self.pass,
                 })
             }
@@ -620,7 +642,10 @@ struct Surface {
 
 impl Surface {
     fn behind(surfaces: &[Self], area: Rect) -> Option<Color32> {
-        let surface = surfaces.iter().rev().find(|s| s.bounds.intersects(area))?;
+        let surface = surfaces
+            .iter()
+            .rev()
+            .find(|s| s.bounds.intersect(area).is_positive())?;
         if !surface.interior.contains_rect(area) {
             return None;
         }
@@ -629,6 +654,15 @@ impl Surface {
         (middle_x.contains_rect(area) || middle_y.contains_rect(area))
             .then_some(surface.color)
             .flatten()
+    }
+
+    fn unknown(bounds: Rect) -> Self {
+        Self {
+            bounds,
+            interior: Rect::NOTHING,
+            radius: 0.,
+            color: None,
+        }
     }
 
     fn record(surfaces: &mut Vec<Self>, shape: &Shape, clip: Rect) {
@@ -642,12 +676,7 @@ impl Surface {
         if !bounds.is_positive() {
             return;
         }
-        let mut surface = Self {
-            bounds,
-            interior: Rect::NOTHING,
-            radius: 0.,
-            color: None,
-        };
+        let mut surface = Self::unknown(bounds);
         if let Shape::Rect(r) = shape
             && r.fill.a() == 255
             && r.brush.is_none()
@@ -702,7 +731,7 @@ impl egui::Plugin for TextRenderer {
                     self.runs
                         .iter()
                         .filter(|(key, _)| key.colors.is_none())
-                        .map(|(key, run)| (run.texture.id(), key))
+                        .map(|(key, run)| (run.texture.id(), (key, run)))
                         .collect()
                 } else {
                     HashMap::new()
@@ -720,15 +749,26 @@ impl egui::Plugin for TextRenderer {
                             let backdrop = Surface::behind(&surfaces, area);
                             runs.push((index, Label::Text(text.clone(), backdrop)));
                         } else if let Shape::Mesh(mesh) = &entry.shape
-                            && let Some(&key) = masks.get(&mesh.texture_id)
-                            && let Some(backdrop) = Surface::behind(&surfaces, area)
-                            && let Some(first) = mesh.vertices.first()
-                            && first.color.a() == 255
-                            && mesh.vertices.iter().all(|v| v.color == first.color)
+                            && let Some(&(key, run)) = masks.get(&mesh.texture_id)
                         {
-                            let mut colored = key.clone();
-                            colored.colors = Some((first.color, backdrop));
-                            runs.push((index, Label::Mask(mesh.clone(), colored)));
+                            // Adjacent TextBlocks can have overlapping bitmap padding.
+                            // Only the occupied rows can cover a background or other text.
+                            let ink = run
+                                .ink_bounds(mesh.calc_bounds())
+                                .intersect(entry.clip_rect);
+                            if ink.is_positive() {
+                                if let Some(backdrop) = Surface::behind(&surfaces, ink)
+                                    && let Some(first) = mesh.vertices.first()
+                                    && first.color.a() == 255
+                                    && mesh.vertices.iter().all(|v| v.color == first.color)
+                                {
+                                    let mut colored = key.clone();
+                                    colored.colors = Some((first.color, backdrop));
+                                    runs.push((index, Label::Mask(mesh.clone(), colored)));
+                                }
+                                surfaces.push(Surface::unknown(ink));
+                            }
+                            continue;
                         }
                         if lcd {
                             Surface::record(&mut surfaces, &entry.shape, entry.clip_rect);
@@ -808,6 +848,50 @@ mod tests {
     }
 
     #[test]
+    fn adjacent_text_blocks_keep_cleartype_over_their_unpainted_padding() {
+        let _apartment = Apartment::open();
+        let ctx = Context::default();
+        let mut renderer = TextRenderer::default();
+        let background = Rect::from_min_size(Pos2::ZERO, vec2(600., 150.));
+        for scale in [1.0_f32, 1.5] {
+            let mut measure = |text: &str, size: f32, bold: bool, top: f32| {
+                let pos = pos2(28., top);
+                let (start, origin) = raster_origin(pos, scale);
+                let key = RunKey {
+                    text: text.into(),
+                    pixels: (size * scale).to_bits(),
+                    scale: scale.to_bits(),
+                    semibold: bold,
+                    line: LineWidth::Natural,
+                    origin,
+                    colors: None,
+                };
+                let run = renderer.run(&ctx, key, 4096).unwrap();
+                let texture = Rect::from_min_size(start, run.texture.size_vec2() / scale);
+                (texture, run.ink_bounds(texture), run.layout_size.y / scale)
+            };
+            let (title, title_ink, height) = measure("계정 연결", 24., true, 28.);
+            let (subtitle, subtitle_ink, _) =
+                measure("서비스를 선택하세요.", 12., false, 28. + height);
+            assert!(title.intersect(subtitle).is_positive());
+            let surfaces = [
+                Surface {
+                    bounds: background,
+                    interior: background,
+                    radius: 0.,
+                    color: Some(Color32::WHITE),
+                },
+                Surface::unknown(title_ink),
+            ];
+            assert_eq!(
+                Surface::behind(&surfaces, subtitle_ink),
+                Some(Color32::WHITE)
+            );
+            assert_eq!(Surface::behind(&surfaces, title_ink), None);
+        }
+    }
+
+    #[test]
     fn hyphenated_labels_preserve_the_wpf_suffix_origin() {
         let _apartment = Apartment::open();
         let factories = Factories::new().unwrap();
@@ -826,13 +910,13 @@ mod tests {
                 origin: [0; 2],
                 colors: None,
             };
-            let (label, _) = factories.render(&whole, 4096).unwrap();
+            let (label, _, _) = factories.render(&whole, 4096).unwrap();
             let suffix = RunKey {
                 text: "beta".into(),
                 origin: [fraction, 0],
                 ..whole
             };
-            let (fragment, _) = factories.render(&suffix, 4096).unwrap();
+            let (fragment, _, _) = factories.render(&suffix, 4096).unwrap();
             for y in 0..label.height() {
                 for x in 1..fragment.width().min(label.width() - column) {
                     assert_eq!(
@@ -861,8 +945,8 @@ mod tests {
             origin: [0; 2],
             colors: None,
         };
-        let (label, _) = factories.render(&mixed, 4096).unwrap();
-        let (fragment, _) = factories
+        let (label, _, _) = factories.render(&mixed, 4096).unwrap();
+        let (fragment, _, _) = factories
             .render(
                 &RunKey {
                     text: " 변경".into(),
@@ -888,12 +972,12 @@ mod tests {
                 origin: [0; 2],
                 colors: None,
             };
-            let (mask, size) = factories.render(&run, 4096).unwrap();
+            let (mask, size, _) = factories.render(&run, 4096).unwrap();
             let latin = RunKey {
                 text: "Codex".into(),
                 ..run
             };
-            let (_, latin_size) = factories.render(&latin, 4096).unwrap();
+            let (_, latin_size, _) = factories.render(&latin, 4096).unwrap();
             assert_eq!(size.y, latin_size.y);
             assert!(mask.width() > previous_width);
             assert!(mask.pixels.iter().any(|p| p.a() == 0));
@@ -904,19 +988,19 @@ mod tests {
                 text: "Cod…".into(),
                 ..run.clone()
             };
-            let (sign_mask, sign_size) = factories.render(&sign, 4096).unwrap();
+            let (sign_mask, sign_size, _) = factories.render(&sign, 4096).unwrap();
             let ellipsis = RunKey {
                 line: LineWidth::Ellipsis((sign_size.x + 0.1).to_bits()),
                 ..run.clone()
             };
-            let (trimmed, trimmed_size) = factories.render(&ellipsis, 4096).unwrap();
+            let (trimmed, trimmed_size, _) = factories.render(&ellipsis, 4096).unwrap();
             assert_eq!(trimmed_size, sign_size);
             assert_eq!(trimmed.pixels, sign_mask.pixels);
             let narrow = RunKey {
                 line: LineWidth::Wrap((3. * pixels).to_bits()),
                 ..run
             };
-            let (wrapped, wrapped_size) = factories.render(&narrow, 4096).unwrap();
+            let (wrapped, wrapped_size, _) = factories.render(&narrow, 4096).unwrap();
             assert!(wrapped.width() < mask.width() && wrapped_size.y > size.y);
             previous_width = mask.width();
         }

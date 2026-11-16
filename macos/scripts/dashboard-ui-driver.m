@@ -509,7 +509,8 @@ static NSDictionary *perform(NSDictionary *request) {
     NSWindow *window = dashboardWindow();
     if (!window) return @{@"pending": @"dashboard window"};
     NSString *op = request[@"op"], *label = request[@"label"];
-    if ([op isEqual:@"connectionFields"]) return @{@"fields": connectionFieldViews(window.attachedSheet)};
+    if ([op isEqual:@"editableFields"])
+        return @{@"fields": connectionFieldViews(window.attachedSheet ?: window)};
     if ([@[@"focusField", @"editField", @"fieldKey", @"fieldValue"] containsObject:op])
         return editTextField(window.attachedSheet ?: window, request);
     if ([op isEqual:@"selectText"] || [op isEqual:@"copySelection"] || [op isEqual:@"selectionStyle"])
@@ -632,7 +633,9 @@ static NSDictionary *perform(NSDictionary *request) {
                                     @"저작권 및 변경 고지", @"Apache License 2.0 전문"] containsObject:label] &&
         clickControl(target, label)) return @{@"pressed": label};
     BOOL lookingForHelp = [op isEqual:@"help"];
-    id element = control(target, label, available, lookingForHelp);
+    BOOL lookingForElement = [op isEqual:@"present"];
+    id element = control(target, label, available, lookingForHelp || lookingForElement);
+    if (lookingForElement) return @{@"found": @(element != nil)};
     if (lookingForHelp) {
         NSString *help = [element respondsToSelector:@selector(accessibilityHelp)] ? [element accessibilityHelp] : nil;
         return @{@"help": help ?: NSNull.null, @"found": @(element != nil)};
