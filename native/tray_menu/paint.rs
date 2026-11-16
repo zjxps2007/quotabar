@@ -94,6 +94,41 @@ fn system(index: SYS_COLOR_INDEX) -> Color {
     let color = unsafe { GetSysColor(index) };
     0xff000000 | (color & 0xff) << 16 | (color & 0xff00) | (color >> 16) & 0xff
 }
+fn rounded_path([x, y, w, h]: [f32; 4], radius: f32) -> io::Result<Owned<GpPath>> {
+    let d = (radius * 2.).min(w).min(h);
+    unsafe {
+        let path = Owned::new(
+            |p| GdipCreatePath(FillModeAlternate, p),
+            |p| {
+                GdipDeletePath(p);
+            },
+        )?;
+        for (cx, cy, angle) in [
+            (x, y, 180.),
+            (x + w - d, y, 270.),
+            (x + w - d, y + h - d, 0.),
+            (x, y + h - d, 90.),
+        ] {
+            crate::tray_icon::checked(GdipAddPathArc(path.raw, cx, cy, d, d, angle, 90.))?;
+        }
+        crate::tray_icon::checked(GdipClosePathFigure(path.raw))?;
+        Ok(path)
+    }
+}
+pub(super) fn window_region(width: i32, height: i32, radius: f32) -> io::Result<HRGN> {
+    let path = rounded_path([0., 0., width as f32, height as f32], radius)?;
+    unsafe {
+        let region = Owned::new(
+            |p| GdipCreateRegionPath(path.raw, p),
+            |p| {
+                GdipDeleteRegion(p);
+            },
+        )?;
+        let mut handle = null_mut();
+        crate::tray_icon::checked(GdipGetRegionHRgn(region.raw, null_mut(), &mut handle))?;
+        Ok(handle)
+    }
+}
 struct Graphics {
     g: Owned<GpGraphics>,
     family: Owned<GpFontFamily>,
@@ -168,26 +203,10 @@ impl Graphics {
         }
     }
     fn shape(&self, b: [f32; 4], rad: f32, color: Color, stroke: bool) {
-        let [x, y, w, h] = b;
-        let d = (rad * 2.).min(w).min(h);
+        let Ok(path) = rounded_path(b, rad) else {
+            return;
+        };
         unsafe {
-            let Ok(path) = Owned::new(
-                |p| GdipCreatePath(FillModeAlternate, p),
-                |p| {
-                    GdipDeletePath(p);
-                },
-            ) else {
-                return;
-            };
-            for (cx, cy, a) in [
-                (x, y, 180.),
-                (x + w - d, y, 270.),
-                (x + w - d, y + h - d, 0.),
-                (x, y + h - d, 90.),
-            ] {
-                GdipAddPathArc(path.raw, cx, cy, d, d, a, 90.);
-            }
-            GdipClosePathFigure(path.raw);
             if stroke {
                 if let Ok(pen) = Owned::new(
                     |p| GdipCreatePen1(color, 1., UnitWorld, p),
@@ -610,6 +629,53 @@ fn load_logo(bytes: &[u8]) -> io::Result<Owned<GpBitmap>> {
         Ok(copy)
     }
 }
+/// WinForms draws its visible ToolStrip into an opaque color buffer. GDI+
+/// produces monochrome glyphs on some redirected popup and child window DCs.
+pub(super) fn buffered(dc: HDC, width: i32, height: i32, draw: impl Fn(HDC)) {
+    if width <= 0 || height <= 0 {
+        return;
+    }
+    unsafe {
+        let info = BITMAPINFO {
+            bmiHeader: BITMAPINFOHEADER {
+                biSize: size_of::<BITMAPINFOHEADER>() as u32,
+                biWidth: width,
+                biHeight: -height,
+                biPlanes: 1,
+                biBitCount: 32,
+                biCompression: BI_RGB,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let buffer = CreateCompatibleDC(dc);
+        let mut bits = null_mut();
+        let bitmap = CreateDIBSection(dc, &info, DIB_RGB_COLORS, &mut bits, null_mut(), 0);
+        let copied = if buffer.is_null() || bitmap.is_null() {
+            false
+        } else {
+            let previous = SelectObject(buffer, bitmap);
+            if previous.is_null() {
+                false
+            } else {
+                draw(buffer);
+                let copied = BitBlt(dc, 0, 0, width, height, buffer, 0, 0, SRCCOPY) != 0;
+                SelectObject(buffer, previous);
+                copied
+            }
+        };
+        if !bitmap.is_null() {
+            DeleteObject(bitmap);
+        }
+        if !buffer.is_null() {
+            DeleteDC(buffer);
+        }
+        if !copied {
+            draw(dc);
+        }
+    }
+}
+
 pub(super) fn background(menu: &Menu, dc: HDC) {
     let Ok(l) = menu.layout.try_borrow() else {
         return;
@@ -793,12 +859,12 @@ fn scroll_arrow(
         ],
     );
 }
-pub(super) fn child(menu: &Menu, s: &DRAWITEMSTRUCT) {
+pub(super) fn child(menu: &Menu, s: &DRAWITEMSTRUCT, dc: HDC) {
     let Ok(l) = menu.layout.try_borrow() else {
         return;
     };
     let p = Palette::new(&l.appearance);
-    let Some(g) = Graphics::new(s.hDC, p) else {
+    let Some(g) = Graphics::new(dc, p) else {
         return;
     };
     unsafe {

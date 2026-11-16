@@ -478,10 +478,10 @@ impl Menu {
                 height,
                 SWP_NOACTIVATE | if show { SWP_SHOWWINDOW } else { 0 },
             );
-            let radius = (24. * scale) as i32;
-            let region = CreateRoundRectRgn(0, 0, width + 1, height + 1, radius, radius);
-            if !region.is_null() && SetWindowRgn(self.window, region, 1) == 0 {
-                DeleteObject(region);
+            if let Ok(region) = paint::window_region(width, height, 12. * scale) {
+                if !region.is_null() && SetWindowRgn(self.window, region, 1) == 0 {
+                    DeleteObject(region);
+                }
             }
             self.scroll_to(self.first_row.get());
             RedrawWindow(
@@ -754,7 +754,11 @@ unsafe extern "system" fn window_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPAR
                 WM_PAINT => {
                     let mut ps = PAINTSTRUCT::default();
                     let dc = BeginPaint(hwnd, &mut ps);
-                    paint::background(menu, dc);
+                    let mut bounds = RECT::default();
+                    GetClientRect(hwnd, &mut bounds);
+                    paint::buffered(dc, bounds.right, bounds.bottom, |buffer| {
+                        paint::background(menu, buffer);
+                    });
                     EndPaint(hwnd, &ps);
                     return 0;
                 }
@@ -764,7 +768,9 @@ unsafe extern "system" fn window_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPAR
                 }
                 WM_DRAWITEM => {
                     if let Some(s) = (lp as *const DRAWITEMSTRUCT).as_ref() {
-                        paint::child(menu, s);
+                        paint::buffered(s.hDC, s.rcItem.right, s.rcItem.bottom, |buffer| {
+                            paint::child(menu, s, buffer);
+                        });
                     }
                     return 1;
                 }
