@@ -891,11 +891,10 @@ pub fn action_on(ui: &mut Ui, s: &str, primary: bool, p: Palette, backdrop: Colo
         );
         crate::mac::symbol(painter, icon, name, 13., false, ink);
     }
-    painter.text(
-        pos2(rect.left() + padding.x + icon_width, rect.center().y),
-        Align2::LEFT_CENTER,
+    crate::mac_text::PreferredFont::Body.paint_at(
+        ui,
+        pos2(rect.left() + padding.x + icon_width, rect.top() + padding.y),
         text,
-        FontId::proportional(13.),
         ink,
     );
     if response.is_pointer_button_down_on() {

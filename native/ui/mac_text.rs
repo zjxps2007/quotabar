@@ -7,6 +7,7 @@ use core_foundation::{
 };
 use core_graphics::{
     base::kCGImageAlphaNoneSkipLast,
+    color::CGColor,
     color_space::CGColorSpace,
     context::CGContext,
     geometry::{CGPoint, CGRect, CGSize},
@@ -16,7 +17,7 @@ use core_text::{
     line::CTLine,
     string_attributes::{
         kCTFontAttributeName, kCTForegroundColorFromContextAttributeName, kCTKernAttributeName,
-        kCTUnderlineStyleAttributeName,
+        kCTUnderlineColorAttributeName, kCTUnderlineStyleAttributeName,
     },
 };
 use eframe::egui::{self, epaint::TextShape, *};
@@ -239,7 +240,19 @@ struct LineMetrics {
 fn raster(key: &Key, limit: usize) -> Option<(ColorImage, Vec2, LineMetrics)> {
     let size = f64::from(f32::from_bits(key.size));
     let scale = f64::from(f32::from_bits(key.scale));
-    let text = attributed(&key.text, size, key.face, f32::from_bits(key.tracking));
+    let mut text = attributed(&key.text, size, key.face, f32::from_bits(key.tracking));
+    let ink = if key.light_ink { 1. } else { 0. };
+    let alpha = f64::from(key.ink_alpha) / 255.;
+    if key.face == Face::Underlined {
+        // Core Text uses black for an unspecified underline even when the
+        // glyphs take white from the drawing context for a dark appearance.
+        let range = CFRange::init(0, text.char_len());
+        text.set_attribute(
+            range,
+            unsafe { kCTUnderlineColorAttributeName },
+            &CGColor::rgb(ink, ink, ink, alpha),
+        );
+    }
     let line = CTLine::new_with_attributed_string(text.as_concrete_TypeRef());
     let bounds = line.get_typographic_bounds();
     let ascent = (bounds.ascent * scale).ceil();
@@ -259,7 +272,6 @@ fn raster(key: &Key, limit: usize) -> Option<(ColorImage, Vec2, LineMetrics)> {
     );
     // Quartz smooths light ink on a dark surface differently from dark ink on
     // a light surface. A transparent alpha-only mask loses that distinction.
-    let ink = if key.light_ink { 1. } else { 0. };
     let paper = 1. - ink;
     canvas.set_rgb_fill_color(paper, paper, paper, 1.);
     canvas.fill_rect(CGRect::new(
@@ -270,7 +282,7 @@ fn raster(key: &Key, limit: usize) -> Option<(ColorImage, Vec2, LineMetrics)> {
     // Let Quartz composite the semantic label opacity with its glyph coverage
     // in one pass. Multiplying an 8-bit mask by the label opacity later loses
     // a level of edge coverage on both light and dark backgrounds.
-    canvas.set_rgb_fill_color(ink, ink, ink, f64::from(key.ink_alpha) / 255.);
+    canvas.set_rgb_fill_color(ink, ink, ink, alpha);
     canvas.set_should_antialias(true);
     canvas.set_allows_font_smoothing(true);
     canvas.set_should_smooth_fonts(true);
@@ -745,9 +757,14 @@ pub fn hyperlink(
         let run = renderer.run(ui.ctx(), title, size, face, color)?;
         let height = system_line_height(ui, f64::from(size)).max(run.size.y);
         let (rect, response) = ui.allocate_exact_size(vec2(run.size.x, height), Sense::click());
-        let top = pos2(rect.left(), rect.center().y - run.size.y * 0.5);
-        ui.painter()
-            .add(run.shape(top, ui.ctx().pixels_per_point(), color));
+        let scale = ui.pixels_per_point();
+        let shape = if underline {
+            run.centered_shape(rect.left_center(), scale, color)
+        } else {
+            let top = pos2(rect.left(), rect.center().y - run.size.y * 0.5);
+            run.shape(top, scale, color)
+        };
+        ui.painter().add(shape);
         Some(response)
     });
     let Some(response) = native else {
@@ -1049,19 +1066,32 @@ mod tests {
             light_ink: false,
             ink_alpha: 255,
         };
-        let (plain, size, _) = raster(&key, 4096).unwrap();
-        key.face = Face::Underlined;
-        let (link, underlined_size, _) = raster(&key, 4096).unwrap();
-        assert_eq!(size, underlined_size);
-        assert!(
-            plain
-                .pixels
-                .iter()
-                .zip(link.pixels)
-                .filter(|(a, b)| a.a() < b.a())
-                .count()
-                > 12
-        );
+        for scale in [1.0_f32, 2.] {
+            for light_ink in [false, true] {
+                key.scale = scale.to_bits();
+                key.light_ink = light_ink;
+                key.face = Face::Regular;
+                let (plain, size, _) = raster(&key, 4096).unwrap();
+                key.face = Face::Underlined;
+                let (link, underlined_size, _) = raster(&key, 4096).unwrap();
+                assert_eq!(size, underlined_size);
+                // The underline crosses the spaces as well as the fallback glyphs.
+                assert!(
+                    link.pixels
+                        .chunks_exact(link.size[0])
+                        .zip(plain.pixels.chunks_exact(plain.size[0]))
+                        .any(|(underlined, plain)| {
+                            underlined
+                                .iter()
+                                .zip(plain)
+                                .filter(|(a, b)| a.a() > b.a())
+                                .count()
+                                > link.size[0] / 2
+                        }),
+                    "underline at {scale}x, light ink {light_ink}"
+                );
+            }
+        }
     }
 
     #[test]
