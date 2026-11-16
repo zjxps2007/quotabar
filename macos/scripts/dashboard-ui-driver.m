@@ -223,7 +223,7 @@ static NSArray<NSString *> *names(id element) {
     return values;
 }
 
-static id control(NSWindow *window, NSString *name, NSMutableArray *available) {
+static id control(NSWindow *window, NSString *name, NSMutableArray *available, BOOL lookingForHelp) {
     if (!window.contentView) return nil;
     NSMutableArray *queue = [NSMutableArray arrayWithObject:window.contentView];
     NSHashTable *seen = [NSHashTable hashTableWithOptions:NSPointerFunctionsObjectPointerPersonality];
@@ -232,7 +232,7 @@ static id control(NSWindow *window, NSString *name, NSMutableArray *available) {
         if ([seen containsObject:node]) continue;
         [seen addObject:node];
         NSString *role = [node respondsToSelector:@selector(accessibilityRole)] ? [node accessibilityRole] : nil;
-        if ([@[NSAccessibilityButtonRole, NSAccessibilityRadioButtonRole, NSAccessibilityCheckBoxRole,
+        if (lookingForHelp || [@[NSAccessibilityButtonRole, NSAccessibilityRadioButtonRole, NSAccessibilityCheckBoxRole,
               NSAccessibilityPopUpButtonRole, @"AXSwitch"] containsObject:role ?: @""]) {
             for (NSString *label in names(node)) {
                 if ([label isEqual:name] || ([name isEqual:@"계정 연결"] && [label hasPrefix:@"+"] && [label hasSuffix:name]))
@@ -453,7 +453,12 @@ static NSDictionary *perform(NSDictionary *request) {
                                     @"Codex", @"Claude", @"Gemini", @"브라우저 로그인", @"파일 가져오기",
                                     @"저작권 및 변경 고지", @"Apache License 2.0 전문"] containsObject:label] &&
         clickControl(target, label)) return @{@"pressed": label};
-    id element = control(target, label, available);
+    BOOL lookingForHelp = [op isEqual:@"help"];
+    id element = control(target, label, available, lookingForHelp);
+    if (lookingForHelp) {
+        NSString *help = [element respondsToSelector:@selector(accessibilityHelp)] ? [element accessibilityHelp] : nil;
+        return @{@"help": help ?: NSNull.null, @"found": @(element != nil)};
+    }
     if (!element && ([op isEqual:@"press"] || [op isEqual:@"attempt"]) && clickControl(target, label))
         return @{@"pressed": label};
     if (!element) return @{@"pending": @"control", @"label": label, @"available": available};

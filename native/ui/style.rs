@@ -427,7 +427,12 @@ pub fn tooltip_text(response: Response, text: &str) -> Response {
         response.on_hover_text_at_pointer(text)
     }
     #[cfg(target_os = "macos")]
-    response.on_hover_text(text)
+    {
+        response
+            .ctx
+            .accesskit_node_builder(response.id, |node| node.set_description(text));
+        response.on_hover_text(text)
+    }
 }
 pub fn caption(ui: &mut Ui, s: impl Into<String>, p: Palette) -> Response {
     label(ui, s, 11., false, p.muted)
@@ -951,7 +956,14 @@ pub fn mac_setting_toggle(
         );
     }
     let track = Rect::from_center_size(row.right_center() - vec2(19., 0.), vec2(38., 22.));
-    if !crate::mac::draw_switch(ui, track, value, response.is_pointer_button_down_on()) {
+    if !crate::mac::draw_switch(
+        ui,
+        track,
+        value,
+        response.is_pointer_button_down_on(),
+        objc2_app_kit::NSControlSize::Regular,
+        None,
+    ) {
         let track_color = if value {
             // The system switch blends a monochrome accent into its control
             // surface. A pure white accent would hide the thumb in Dark Aqua.
@@ -1115,21 +1127,34 @@ pub fn named_toggle(
         vec2(28., 16.)
     };
     let t = Rect::from_center_size(r.right_center() - vec2(size.x * 0.5, 0.), size);
-    painter.rect_filled(t, 8, if value { tint } else { p.track });
-    painter.circle_filled(
-        pos2(
-            if value { t.right() - 8. } else { t.left() + 8. },
-            t.center().y,
-        ),
-        6.,
-        if cfg!(windows) {
-            if value { p.card } else { p.muted }
-        } else if value || p.dark {
-            Color32::WHITE
-        } else {
-            p.muted
-        },
+    #[cfg(target_os = "macos")]
+    let native = crate::mac::draw_switch(
+        ui,
+        t,
+        value,
+        response.is_pointer_button_down_on(),
+        objc2_app_kit::NSControlSize::Mini,
+        Some(tint),
     );
+    #[cfg(windows)]
+    let native = false;
+    if !native {
+        painter.rect_filled(t, 8, if value { tint } else { p.track });
+        painter.circle_filled(
+            pos2(
+                if value { t.right() - 8. } else { t.left() + 8. },
+                t.center().y,
+            ),
+            6.,
+            if cfg!(windows) {
+                if value { p.card } else { p.muted }
+            } else if value || p.dark {
+                Color32::WHITE
+            } else {
+                p.muted
+            },
+        );
+    }
     if response.has_focus() {
         painter.rect_stroke(
             r.expand(2.),

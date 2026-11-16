@@ -44,7 +44,7 @@ class Controls:
         raise TimeoutError(f"{op} {label}: expected {expected}, observed {result}")
 
 
-def exercise(dashboard, executable, folder, library, fixture, observed):
+def exercise(dashboard, executable, folder, library, fixture, observed, help_text):
     folder.mkdir()
     env = {**os.environ, **dashboard.fixture_environment(), "HOME": str(folder),
            "DYLD_INSERT_LIBRARIES": str(library), "QUOTABAR_TEST_UI_DIRECTORY": str(folder)}
@@ -134,6 +134,10 @@ def exercise(dashboard, executable, folder, library, fixture, observed):
             fixture["settings"].update(autoRefresh=False, refreshSeconds=300)
             send({"state": {"_0": fixture}})
             menu("Dashboard 열기", "route", "dashboard")
+            account = fixture["settings"]["accounts"][0]
+            tray_label = f"Codex({account['name']}) 상단바에 표시"
+            time.sleep(0.35)
+            help_text["tray"] = controls.request("help", tray_label)
             send({"show": {"route": "accounts"}})
             route("accounts")
             time.sleep(0.35)
@@ -143,7 +147,7 @@ def exercise(dashboard, executable, folder, library, fixture, observed):
                     raise ValueError(f"Unexpected provider selection: {selection}")
                 observed.append({"providerFilter": selection})
                 time.sleep(0.20)
-            account = fixture["settings"]["accounts"][0]
+            help_text["monitoring"] = controls.request("help", f"Codex({account['name']}) 모니터링")
             for enabled in (False, True):
                 controls.request("press", f"Codex({account['name']}) 모니터링")
                 if UUID(command("toggle")["_0"]) != UUID(account["id"]):
@@ -457,10 +461,10 @@ def compare(dashboard, work, original, fixture, library):
     fixture = {**fixture, "settings": {**fixture["settings"], "scanLocalLogs": False}}
     results = {}
     for side, program in (("original", original), ("rust", dashboard.APP)):
-        record = {"observed": []}
+        record = {"observed": [], "help": {}}
         results[side] = record
         try:
-            exercise(dashboard, program, work / side, library, deepcopy(fixture), record["observed"])
+            exercise(dashboard, program, work / side, library, deepcopy(fixture), record["observed"], record["help"])
         except (OSError, ValueError, KeyError, RuntimeError, EOFError, subprocess.SubprocessError) as error:
             record["error"] = str(error)
         print(f"{side}: {len(record['observed'])} dashboard actions; {record.get('error', 'complete')}", flush=True)
@@ -471,5 +475,9 @@ def compare(dashboard, work, original, fixture, library):
         return [action for action in results[side]["observed"] if "repeatedPreference" not in action]
     results["userActionsIdentical"] = (all("error" not in results[side] for side in ("original", "rust"))
                                        and outcomes("original") == outcomes("rust"))
+    expected_help = {"tray": "상단바 요약과 팝업에 표시합니다. 꺼도 사용량 조회는 계속됩니다.",
+                     "monitoring": "끄면 이 계정의 조회를 일시 정지합니다."}
+    results["switchHelpIdentical"] = all(results[side]["help"].get(key) == {"help": value, "found": True}
+                                        for side in ("original", "rust") for key, value in expected_help.items())
     (dashboard.REPORT / "actions.json").write_text(json.dumps(results, ensure_ascii=False, indent=2))
-    return results["identical"]
+    return results["identical"] and results["switchHelpIdentical"]

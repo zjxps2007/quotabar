@@ -326,16 +326,17 @@ impl Dashboard {
                     #[cfg(windows)]
                     let toggle_size = vec2(86., 16.);
                     ui.allocate_ui_with_layout(toggle_size, Layout::top_down(Align::Min), |ui| {
-                        if named_toggle(
+                        let switch = named_toggle(
                             ui,
                             "모니터링",
                             &a.control_label("모니터링"),
                             a.enabled,
                             tint,
                             p,
-                        )
-                        .clicked()
-                        {
+                        );
+                        #[cfg(target_os = "macos")]
+                        let switch = tooltip_text(switch, "끄면 이 계정의 조회를 일시 정지합니다.");
+                        if switch.clicked() {
                             self.edit_account(a, &a.name, !a.enabled, a.tray);
                         }
                     });

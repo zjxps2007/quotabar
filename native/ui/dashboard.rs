@@ -671,6 +671,15 @@ impl Dashboard {
             )
             .inner
         };
+        #[cfg(target_os = "macos")]
+        let switch = tooltip_text(
+            switch,
+            if a.enabled {
+                "상단바 요약과 팝업에 표시합니다. 꺼도 사용량 조회는 계속됩니다."
+            } else {
+                "모니터링을 재개하면 이 설정에 따라 상단바에 표시됩니다."
+            },
+        );
         #[cfg(windows)]
         let switch = named_toggle(ui, tray_label, &name, a.tray, p.tint(a.provider), p);
         if switch.clicked() {

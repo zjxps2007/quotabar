@@ -37,6 +37,7 @@ fn control_image(
     kind: &'static str,
     state: Id,
     size: Vec2,
+    tint: Option<Color32>,
     make: impl FnOnce(MainThreadMarker) -> Retained<NSControl>,
 ) -> Option<ControlImage> {
     let main = MainThreadMarker::new()?;
@@ -47,6 +48,7 @@ fn control_image(
     let id = Id::new((
         kind,
         state,
+        tint,
         appearance.name().to_string(),
         size.x.to_bits(),
         size.y.to_bits(),
@@ -79,15 +81,16 @@ fn control_image(
         let rtl =
             control.userInterfaceLayoutDirection() == NSUserInterfaceLayoutDirection::RightToLeft;
         let (width, height) = rgba.dimensions();
-        let charcoal: u16 = if ui.visuals().dark_mode { 92 } else { 0 };
+        let tint =
+            tint.unwrap_or_else(|| Color32::from_gray(if ui.visuals().dark_mode { 92 } else { 0 }));
         for (x, _, pixel) in rgba.enumerate_pixels_mut() {
             let trailing = if rtl { x } else { width - 1 - x };
             if switch || trailing < height {
                 let [r, g, b, a] = pixel.0;
                 let low = r.min(g).min(b);
                 let range = u16::from(r.max(g).max(b) - low);
-                let shade = low + ((range * charcoal + 127) / 255) as u8;
-                pixel.0 = [shade, shade, shade, a];
+                let shade = |channel: u8| low + ((range * u16::from(channel) + 127) / 255) as u8;
+                pixel.0 = [shade(tint.r()), shade(tint.g()), shade(tint.b()), a];
             }
         }
     }
@@ -164,6 +167,7 @@ fn button_image(
             pressed,
         )),
         size,
+        None,
         |main| {
             let button = push_button(main, title, symbol, control_size, font_size);
             button.setHighlighted(pressed);
@@ -184,6 +188,7 @@ pub fn draw_segments(
         "AppKit segmented control",
         Id::new((items, current, pressed)),
         bounds.size(),
+        None,
         |main| {
             let labels: Vec<_> = items
                 .iter()
@@ -214,14 +219,23 @@ pub fn draw_segments(
     }
 }
 
-pub fn draw_switch(ui: &Ui, bounds: Rect, checked: bool, pressed: bool) -> bool {
+pub fn draw_switch(
+    ui: &Ui,
+    bounds: Rect,
+    checked: bool,
+    pressed: bool,
+    size: NSControlSize,
+    tint: Option<Color32>,
+) -> bool {
     let image = control_image(
         ui,
         "AppKit switch",
-        Id::new((checked, pressed)),
+        Id::new((size, checked, pressed)),
         bounds.size(),
+        tint,
         |main| {
             let control = NSSwitch::new(main);
+            control.setControlSize(size);
             control.setState(isize::from(checked));
             control.setHighlighted(pressed);
             control.into_super()
@@ -241,6 +255,7 @@ pub fn draw_checkbox(ui: &Ui, bounds: Rect, checked: bool, pressed: bool) -> boo
         "AppKit checkbox",
         Id::new((checked, pressed)),
         bounds.size(),
+        None,
         |main| {
             let button = unsafe {
                 NSButton::checkboxWithTitle_target_action(&NSString::new(), None, None, main)
@@ -295,6 +310,7 @@ pub fn popup_choice(
         "AppKit pop-up button",
         Id::new(title),
         rect.size(),
+        None,
         |main| {
             popup_button(main, labels, selected)
                 .into_super()
