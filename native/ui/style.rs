@@ -1085,6 +1085,16 @@ pub fn mac_setting_toggle(
     response
 }
 pub fn checkbox(ui: &mut Ui, checked: &mut bool, title: &str, size: f32, p: Palette) -> Response {
+    checkbox_in_row(ui, checked, title, size, p, None)
+}
+pub fn checkbox_in_row(
+    ui: &mut Ui,
+    checked: &mut bool,
+    title: &str,
+    size: f32,
+    p: Palette,
+    top: Option<f32>,
+) -> Response {
     let text = ui
         .painter()
         .layout_no_wrap(title.to_owned(), FontId::proportional(size), p.ink);
@@ -1092,13 +1102,12 @@ pub fn checkbox(ui: &mut Ui, checked: &mut bool, title: &str, size: f32, p: Pale
     let content = crate::windows_text::natural_size(ui, title, size, false).unwrap_or(text.size());
     #[cfg(target_os = "macos")]
     let content = crate::mac_text::natural_size(ui, title, size, false).unwrap_or(text.size());
-    let (row, mut response) = ui.allocate_exact_size(
-        vec2(
-            20. + content.x,
-            ui.spacing().interact_size.y.max(content.y).max(13.),
-        ),
-        Sense::click(),
+    let row_size = vec2(
+        20. + content.x,
+        ui.spacing().interact_size.y.max(content.y).max(13.),
     );
+    let (row, mut response) = ui.allocate_exact_size(row_size, Sense::click());
+    let row = top.map_or(row, |y| Rect::from_min_size(pos2(row.left(), y), row_size));
     button_pressed(ui, &mut response);
     if response.clicked() {
         *checked = !*checked;

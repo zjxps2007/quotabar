@@ -29,9 +29,11 @@ struct Factories {
 impl Factories {
     fn line_box(&self, size: f32, semibold: bool) -> Option<(f32, f32)> {
         let m = self.line_metrics[usize::from(semibold)]?;
-        let unit = size / f32::from(m.designUnitsPerEm);
-        let height = f32::from(m.ascent) + f32::from(m.descent) + f32::from(m.lineGap);
-        Some((height * unit, f32::from(m.ascent) * unit))
+        // TextFormatter measures line spacing and ascent separately in 1/300 DIP.
+        let units = f64::from(size) * 300. / f64::from(m.designUnitsPerEm);
+        let dip = |design: i32| ((f64::from(design) * units).round_ties_even() / 300.) as f32;
+        let height = i32::from(m.ascent) + i32::from(m.descent) + i32::from(m.lineGap);
+        Some((dip(height), dip(i32::from(m.ascent))))
     }
     fn line_metrics(write: &IDWriteFactory) -> [Option<DWRITE_FONT_METRICS>; 2] {
         let family = unsafe {
@@ -106,6 +108,7 @@ impl Factories {
 
     fn render(&self, key: &RunKey, max_size: usize) -> Option<(ColorImage, Vec2, Range<usize>)> {
         let size = f32::from_bits(key.pixels);
+        let scale = f32::from_bits(key.scale);
         let weight = if key.semibold {
             DWRITE_FONT_WEIGHT_SEMI_BOLD
         } else {
@@ -129,9 +132,13 @@ impl Factories {
             // WPF's TextBlock uses the family baseline and line spacing across
             // fallback runs. DirectWrite's default combines the largest ascent and
             // descent from different faces, making mixed Korean/Latin rows taller.
-            if let Some((height, baseline)) = self.line_box(size, key.semibold) {
+            if let Some((height, baseline)) = self.line_box(size / scale, key.semibold) {
                 format
-                    .SetLineSpacing(DWRITE_LINE_SPACING_METHOD_UNIFORM, height, baseline)
+                    .SetLineSpacing(
+                        DWRITE_LINE_SPACING_METHOD_UNIFORM,
+                        height * scale,
+                        baseline * scale,
+                    )
                     .ok()?;
             }
             let width = match key.line {
@@ -165,7 +172,7 @@ impl Factories {
                 .ok()?;
             let mut metrics = DWRITE_TEXT_METRICS::default();
             layout.GetMetrics(&mut metrics).ok()?;
-            let mut draw_x = f32::from(key.origin[0]) / 64.;
+            let mut draw_x = f32::from(key.origin.x64) / 64.;
             let mut fraction = 0.;
             let indent = utf16.iter().take_while(|&&c| c == u16::from(b' ')).count();
             if indent > 0
@@ -182,7 +189,6 @@ impl Factories {
                     .HitTestTextPosition(0, true, &mut x, &mut y, &mut hit)
                     .ok()?;
                 if hit.left == 0. && hit.bidiLevel == 0 {
-                    let scale = f32::from_bits(key.scale);
                     let space = (x * 300. / scale).round() * scale / 300.;
                     draw_x += space * indent as f32;
                     fraction = draw_x.fract();
@@ -201,14 +207,13 @@ impl Factories {
             }
             let origin = windows_numerics::Vector2 {
                 X: draw_x + fraction,
-                Y: f32::from(key.origin[1]) / 64.,
+                Y: f32::from_bits(key.origin.y_bits),
             };
             let params = if key.colors.is_some() {
                 &self.lcd_coverage
             } else {
                 &self.coverage
             };
-            let scale = f32::from_bits(key.scale);
             let size = [width, height];
             glyphs::mark_dash_runs(&self.write, &layout, run_text).ok()?;
             let rounding = key.subpixel_rounding();
@@ -449,7 +454,7 @@ struct RunKey {
     scale: u32,
     semibold: bool,
     line: LineWidth,
-    origin: [u8; 2],
+    origin: RasterOrigin,
     colors: Option<LcdColors>,
 }
 
@@ -477,19 +482,70 @@ enum LineWidth {
     Ellipsis(u32),
 }
 
-#[derive(Clone, Copy, PartialEq)]
-pub enum LabelLayout {
+/// WPF stacks natural text heights with whole-DIP margins and padding. Keep
+/// that sum independently of egui's 1/32-DIP widget allocation grid.
+pub struct TextStack(std::cell::Cell<f64>);
+
+impl TextStack {
+    pub fn new(top: f32) -> Self {
+        Self(std::cell::Cell::new(f64::from(top)))
+    }
+
+    pub fn top(&self, allocated: f32) -> f32 {
+        let anchor = self.0.get();
+        (anchor + (f64::from(allocated) - anchor).round()) as f32
+    }
+
+    pub fn advance(&self, height: f32) {
+        let height = (f64::from(height) * 300.).round_ties_even() / 300.;
+        self.0.set(self.0.get() + height);
+    }
+
+    pub fn label(
+        &self,
+        ui: &mut Ui,
+        text: &str,
+        size: f32,
+        semibold: bool,
+        color: Color32,
+    ) -> Response {
+        draw_label(ui, text, size, semibold, color, LabelLayout::Stacked(self)).unwrap_or_else(
+            || {
+                let response = ui.label(crate::style::rich(text, size, semibold, color));
+                self.advance(response.rect.height());
+                response
+            },
+        )
+    }
+}
+
+#[derive(Clone, Copy)]
+pub enum LabelLayout<'a> {
     Inline,
     Block,
+    Stacked(&'a TextStack),
     SingleLine,
 }
 
 /// DirectWrite snaps each baseline in device space. Preserve the fraction of
 /// the layout origin when rasterizing the run into its own pixel-aligned bitmap.
-fn raster_origin(position: Pos2, scale: f32) -> (Pos2, [u8; 2]) {
-    let units = [position.x, position.y].map(|p| (p * scale * 64.).round() as i32);
-    let [x, y] = units.map(|v| v.div_euclid(64) as f32 / scale);
-    (pos2(x, y), units.map(|v| v.rem_euclid(64) as u8))
+#[derive(Clone, Copy, Default, Eq, PartialEq, Hash)]
+struct RasterOrigin {
+    x64: u8,
+    y_bits: u32,
+}
+
+fn raster_origin(position: Pos2, scale: f32) -> (Pos2, RasterOrigin) {
+    let x = (position.x * scale * 64.).round() as i32;
+    let y = position.y * scale;
+    let top = y.floor();
+    (
+        pos2(x.div_euclid(64) as f32 / scale, top / scale),
+        RasterOrigin {
+            x64: x.rem_euclid(64) as u8,
+            y_bits: (y - top).to_bits(),
+        },
+    )
 }
 
 struct CachedRun {
@@ -625,7 +681,7 @@ pub fn natural_size(ui: &Ui, text: &str, size: f32, semibold: bool) -> Option<Ve
         scale: scale.to_bits(),
         semibold,
         line: LineWidth::Natural,
-        origin: [0; 2],
+        origin: RasterOrigin::default(),
         colors: None,
     };
     let renderer = ui.ctx().plugin_opt::<TextRenderer>()?;
@@ -644,7 +700,7 @@ pub fn draw_label(
     size: f32,
     semibold: bool,
     color: Color32,
-    layout: LabelLayout,
+    layout: LabelLayout<'_>,
 ) -> Option<Response> {
     let width = ui.available_width();
     let scale = ui.ctx().pixels_per_point();
@@ -664,7 +720,7 @@ pub fn draw_label(
         scale: scale.to_bits(),
         semibold,
         line,
-        origin: [0; 2],
+        origin: RasterOrigin::default(),
         colors: None,
     };
     let renderer = ui.ctx().plugin_opt::<TextRenderer>()?;
@@ -673,17 +729,21 @@ pub fn draw_label(
     // WPF measures TextBlocks before arranging their parent. Retain the
     // fractional natural size across stacked rows, independently of the bitmap.
     let mut desired = measured / scale;
-    desired.x = if layout == LabelLayout::Inline {
+    desired.x = if matches!(layout, LabelLayout::Inline) {
         desired.x.min(width)
     } else {
         width
     };
     let (rect, response) = ui.allocate_exact_size(desired, Sense::hover());
-    let (start, origin) = raster_origin(rect.min, scale);
+    let mut pos = rect.min;
+    if let LabelLayout::Stacked(stack) = layout {
+        pos.y = stack.top(pos.y);
+    }
+    let (start, origin) = raster_origin(pos, scale);
     key.origin = origin;
     let run = renderer.run(ui.ctx(), key, max_size)?;
     let mut painter = ui.painter().clone();
-    if layout == LabelLayout::SingleLine && constrained {
+    if matches!(layout, LabelLayout::SingleLine) && constrained {
         let mut clip = painter.clip_rect();
         clip.max.x = clip.max.x.min(rect.right());
         painter.set_clip_rect(clip);
@@ -695,6 +755,9 @@ pub fn draw_label(
         color,
     );
     response.widget_info(|| WidgetInfo::labeled(WidgetType::Label, ui.is_enabled(), text));
+    if let LabelLayout::Stacked(stack) = layout {
+        stack.advance(desired.y);
+    }
     Some(response)
 }
 
@@ -961,6 +1024,46 @@ mod tests {
     }
 
     #[test]
+    fn wrapped_help_and_consent_keep_the_original_device_baselines() {
+        let _apartment = Apartment::open();
+        let factories = Factories::new().unwrap();
+        let stack = TextStack::new(28.);
+        // Title, subtitle, provider, path caption, editor and browse button.
+        for (size, bold) in [
+            (24., true),
+            (12., false),
+            (13., false),
+            (11., false),
+            (13., false),
+            (13., false),
+        ] {
+            stack.advance(factories.line_box(size, bold).unwrap().0);
+        }
+        let help = stack.top(281.375);
+        let (height, ascent) = factories.line_box(12., false).unwrap();
+        stack.advance(2. * height);
+        let consent = stack.top(328.28125);
+        let (_, checkbox_ascent) = factories.line_box(13., false).unwrap();
+        // Absolute WPF GlyphRun baselines from the official connection dialog,
+        // in 1/300 DIP. At 150% they fall at 441.5, 465.44 and 513.495 pixels.
+        for scale in [1., 1.25, 1.5, 1.75, 2.] {
+            for (top, offset, expected) in [
+                (help, ascent, 88300),
+                (help, height + ascent, 93088),
+                (consent, checkbox_ascent, 102699),
+            ] {
+                let (pos, origin) = raster_origin(pos2(0., top), scale);
+                let baseline = (pos.y * scale).round()
+                    + (f32::from_bits(origin.y_bits) + offset * scale).round();
+                assert_eq!(
+                    baseline,
+                    (f64::from(expected) * f64::from(scale) / 300.).round() as f32
+                );
+            }
+        }
+    }
+
+    #[test]
     fn adjacent_text_blocks_keep_cleartype_over_their_unpainted_padding() {
         let _apartment = Apartment::open();
         let ctx = Context::default();
@@ -1020,13 +1123,16 @@ mod tests {
                 scale: 1_f32.to_bits(),
                 semibold: false,
                 line: LineWidth::Natural,
-                origin: [0; 2],
+                origin: RasterOrigin::default(),
                 colors: None,
             };
             let (label, _, _) = factories.render(&whole, 4096).unwrap();
             let suffix = RunKey {
                 text: "beta".into(),
-                origin: [fraction, 0],
+                origin: RasterOrigin {
+                    x64: fraction,
+                    ..Default::default()
+                },
                 ..whole
             };
             let (fragment, _, _) = factories.render(&suffix, 4096).unwrap();
@@ -1055,7 +1161,7 @@ mod tests {
             scale: 1_f32.to_bits(),
             semibold: false,
             line: LineWidth::Natural,
-            origin: [0; 2],
+            origin: RasterOrigin::default(),
             colors: None,
         };
         let (label, _, _) = factories.render(&mixed, 4096).unwrap();
@@ -1063,7 +1169,10 @@ mod tests {
             .render(
                 &RunKey {
                     text: " 변경".into(),
-                    origin: [34, 0],
+                    origin: RasterOrigin {
+                        x64: 34,
+                        ..Default::default()
+                    },
                     ..mixed
                 },
                 4096,
@@ -1082,7 +1191,7 @@ mod tests {
                 scale: (pixels / 13.).to_bits(),
                 semibold: false,
                 line: LineWidth::Natural,
-                origin: [0; 2],
+                origin: RasterOrigin::default(),
                 colors: None,
             };
             let (mask, size, _) = factories.render(&run, 4096).unwrap();

@@ -137,26 +137,42 @@ fn fractional_dialog_edge_matches_wpf_background_layers() {
     }
 }
 
-fn full_button(ui: &mut Ui, title: &str, primary: bool, p: Palette) -> bool {
+fn full_button(ui: &mut Ui, title: &str, primary: bool, p: Palette, _top: Option<f32>) -> bool {
     let fill = if primary { p.accent } else { p.card };
     let ink = if primary { p.on } else { p.ink };
+    let stroke = Stroke::new(1.0_f32, if primary { p.accent } else { p.line });
     #[cfg(windows)]
-    let height = crate::windows_text::line_height(13.).unwrap_or(17.) + 16.;
+    let button = |ui: &mut Ui| {
+        let font = FontId::proportional(13.);
+        let label = ui.painter().layout_no_wrap(title.into(), font, ink);
+        let content =
+            crate::windows_text::natural_size(ui, title, 13., false).unwrap_or(label.size());
+        let size = vec2(ui.available_width(), content.y + 16.);
+        let (allocated, response) = ui.allocate_exact_size(size, Sense::click());
+        // The dialog's right inset is a whole number of DIPs measured from
+        // the physical client edge, which can fall between egui grid positions.
+        let scale = ui.ctx().pixels_per_point();
+        let client_right = (ui.ctx().content_rect().right() * scale).round() / scale;
+        let right = client_right - (client_right - allocated.right()).round();
+        let top = _top.unwrap_or(allocated.top());
+        let rect = Rect::from_min_max(pos2(allocated.left(), top), pos2(right, top + size.y));
+        ui.painter().rect(rect, 8, fill, stroke, StrokeKind::Inside);
+        ui.painter()
+            .galley(rect.center() - content * 0.5, label, ink);
+        response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, ui.is_enabled(), title));
+        response
+    };
     #[cfg(target_os = "macos")]
-    let height = 32.;
-    button_feedback(ui, p.bg, ink, vec2(10., 5.), |ui| {
+    let button = |ui: &mut Ui| {
         ui.add_sized(
-            [ui.available_width(), height],
-            Button::new(rich(title, if MAC { 12. } else { 13. }, false, ink))
-                .corner_radius(if MAC { 7 } else { 8 })
+            [ui.available_width(), 32.],
+            Button::new(rich(title, 12., false, ink))
+                .corner_radius(7)
                 .fill(fill)
-                .stroke(Stroke::new(
-                    1.0_f32,
-                    if primary { p.accent } else { p.line },
-                )),
+                .stroke(stroke),
         )
-    })
-    .clicked()
+    };
+    button_feedback(ui, p.bg, ink, vec2(10., 5.), button).clicked()
 }
 
 pub struct Connect {
@@ -436,9 +452,27 @@ impl Dashboard {
                             scroll
                         };
                         let scroll = scroll.show(ui, |ui| {
-                            close |= self.connect_panel(ui, c, p, &mut browse);
+                            #[cfg(windows)]
+                            let top = ui.next_widget_position().y;
+                            #[cfg(windows)]
+                            let stack = crate::windows_text::TextStack::new(top);
+                            close |= self.connect_panel(
+                                ui,
+                                c,
+                                p,
+                                &mut browse,
+                                #[cfg(windows)]
+                                &stack,
+                            );
+                            #[cfg(windows)]
+                            {
+                                stack.top(ui.min_rect().bottom()) - top
+                            }
                         });
                         let scale = if MAC { 1. } else { ctx.pixels_per_point() };
+                        #[cfg(windows)]
+                        let natural_height = scroll.inner + 56.;
+                        #[cfg(target_os = "macos")]
                         let natural_height = scroll.content_size.y + 56.;
                         let pixels = natural_height * scale;
                         #[cfg(windows)]
@@ -466,7 +500,7 @@ impl Dashboard {
                         );
                         crate::accessibility::text_value(ui, field, name, "계정 이름");
                         ui.add_space(18.);
-                        if full_button(ui, "저장", true, p) && !name.trim().is_empty() {
+                        if full_button(ui, "저장", true, p, None) && !name.trim().is_empty() {
                             self.edit_account(a, name, a.enabled, a.tray);
                             close = true;
                         }
@@ -684,6 +718,7 @@ impl Dashboard {
         c: &mut Connect,
         p: Palette,
         browse_requested: &mut bool,
+        #[cfg(windows)] stack: &crate::windows_text::TextStack,
     ) -> bool {
         if let Some(remaining) = c.reply_time_left() {
             ui.ctx()
@@ -713,6 +748,12 @@ impl Dashboard {
             "Codex 다시 로그인"
         } else {
             "계정 연결"
+        };
+        #[cfg(windows)]
+        let control_line = crate::windows_text::line_height(13.).unwrap_or(17.);
+        #[cfg(windows)]
+        let form_text = |ui: &mut Ui, title: &str, size, semibold, color| {
+            stack.label(ui, title, size, semibold, color)
         };
         if MAC {
             let dismissed = ui
@@ -802,7 +843,10 @@ impl Dashboard {
             }
         }
         #[cfg(windows)]
-        gap_after_single_line(ui, _picker.response.rect.height(), 14., 20.);
+        {
+            stack.advance(control_line);
+            gap_after_single_line(ui, _picker.response.rect.height(), 14., 20.);
+        }
         #[cfg(target_os = "macos")]
         ui.add_space(20.);
         if MAC && c.provider == "Codex" && c.replacing.is_none() {
@@ -842,7 +886,15 @@ impl Dashboard {
         if browser && let Some(fields) = &c.inputs {
             fields.hide_path();
         }
-        let full = |ui: &mut Ui, s: &str, primary: bool| full_button(ui, s, primary, p);
+        let full = |ui: &mut Ui, s: &str, primary: bool| {
+            #[cfg(windows)]
+            let top = Some(stack.top(ui.next_widget_position().y));
+            #[cfg(target_os = "macos")]
+            let top = None;
+            #[cfg(windows)]
+            stack.advance(control_line);
+            full_button(ui, s, primary, p, top)
+        };
         #[cfg(windows)]
         if c.provider == "Codex" {
             form_text(
@@ -921,6 +973,7 @@ impl Dashboard {
                         let field = ui.add(editor);
                         let height = field.rect.height();
                         crate::accessibility::text_value(ui, field, &mut c.path, "경로");
+                        stack.advance(control_line);
                         gap_after_single_line(ui, height, 34., 10.);
                         full(ui, "찾아보기", false)
                     }
@@ -944,13 +997,15 @@ impl Dashboard {
             ui.add_space(15.);
             ui.scope(|ui| {
                 ui.spacing_mut().interact_size.y = 0.;
-                checkbox(
+                checkbox_in_row(
                     ui,
                     &mut c.consent,
                     "기존 status line을 보존하는 연결에 동의합니다",
                     13.,
                     p,
+                    Some(stack.top(ui.next_widget_position().y)),
                 );
+                stack.advance(control_line);
             });
         } else {
             let note = if c.provider == "Gemini" {
