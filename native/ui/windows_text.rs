@@ -218,56 +218,52 @@ impl Factories {
             };
             let size = [width, height];
             glyphs::mark_dash_runs(&self.write, &layout, run_text).ok()?;
-            let rounding = key.subpixel_rounding();
-            let bytes = glyphs::coverage(self, params, &layout, origin, scale, size, rounding)
-                .or_else(|| self.bitmap_coverage(&layout, params, origin, fraction, key, size))?;
+            let units = key.coverage_units();
+            let samples = glyphs::coverage(self, params, &layout, origin, scale, size, key)
+                .or_else(|| {
+                    self.bitmap_coverage(&layout, params, origin, fraction, key, size)
+                        .map(|bytes| bytes.into_iter().map(|b| u16::from(b) * units).collect())
+                })?;
             // Include subpixel ink from all three channels, even for a run
             // whose first texture uses the grayscale coverage channel.
-            let has_ink = |row: &[u8]| row.chunks_exact(4).any(|pixel| pixel[..3] != [0; 3]);
-            let mut rows = bytes.chunks_exact(width * 4);
+            let has_ink = |row: &[u16]| row.chunks_exact(4).any(|pixel| pixel[..3] != [0; 3]);
+            let mut rows = samples.chunks_exact(width * 4);
             let ink_rows = rows
                 .clone()
                 .position(has_ink)
                 .map_or(0..0, |top| top..rows.rposition(has_ink).unwrap() + 1);
-            let colors = key.colors.map(|colors| {
-                let ink = colors.ink;
-                let backdrop = colors.backdrop;
-                let channels = [
-                    (ink.r(), backdrop.r()),
-                    (ink.g(), backdrop.g()),
-                    (ink.b(), backdrop.b()),
-                ];
-                let lookup = channels.map(|(fg, bg)| {
-                    std::array::from_fn::<_, 256, _>(|i| {
-                        if colors.software {
-                            software_channel(i as u8, fg, bg, &self.software_gamma)
-                        } else {
-                            compose_glyph(i as u8, fg, bg, self.gamma)
-                        }
-                    })
-                });
-                (ink, lookup)
-            });
-            let mask = bytes
+            let mask = samples
                 .as_chunks::<4>()
                 .0
                 .iter()
                 .map(|px| {
-                    if let Some((ink, [red, green, blue])) = &colors {
+                    if let Some(colors) = key.colors {
                         if px[..3] == [0, 0, 0] {
                             Color32::TRANSPARENT
-                        } else if px[..3] == [255, 255, 255] {
-                            *ink
+                        } else if px[..3] == [255 * units; 3] {
+                            colors.ink
                         } else {
+                            let channel = |sample: u16, fg, bg| {
+                                if colors.software {
+                                    software_channel(sample as u8, fg, bg, &self.software_gamma)
+                                } else {
+                                    compose_glyph(
+                                        f32::from(sample) / f32::from(units),
+                                        fg,
+                                        bg,
+                                        self.gamma,
+                                    )
+                                }
+                            };
                             Color32::from_rgb(
-                                red[px[2] as usize],
-                                green[px[1] as usize],
-                                blue[px[0] as usize],
+                                channel(px[2], colors.ink.r(), colors.backdrop.r()),
+                                channel(px[1], colors.ink.g(), colors.backdrop.g()),
+                                channel(px[0], colors.ink.b(), colors.backdrop.b()),
                             )
                         }
                     } else {
                         // For an alpha bitmap WPF samples the center of the coverage texture.
-                        Color32::from_white_alpha(px[1])
+                        Color32::from_white_alpha(px[1] as u8)
                     }
                 })
                 .collect();
@@ -405,8 +401,8 @@ fn glyph_gamma(display_gamma: f32) -> [f32; 4] {
     COEFFICIENTS[(((display_gamma - 1.) * 10.) as usize).min(COEFFICIENTS.len() - 1)]
 }
 
-fn compose_glyph(sample: u8, foreground: u8, background: u8, [g1, g2, g3, g4]: [f32; 4]) -> u8 {
-    let alpha = f32::from(sample) / 255.;
+fn compose_glyph(sample: f32, foreground: u8, background: u8, [g1, g2, g3, g4]: [f32; 4]) -> u8 {
+    let alpha = sample / 255.;
     let ink = f32::from(foreground) / 255.;
     let corrected = alpha + alpha * (1. - alpha) * ((g1 * ink + g2) * alpha + (g3 * ink + g4));
     // The display shader keeps fractional coverage through the blend. Only the
@@ -469,6 +465,16 @@ struct LcdColors {
 }
 
 impl RunKey {
+    fn coverage_units(&self) -> u16 {
+        // The console ClearType shader retains five fractional bits from
+        // filtering the mask. Software and grayscale surfaces use byte masks.
+        if self.colors.is_some_and(|c| !c.software) {
+            32
+        } else {
+            1
+        }
+    }
+
     fn subpixel_rounding(&self) -> u32 {
         if self.colors.is_some_and(|c| c.software) {
             0
@@ -1077,16 +1083,16 @@ mod tests {
     fn cleartype_coverage_blends_light_and_dark_ink() {
         let gamma = glyph_gamma(1.75);
         // Paired glyph edges from the original license window on the console.
-        let samples = [0, 59, 109, 153, 191, 225, 255];
+        let samples = [0., 59., 109., 153., 191., 218.1875, 225., 255.];
         assert_eq!(
             samples.map(|s| compose_glyph(s, 23, 255, gamma)),
-            [255, 216, 185, 152, 114, 71, 23]
+            [255, 216, 185, 152, 114, 80, 71, 23]
         );
         assert_eq!(
             samples.map(|s| compose_glyph(s, 242, 28, gamma)),
-            [28, 108, 154, 185, 207, 225, 242]
+            [28, 108, 154, 185, 207, 221, 225, 242]
         );
-        assert_eq!(compose_glyph(127, 255, 0, glyph_gamma(1.)), 127);
+        assert_eq!(compose_glyph(127., 255, 0, glyph_gamma(1.)), 127);
         assert_eq!(glyph_gamma(3.), glyph_gamma(2.25));
     }
 

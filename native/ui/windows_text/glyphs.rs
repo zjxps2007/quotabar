@@ -264,9 +264,21 @@ struct Coverage<'a> {
     params: &'a IDWriteRenderingParams,
     bgr: bool,
     rounding: u32,
+    units: u16,
     size: [usize; 2],
-    pixels: Vec<u8>,
+    pixels: Vec<u16>,
     pen: Option<Pen>,
+}
+
+fn strip_weights(origin: f32, units: u16) -> (usize, u32) {
+    let mut phase = (origin - origin.floor()) * 3.;
+    if units > 1 {
+        // The display samples to the left of each destination subpixel. Its
+        // backward texture lookup rounds the forward shift up to a filter step.
+        let steps = f32::from(units);
+        phase = (phase * steps).ceil() / steps;
+    }
+    (phase as usize, (phase.fract() * 65536.) as u32)
 }
 
 impl Coverage<'_> {
@@ -341,9 +353,8 @@ impl Coverage<'_> {
         for value in &mut strip {
             *value = self.factory.contrast[usize::from(*value)];
         }
-        let phase = (x - x.floor()) * 3.;
-        let shift = phase.floor() as usize;
-        let blend = ((phase - shift as f32) * 65536.) as u32;
+        let (shift, blend) = strip_weights(x, self.units);
+        let full = 255 * u32::from(self.units);
         let dst_x = left + area.left;
         for (dy, row) in strip.chunks_exact(stride).enumerate() {
             let dst_row = (baseline + area.top + dy as i32) as usize * self.size[0];
@@ -358,12 +369,11 @@ impl Coverage<'_> {
                         .copied()
                         .unwrap_or(0) as u32
                 };
-                let alpha =
-                    (sample(shift) * (65536 - blend) + sample(shift + 1) * blend + self.rounding)
-                        >> 16;
+                let filtered = sample(shift) * (65536 - blend) + sample(shift + 1) * blend;
+                let alpha = (filtered * u32::from(self.units) + self.rounding) >> 16;
                 let channel = if self.bgr { sub % 3 } else { 2 - sub % 3 };
                 let dst = &mut self.pixels[4 * (dst_row + px as usize) + channel];
-                *dst = (alpha + ((255 - alpha) * u32::from(*dst) + 127) / 255) as u8;
+                *dst = (alpha + ((full - alpha) * u32::from(*dst) + full / 2) / full) as u16;
             }
         }
         Ok(())
@@ -377,8 +387,8 @@ pub(super) fn coverage(
     origin: Vector2,
     scale: f32,
     size: [usize; 2],
-    rounding: u32,
-) -> Option<Vec<u8>> {
+    key: &super::RunKey,
+) -> Option<Vec<u16>> {
     let geometry = unsafe { params.GetPixelGeometry() };
     if unsafe { params.GetClearTypeLevel() } != 1.
         || !matches!(
@@ -393,7 +403,8 @@ pub(super) fn coverage(
         params,
         size,
         bgr: geometry == DWRITE_PIXEL_GEOMETRY_BGR,
-        rounding,
+        rounding: key.subpixel_rounding(),
+        units: key.coverage_units(),
         pixels: vec![0; size[0] * size[1] * 4],
         pen: None,
     };
@@ -404,6 +415,18 @@ pub(super) fn coverage(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn display_filter_matches_the_wpf_license_text_origins() {
+        // TextFormatter's origins after 27, 24, 3 and 6 leading spaces at
+        // 13 DIPs, and the weights recovered from both themes of the live window.
+        for (x, shift, numerator) in [(96.12, 0, 12), (85.44, 1, 11), (10.68, 2, 2), (21.36, 1, 3)]
+        {
+            assert_eq!(strip_weights(x, 32), (shift, numerator * 65536 / 32));
+        }
+        assert_eq!(strip_weights(-0.001, 32), (3, 0));
+        assert_eq!(strip_weights(1., 32), (0, 0));
+    }
 
     #[test]
     fn ideal_metrics_match_reference_glyphs_at_both_dpi_scales() {
