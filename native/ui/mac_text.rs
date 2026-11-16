@@ -271,11 +271,17 @@ impl Renderer {
                 format.extra_letter_spacing,
             )?;
             let origin = text.pos + row.pos.to_vec2();
-            shapes.push(run.centered_shape(
-                origin + vec2(0., row.size.y / 2.),
-                ctx.pixels_per_point(),
-                color,
-            ));
+            let scale = ctx.pixels_per_point();
+            let shape = if format.line_height.is_some() {
+                run.centered_shape(origin + vec2(0., row.size.y / 2.), scale, color)
+            } else {
+                run.shape(
+                    origin + vec2(0., (row.size.y - run.size.y) * 0.5),
+                    scale,
+                    color,
+                )
+            };
+            shapes.push(shape);
         }
         Some(Shape::Vec(shapes))
     }

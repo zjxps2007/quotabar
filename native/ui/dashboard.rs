@@ -7,7 +7,12 @@ use serde_json::{Value, json};
 use std::collections::HashSet;
 
 #[cfg(target_os = "macos")]
-fn mac_message_banner(ui: &mut Ui, message: &str, palette: Palette) -> bool {
+fn mac_message_banner(
+    ui: &mut Ui,
+    message: &str,
+    palette: Palette,
+    field: Option<&crate::mac::BannerLabel>,
+) -> bool {
     Frame::new()
         .inner_margin(14)
         .fill(surface_fill(palette.bg, palette.warning, 0.08))
@@ -36,10 +41,13 @@ fn mac_message_banner(ui: &mut Ui, message: &str, palette: Palette) -> bool {
                 palette.warning,
             );
             let text_origin = pos2(icon_rect.right() + 8., row.center().y - text.size().y / 2.);
-            ui.place(
-                Rect::from_min_size(text_origin, text.size()),
-                Label::new(text).selectable(true),
-            );
+            let rect = Rect::from_min_size(text_origin, text.size());
+            if let Some(field) = field {
+                field.place(message, rect, text_width, ui.ctx().zoom_factor());
+            } else {
+                // GPU-only captures exclude AppKit subviews.
+                ui.place(rect, Label::new(text).selectable(true));
+            }
             let close_rect = Rect::from_center_size(
                 row.right_center() - vec2(close_size.x / 2., 0.),
                 close_size,
@@ -309,11 +317,18 @@ impl Dashboard {
                 if !MAC { ui.add_space(18.); }
             }
             #[cfg(target_os = "macos")]
-            if let Some(message) = self.state.raw["message"].as_str()
-                && mac_message_banner(ui, message, p)
             {
-                self.wire.action("message", Value::Null);
-                self.state.raw["message"] = Value::Null;
+                let field = self.banner_label.as_ref();
+                let message = self.state.raw["message"].as_str();
+                let visible_field = field.filter(|_| self.capture.is_none() && message.is_some());
+                if visible_field.is_none() && let Some(field) = field {
+                    field.hide();
+                }
+                if let Some(message) = message && mac_message_banner(ui, message, p, visible_field) {
+                    if let Some(field) = visible_field { field.hide(); }
+                    self.wire.action("message", Value::Null);
+                    self.state.raw["message"] = Value::Null;
+                }
             }
             #[cfg(windows)]
             {
