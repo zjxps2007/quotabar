@@ -1,9 +1,9 @@
-use std::{ffi::c_void, mem::ManuallyDrop, slice};
+use std::{cell::Cell, ffi::c_void, mem::ManuallyDrop, slice};
 use windows::Win32::{
     Foundation::{E_NOTIMPL, E_POINTER},
     Graphics::{Direct2D::*, DirectWrite::*},
 };
-use windows_core::{BOOL, IUnknown, IUnknownImpl, Ref, Result, implement};
+use windows_core::{BOOL, ComObject, IUnknown, IUnknownImpl, Ref, Result, implement};
 use windows_numerics::Vector2;
 
 // WPF's ideal-mode formatter measures in 1/300 DIP and stores run advances
@@ -34,9 +34,13 @@ fn glyph_metrics(em: f32, scale: f32) -> impl FnMut(f32) -> f32 {
 
 #[implement(IDWriteTextRenderer)]
 struct GlyphPainter {
-    target: ID2D1RenderTarget,
-    brush: ID2D1SolidColorBrush,
     scale: f32,
+    failed: Cell<bool>,
+}
+
+enum Destination<'a, 'b> {
+    Bitmap(&'a ID2D1RenderTarget, &'a ID2D1SolidColorBrush),
+    Mask(&'a mut Coverage<'b>),
 }
 
 impl IDWritePixelSnapping_Impl for GlyphPainter_Impl {
@@ -63,7 +67,7 @@ impl IDWritePixelSnapping_Impl for GlyphPainter_Impl {
 impl IDWriteTextRenderer_Impl for GlyphPainter_Impl {
     fn DrawGlyphRun(
         &self,
-        _: *const c_void,
+        context: *const c_void,
         x: f32,
         y: f32,
         mode: DWRITE_MEASURING_MODE,
@@ -101,9 +105,18 @@ impl IDWriteTextRenderer_Impl for GlyphPainter_Impl {
                 .collect();
             adjusted.glyphOffsets = offsets.as_ptr();
         }
-        unsafe {
-            self.target
-                .DrawGlyphRun(Vector2 { X: x, Y: y }, &*adjusted, &self.brush, mode);
+        // DirectWrite calls us synchronously, including for inline objects.
+        let output = unsafe { context.cast_mut().cast::<Destination<'_, '_>>().as_mut() }
+            .ok_or(E_POINTER)?;
+        match output {
+            Destination::Bitmap(target, brush) => unsafe {
+                target.DrawGlyphRun(Vector2 { X: x, Y: y }, &*adjusted, &**brush, mode);
+            },
+            Destination::Mask(mask) => {
+                let origin = mask.run_origin(x, y, run, self.scale);
+                mask.paint(&adjusted, origin, y, mode)
+                    .inspect_err(|_| self.failed.set(true))?;
+            }
         }
         Ok(())
     }
@@ -116,6 +129,7 @@ impl IDWriteTextRenderer_Impl for GlyphPainter_Impl {
         _: *const DWRITE_UNDERLINE,
         _: Ref<'_, IUnknown>,
     ) -> Result<()> {
+        self.failed.set(true);
         Err(E_NOTIMPL.into())
     }
     fn DrawStrikethrough(
@@ -126,6 +140,7 @@ impl IDWriteTextRenderer_Impl for GlyphPainter_Impl {
         _: *const DWRITE_STRIKETHROUGH,
         _: Ref<'_, IUnknown>,
     ) -> Result<()> {
+        self.failed.set(true);
         Err(E_NOTIMPL.into())
     }
     fn DrawInlineObject(
@@ -139,7 +154,15 @@ impl IDWriteTextRenderer_Impl for GlyphPainter_Impl {
         effect: Ref<'_, IUnknown>,
     ) -> Result<()> {
         // DirectWrite supplies the trimming sign as a separate inline layout.
-        // Send its glyphs through this same renderer as the text it follows.
+        // Keep its continuous layout with the preceding text when Direct2D
+        // paints the sign, just as when that ellipsis is typed literally.
+        if matches!(
+            unsafe { context.cast::<Destination<'_, '_>>().as_ref() },
+            Some(Destination::Mask(_))
+        ) {
+            self.failed.set(true);
+            return Err(E_NOTIMPL.into());
+        }
         unsafe {
             object.ok()?.Draw(
                 (!context.is_null()).then_some(context),
@@ -151,6 +174,34 @@ impl IDWriteTextRenderer_Impl for GlyphPainter_Impl {
                 effect.as_ref(),
             )
         }
+        .inspect_err(|_| self.failed.set(true))
+    }
+}
+
+fn draw_to(
+    layout: &IDWriteTextLayout,
+    origin: Vector2,
+    scale: f32,
+    mut destination: Destination<'_, '_>,
+) -> Result<()> {
+    let renderer = ComObject::new(GlyphPainter {
+        scale,
+        failed: Cell::new(false),
+    });
+    let context = (&raw mut destination).cast();
+    unsafe {
+        layout.Draw(
+            Some(context),
+            renderer.as_interface::<IDWriteTextRenderer>(),
+            origin.X,
+            origin.Y,
+        )?;
+    }
+    // IDWriteTextLayout can return S_OK even if an inline drawing callback failed.
+    if renderer.failed.get() {
+        Err(E_NOTIMPL.into())
+    } else {
+        Ok(())
     }
 }
 
@@ -161,13 +212,151 @@ pub(super) fn draw(
     origin: Vector2,
     scale: f32,
 ) -> Result<()> {
-    let renderer: IDWriteTextRenderer = GlyphPainter {
-        target: target.clone(),
-        brush: brush.clone(),
-        scale,
+    draw_to(layout, origin, scale, Destination::Bitmap(target, brush))
+}
+
+struct Pen {
+    y: f32,
+    layout_end: f32,
+    ideal_end: f64,
+}
+
+struct Coverage<'a> {
+    factory: &'a super::Factories,
+    params: &'a IDWriteRenderingParams,
+    bgr: bool,
+    size: [usize; 2],
+    pixels: Vec<u8>,
+    pen: Option<Pen>,
+}
+
+impl Coverage<'_> {
+    fn run_origin(&mut self, x: f32, y: f32, run: &DWRITE_GLYPH_RUN, scale: f32) -> f32 {
+        // WPF sums ideal advances before storing them in a compressed GlyphRun.
+        // A new line, tab or bidi reorder can give the next run a separate anchor.
+        let start = self
+            .pen
+            .as_ref()
+            .filter(|p| p.y == y && (p.layout_end - x).abs() < 0.001)
+            .map_or(f64::from(x), |p| p.ideal_end);
+        self.pen = None;
+        if !run.glyphAdvances.is_null() {
+            let advances =
+                unsafe { slice::from_raw_parts(run.glyphAdvances, run.glyphCount as usize) };
+            let units = 300. / f64::from(scale);
+            let width: f64 = advances
+                .iter()
+                .map(|&v| {
+                    let ideal = (f64::from(v) * units).round_ties_even();
+                    if v > 0. { ideal.max(1.) } else { ideal }
+                })
+                .sum();
+            let direction = if run.bidiLevel & 1 == 0 { 1. } else { -1. };
+            self.pen = Some(Pen {
+                y,
+                layout_end: x + direction * advances.iter().sum::<f32>(),
+                ideal_end: start + f64::from(direction) * width / units,
+            });
+        }
+        start as f32
     }
-    .into();
-    unsafe { layout.Draw(None, &renderer, origin.X, origin.Y) }
+
+    fn paint(
+        &mut self,
+        run: &DWRITE_GLYPH_RUN,
+        x: f32,
+        y: f32,
+        mode: DWRITE_MEASURING_MODE,
+    ) -> Result<()> {
+        // WPF realizes each glyph run at (0, 0), applies enhanced contrast,
+        // then positions its coverage strip at the fractional baseline origin.
+        let analysis = unsafe {
+            let rendering = run
+                .fontFace
+                .as_ref()
+                .ok_or(E_POINTER)?
+                .GetRecommendedRenderingMode(run.fontEmSize, 1., mode, self.params)?;
+            self.factory
+                .write
+                .CreateGlyphRunAnalysis(run, 1., None, rendering, mode, 0., 0.)?
+        };
+        let aliased = unsafe { analysis.GetAlphaTextureBounds(DWRITE_TEXTURE_ALIASED_1x1)? };
+        if aliased.right > aliased.left && aliased.bottom > aliased.top {
+            // Embedded bitmap glyphs need Direct2D's aliased-text path.
+            return Err(E_NOTIMPL.into());
+        }
+        let mut area = unsafe { analysis.GetAlphaTextureBounds(DWRITE_TEXTURE_CLEARTYPE_3x1)? };
+        let (left, baseline) = (x.floor() as i32, y.round() as i32);
+        let [width, height] = self.size.map(|v| v as i32);
+        // Include one source pixel to the left for subpixel interpolation.
+        area.left = area.left.max(-left - 1);
+        area.right = area.right.min(width - left);
+        area.top = area.top.max(-baseline);
+        area.bottom = area.bottom.min(height - baseline);
+        if area.left >= area.right || area.top >= area.bottom {
+            return Ok(());
+        }
+        let stride = 3 * (area.right - area.left) as usize;
+        let mut strip = vec![0u8; stride * (area.bottom - area.top) as usize];
+        unsafe { analysis.CreateAlphaTexture(DWRITE_TEXTURE_CLEARTYPE_3x1, &area, &mut strip)? };
+        for value in &mut strip {
+            *value = self.factory.contrast[usize::from(*value)];
+        }
+        let phase = (x - x.floor()) * 3.;
+        let shift = phase.floor() as usize;
+        let blend = ((phase - shift as f32) * 65536.) as u32;
+        let dst_x = left + area.left;
+        for (dy, row) in strip.chunks_exact(stride).enumerate() {
+            let dst_row = (baseline + area.top + dy as i32) as usize * self.size[0];
+            for sub in 0..stride + 3 {
+                let px = dst_x + (sub / 3) as i32;
+                if !(0..width).contains(&px) {
+                    continue;
+                }
+                let sample = |offset| {
+                    sub.checked_sub(offset)
+                        .and_then(|i| row.get(i))
+                        .copied()
+                        .unwrap_or(0) as u32
+                };
+                let alpha =
+                    (sample(shift) * (65536 - blend) + sample(shift + 1) * blend + 32768) >> 16;
+                let channel = if self.bgr { sub % 3 } else { 2 - sub % 3 };
+                let dst = &mut self.pixels[4 * (dst_row + px as usize) + channel];
+                *dst = (alpha + ((255 - alpha) * u32::from(*dst) + 127) / 255) as u8;
+            }
+        }
+        Ok(())
+    }
+}
+
+pub(super) fn coverage(
+    factory: &super::Factories,
+    params: &IDWriteRenderingParams,
+    layout: &IDWriteTextLayout,
+    origin: Vector2,
+    scale: f32,
+    size: [usize; 2],
+) -> Option<Vec<u8>> {
+    let geometry = unsafe { params.GetPixelGeometry() };
+    if unsafe { params.GetClearTypeLevel() } != 1.
+        || !matches!(
+            geometry,
+            DWRITE_PIXEL_GEOMETRY_RGB | DWRITE_PIXEL_GEOMETRY_BGR
+        )
+    {
+        return None;
+    }
+    let mut mask = Coverage {
+        factory,
+        params,
+        size,
+        bgr: geometry == DWRITE_PIXEL_GEOMETRY_BGR,
+        pixels: vec![0; size[0] * size[1] * 4],
+        pen: None,
+    };
+    draw_to(layout, origin, scale, Destination::Mask(&mut mask)).ok()?;
+    Some(mask.pixels)
 }
 
 #[cfg(test)]

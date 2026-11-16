@@ -195,6 +195,68 @@ impl Factories {
             if width > max_size || height > max_size || width.checked_mul(height)? > 1_048_576 {
                 return None;
             }
+            let origin = windows_numerics::Vector2 {
+                X: draw_x + fraction,
+                Y: f32::from(key.origin[1]) / 64.,
+            };
+            let params = if key.colors.is_some() {
+                &self.lcd_coverage
+            } else {
+                &self.coverage
+            };
+            let scale = f32::from_bits(key.scale);
+            let size = [width, height];
+            let bytes = glyphs::coverage(self, params, &layout, origin, scale, size)
+                .or_else(|| self.bitmap_coverage(&layout, params, origin, fraction, scale, size))?;
+            let colors = key.colors.map(|(ink, backdrop)| {
+                let channels = [
+                    (ink.r(), backdrop.r()),
+                    (ink.g(), backdrop.g()),
+                    (ink.b(), backdrop.b()),
+                ];
+                channels.map(|(fg, bg)| {
+                    std::array::from_fn::<_, 256, _>(|i| compose_glyph(i as u8, fg, bg, self.gamma))
+                })
+            });
+            let mask = bytes
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .map(|px| {
+                    if let Some([red, green, blue]) = &colors {
+                        if px[..3] == [0, 0, 0] {
+                            Color32::TRANSPARENT
+                        } else {
+                            Color32::from_rgb(
+                                red[px[2] as usize],
+                                green[px[1] as usize],
+                                blue[px[0] as usize],
+                            )
+                        }
+                    } else {
+                        // For an alpha bitmap WPF samples the center of the coverage texture.
+                        Color32::from_white_alpha(px[1])
+                    }
+                })
+                .collect();
+            Some((
+                ColorImage::new([width, height], mask),
+                vec2(metrics.widthIncludingTrailingWhitespace, metrics.height),
+            ))
+        }
+    }
+
+    fn bitmap_coverage(
+        &self,
+        layout: &IDWriteTextLayout,
+        params: &IDWriteRenderingParams,
+        mut origin: windows_numerics::Vector2,
+        fraction: f32,
+        scale: f32,
+        [width, height]: [usize; 2],
+    ) -> Option<Vec<u8>> {
+        origin.X -= fraction;
+        unsafe {
             let bitmap = self
                 .images
                 .CreateBitmap(
@@ -233,21 +295,13 @@ impl Factories {
             let brush = target.CreateSolidColorBrush(&white, None).ok()?;
             target.BeginDraw();
             target.Clear(Some(&black));
-            target.SetTextRenderingParams(if key.colors.is_some() {
-                &self.lcd_coverage
-            } else {
-                &self.coverage
-            });
+            target.SetTextRenderingParams(params);
             target.SetTextAntialiasMode(D2D1_TEXT_ANTIALIAS_MODE_CLEARTYPE);
-            let origin = windows_numerics::Vector2 {
-                X: draw_x,
-                Y: f32::from(key.origin[1]) / 64.,
-            };
-            if glyphs::draw(&target, &brush, &layout, origin, f32::from_bits(key.scale)).is_err() {
+            if glyphs::draw(&target, &brush, layout, origin, scale).is_err() {
                 // An inline object or decoration can require the system renderer.
                 // Clear any runs already painted before replaying the whole layout.
                 target.Clear(Some(&black));
-                target.DrawTextLayout(origin, &layout, &brush, D2D1_DRAW_TEXT_OPTIONS_NONE);
+                target.DrawTextLayout(origin, layout, &brush, D2D1_DRAW_TEXT_OPTIONS_NONE);
             }
             target.EndDraw(None, None).ok()?;
             let mut bytes = vec![0; width * height * 4];
@@ -260,47 +314,12 @@ impl Factories {
                 }
             }
             if fraction > 0. {
-                let bgr = key.colors.is_some()
-                    && self.lcd_coverage.GetPixelGeometry() == DWRITE_PIXEL_GEOMETRY_BGR;
+                let bgr = params.GetPixelGeometry() == DWRITE_PIXEL_GEOMETRY_BGR;
                 for row in bytes.chunks_exact_mut(width * 4) {
                     translate_coverage(row, fraction, bgr);
                 }
             }
-            let colors = key.colors.map(|(ink, backdrop)| {
-                let channels = [
-                    (ink.r(), backdrop.r()),
-                    (ink.g(), backdrop.g()),
-                    (ink.b(), backdrop.b()),
-                ];
-                channels.map(|(fg, bg)| {
-                    std::array::from_fn::<_, 256, _>(|i| compose_glyph(i as u8, fg, bg, self.gamma))
-                })
-            });
-            let mask = bytes
-                .as_chunks::<4>()
-                .0
-                .iter()
-                .map(|px| {
-                    if let Some([red, green, blue]) = &colors {
-                        if px[..3] == [0, 0, 0] {
-                            Color32::TRANSPARENT
-                        } else {
-                            Color32::from_rgb(
-                                red[px[2] as usize],
-                                green[px[1] as usize],
-                                blue[px[0] as usize],
-                            )
-                        }
-                    } else {
-                        // For an alpha bitmap WPF samples the center of the coverage texture.
-                        Color32::from_white_alpha(px[1])
-                    }
-                })
-                .collect();
-            Some((
-                ColorImage::new([width, height], mask),
-                vec2(metrics.widthIncludingTrailingWhitespace, metrics.height),
-            ))
+            Some(bytes)
         }
     }
 }
@@ -774,6 +793,34 @@ mod tests {
         }
         let _apartment = Apartment;
         let factories = Factories::new().unwrap();
+        // The WPF run for "변경" starts at 212.0933 DIP in the mixed label.
+        // A leading Segoe UI space (3.56 DIP) plus 34/64 DIP places that
+        // same run at 4.09125 DIP on its own. Both masks must keep the phase.
+        let mixed = RunKey {
+            text: "LicenseDocument { Title = 저작권 및 변경 고지".into(),
+            pixels: 13_f32.to_bits(),
+            scale: 1_f32.to_bits(),
+            semibold: false,
+            line: LineWidth::Natural,
+            origin: [0; 2],
+            colors: None,
+        };
+        let (label, _) = factories.render(&mixed, 4096).unwrap();
+        let (fragment, _) = factories
+            .render(
+                &RunKey {
+                    text: " 변경".into(),
+                    origin: [34, 0],
+                    ..mixed
+                },
+                4096,
+            )
+            .unwrap();
+        for y in 0..label.height() {
+            for x in 0..26 {
+                assert!(label[(212 + x, y)].a().abs_diff(fragment[(4 + x, y)].a()) <= 2);
+            }
+        }
         let mut previous_width = 0;
         for pixels in [13.0_f32, 26.0] {
             let run = RunKey {
