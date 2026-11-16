@@ -45,6 +45,78 @@ fn gap_after_single_line(ui: &mut Ui, drawn_height: f32, vertical_padding: f32, 
     ui.add_space(gap + correction);
 }
 
+#[cfg(windows)]
+fn rename_content_height() -> f32 {
+    let title = crate::windows_text::line_height(20.).unwrap_or(27.);
+    let text = crate::windows_text::line_height(13.).unwrap_or(17.);
+    // Two 18-DIP gaps, window margins, text field and button padding.
+    142. + title + text * 2.
+}
+
+#[cfg(windows)]
+fn auto_size_edge_color(last_row: f32, background: Color32) -> Color32 {
+    // WPF retains the fractional height of both the Window background and its
+    // ScrollViewer inside a whole-pixel HWND. Edges snap to 1/16 pixel before
+    // scan conversion across eight vertical samples.
+    let samples = ((last_row * 16.).round() as u32).div_ceil(2).min(8);
+    let alpha = (255 * samples + 4) / 8;
+    let channel = |component: u8| {
+        let first = (u32::from(component) * samples + 4) / 8;
+        (first + (first * (255 - alpha) + 127) / 255) as u8
+    };
+    Color32::from_rgb(
+        channel(background.r()),
+        channel(background.g()),
+        channel(background.b()),
+    )
+}
+
+#[cfg(windows)]
+fn paint_auto_size_edge(ctx: &Context, natural_height: f32, background: Color32) {
+    let scale = ctx.pixels_per_point();
+    let client = ctx.content_rect();
+    let pixels = natural_height * scale;
+    let height = (client.height() * scale).round();
+    if height != pixels.ceil() {
+        return;
+    }
+    let color = auto_size_edge_color(pixels - (height - 1.), background);
+    if color == background {
+        return;
+    }
+    let strip = Rect::from_min_max(
+        pos2(client.left(), client.bottom() - 1. / scale),
+        client.right_bottom(),
+    );
+    let mut mesh = Mesh::default();
+    mesh.add_colored_rect(strip, color);
+    ctx.layer_painter(LayerId::background()).add(mesh);
+}
+
+#[cfg(all(windows, test))]
+#[test]
+fn fractional_dialog_edge_matches_wpf_background_layers() {
+    // Two equal brushes drawn by WPF's RenderTargetBitmap, in both app themes.
+    let light = [0, 58, 107, 149, 184, 211, 230, 241, 245];
+    let dark = [0, 4, 7, 8, 10, 12, 14, 14, 14];
+    for (n, (&light, &dark)) in light.iter().zip(&dark).enumerate() {
+        let coverage = n as f32 / 8.;
+        for (background, expected) in [(245, light), (14, dark)] {
+            assert_eq!(
+                auto_size_edge_color(coverage, Color32::from_gray(background)),
+                Color32::from_gray(expected),
+            );
+        }
+    }
+    // These are the measured client edges at 100% and 175% in the rename dialog.
+    for (coverage, expected) in [(0.18, 107), (0.565, 211)] {
+        assert_eq!(
+            auto_size_edge_color(coverage, Color32::from_gray(245)).r(),
+            expected
+        );
+    }
+}
+
 fn full_button(ui: &mut Ui, title: &str, primary: bool, p: Palette) -> bool {
     let fill = if primary { p.accent } else { p.card };
     let ink = if primary { p.on } else { p.ink };
@@ -239,10 +311,7 @@ impl Dashboard {
                 #[cfg(windows)]
                 let height = {
                     let scale = ctx.pixels_per_point();
-                    let title = crate::windows_text::line_height(20.).unwrap_or(27.);
-                    let text = crate::windows_text::line_height(13.).unwrap_or(17.);
-                    // Two 18-DIP gaps, window margins, text field and button padding.
-                    ((142. + title + text * 2.) * scale).ceil() / scale
+                    (rename_content_height() * scale).ceil() / scale
                 };
                 #[cfg(target_os = "macos")]
                 let height = 199.;
@@ -316,7 +385,10 @@ impl Dashboard {
                             close |= self.connect_panel(ui, c, p, &mut browse);
                         });
                         let scale = if MAC { 1. } else { ctx.pixels_per_point() };
-                        let pixels = (scroll.content_size.y + 56.) * scale;
+                        let natural_height = scroll.content_size.y + 56.;
+                        let pixels = natural_height * scale;
+                        #[cfg(windows)]
+                        paint_auto_size_edge(ctx, natural_height.min(limit), background);
                         // SizeToContent reserves the full natural extent of the controls.
                         let measured = (pixels.ceil() / scale).min(limit);
                         if c.content_height != Some(measured) {
@@ -328,6 +400,8 @@ impl Dashboard {
                         }
                     }
                     Dialog::Rename(a, name) => {
+                        #[cfg(windows)]
+                        paint_auto_size_edge(ctx, rename_content_height(), background);
                         form_text(ui, "계정 이름", 20., true, p.ink);
                         ui.add_space(18.);
                         let field = ui.add(
