@@ -1,13 +1,13 @@
 use super::{bitmap_pixels, bitmap_rep};
 use block2::StackBlock;
 use eframe::egui::*;
-use objc2::{MainThreadMarker, MainThreadOnly, rc::Retained};
+use objc2::{MainThreadMarker, MainThreadOnly, msg_send, rc::Retained, sel};
 use objc2_app_kit::{
-    NSAppearanceCustomization, NSApplication, NSButton, NSCellImagePosition, NSControl,
-    NSControlSize, NSFont, NSImage, NSPopUpButton, NSSegmentDistribution, NSSegmentSwitchTracking,
-    NSSegmentedControl, NSSwitch, NSUserInterfaceLayoutDirection,
+    NSAppearance, NSAppearanceCustomization, NSApplication, NSButton, NSCellImagePosition, NSColor,
+    NSControl, NSControlSize, NSFont, NSImage, NSPopUpButton, NSSegmentDistribution,
+    NSSegmentSwitchTracking, NSSegmentedControl, NSSwitch, NSUserInterfaceLayoutDirection,
 };
-use objc2_foundation::{NSArray, NSPoint, NSRect, NSSize, NSString};
+use objc2_foundation::{NSArray, NSObjectProtocol, NSPoint, NSRect, NSSize, NSString};
 
 #[derive(Clone)]
 struct ControlImage {
@@ -60,7 +60,26 @@ fn control_image(
     }
 
     let control = make(main);
-    control.setAppearance(Some(&appearance));
+    let switch = control.downcast_ref::<NSSwitch>().is_some();
+    let accent_control = switch || control.downcast_ref::<NSPopUpButton>().is_some();
+    let tinted: Option<Retained<NSAppearance>> =
+        if accent_control && appearance.respondsToSelector(sel!(appearanceByApplyingTintColor:)) {
+            let color = tint.unwrap_or(if ui.visuals().dark_mode {
+                Color32::WHITE
+            } else {
+                Color32::BLACK
+            });
+            let [r, g, b] = [color.r(), color.g(), color.b()].map(|v| f64::from(v) / 255.);
+            let color = NSColor::colorWithSRGBRed_green_blue_alpha(r, g, b, 1.);
+            // AppKit's per-appearance tint is also used by WebKit for native form
+            // controls. It is SPI: check availability and scope it to this control.
+            unsafe { msg_send![&*appearance, appearanceByApplyingTintColor: &*color] }
+        } else {
+            None
+        };
+    let native_tint = tinted.is_some();
+    let appearance = tinted.as_deref().unwrap_or(&appearance);
+    control.setAppearance(Some(appearance));
     control.setEnabled(enabled);
     let alignment = NSRect::new(NSPoint::ZERO, NSSize::new(size.x.into(), size.y.into()));
     let frame = control.frameForAlignmentRect(alignment);
@@ -74,10 +93,9 @@ fn control_image(
         control.cacheDisplayInRect_toBitmapImageRep(control.bounds(), &rep);
     }));
     let mut rgba = bitmap_pixels(&rep)?;
-    let switch = control.downcast_ref::<NSSwitch>().is_some();
-    if enabled && (switch || control.downcast_ref::<NSPopUpButton>().is_some()) {
-        // AppKit uses the system accent for the switch track and the pop-up
-        // indicator. Keep the native shading and apply the dashboard's tint.
+    if enabled && accent_control && !native_tint {
+        // Older systems can still draw the thumb, shadow and shading with the
+        // system accent. Recolor that mask when a tinted appearance is unavailable.
         let rtl =
             control.userInterfaceLayoutDirection() == NSUserInterfaceLayoutDirection::RightToLeft;
         let (width, height) = rgba.dimensions();

@@ -19,6 +19,7 @@ CONNECTION_ERROR = "검증용 연결 오류"
 FILE_ERROR_TEXT = "[connection] " + CONNECTION_ERROR
 TIMEOUT_TEXT = "[dashboard_timeout] 연결 결과를 받지 못했습니다. 계정 목록을 확인한 뒤 다시 시도하세요."
 EXITED_LOGIN_TEXT = "로그인이 완료되지 않았습니다. 다른 Codex 로그인 창을 닫고 다시 시도하세요."
+PROVIDERS = ("codex", "claude", "gemini")
 
 
 class Controls:
@@ -547,6 +548,27 @@ def capture_windows(dashboard, program, folder, library, fixture, output, theme,
                         "used": controls.request("help", f"Claude {today - timedelta(days=1)}, 240 tokens"),
                         "unused": controls.request("help", f"Claude {today - timedelta(days=2)}, 0 tokens"),
                     }
+            observed["providerSwitches"] = {}
+            for provider in PROVIDERS:
+                state = deepcopy(fixture)
+                account = state["settings"]["accounts"][0]
+                account.update(provider=provider, showInMenuBar=True)
+                label = f"{provider.title()}({account['name']}) 상단바에 표시"
+                show("accounts")
+                dashboard.send(app.stdin, {"state": {"_0": state}})
+                show("dashboard")
+                controls.request("present", label, {"found": True})
+                changes = []
+                for visible in (False, True):
+                    capture(f"switch-{provider}-{'on' if account['showInMenuBar'] else 'off'}")
+                    controls.request("press", label)
+                    reply = dashboard.wait_for(app.stdout, "menuBarVisibility")
+                    if reply != {"_0": account["id"], "_1": visible}:
+                        raise ValueError(f"{label}: unexpected switch command {reply}")
+                    changes.append(reply["_1"])
+                    account["showInMenuBar"] = visible
+                    dashboard.send(app.stdin, {"state": {"_0": state}})
+                observed["providerSwitches"][provider] = changes
         except (OSError, ValueError, KeyError, RuntimeError, EOFError, subprocess.SubprocessError) as error:
             observed["error"] = str(error)
         finally:
@@ -573,7 +595,8 @@ def compare_windows(dashboard, work, original, library):
     for theme in dashboard.THEMES:
         for route in (*dashboard.ROUTES, "remove", "message", "message-selected", "message-wrapped", "account-name-selected", "account-email-selected", "popover-sample", "popover-empty", "popover-overflow",
                       "source-path-selected", "settings-path-selected", "settings-bottom", "licenses-notice",
-                      "licenses-apache", "empty", "activity-empty", "activity"):
+                      "licenses-apache", "empty", "activity-empty", "activity",
+                      *(f"switch-{provider}-{state}" for provider in PROVIDERS for state in ("on", "off"))):
             name = f"{route}-{theme}"
             lhs, rhs = (dest / side / f"{name}.png" for side in ("original", "rust"))
             if not lhs.is_file() or not rhs.is_file():
@@ -619,7 +642,9 @@ def compare_windows(dashboard, work, original, library):
                                "unused": {"found": False, "help": None},
                            }
                            for side in ("original", "rust") for theme in dashboard.THEMES)
-    return app_mark_matches and message_matches and copied_accounts and documents_match and scroll_matches and activity_matches and all(row["identical"] for row in results["comparisons"].values())
+    switch_matches = all(results[side][theme].get("providerSwitches") == {p: [False, True] for p in PROVIDERS}
+                         for side in ("original", "rust") for theme in dashboard.THEMES)
+    return app_mark_matches and message_matches and copied_accounts and documents_match and scroll_matches and activity_matches and switch_matches and all(row["identical"] for row in results["comparisons"].values())
 
 
 def compare(dashboard, work, original, fixture, library):

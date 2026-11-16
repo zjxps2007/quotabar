@@ -20,31 +20,7 @@ jobs:
       - name: Automatic install, restart and rollback with a disposable signing key
         shell: pwsh
         run: ./windows/scripts/test-updater.ps1
-  switch-palette:
-    if: contains(github.event.head_commit.message, '[switch-palette]')
-    runs-on: macos-15
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          persist-credentials: false
-      - name: Inspect the macOS reference switch palette
-        run: |
-          target="$RUNNER_TEMP/SwitchPalette.app/Contents"
-          mkdir -p "$target/MacOS"
-          plutil -create xml1 "$target/Info.plist"
-          plutil -insert CFBundleIdentifier -string org.quotabar.test-switch-palette "$target/Info.plist"
-          plutil -insert CFBundleName -string SwitchPalette "$target/Info.plist"
-          plutil -insert CFBundleExecutable -string SwitchPalette "$target/Info.plist"
-          plutil -insert CFBundlePackageType -string APPL "$target/Info.plist"
-          swiftc macos/scripts/inspect-switch.swift -o "$target/MacOS/SwitchPalette"
-          "$target/MacOS/SwitchPalette" artifacts/appkit-switch-samples
-      - uses: actions/upload-artifact@v7
-        if: always()
-        with:
-          name: appkit-switch-samples
-          path: artifacts/appkit-switch-samples
   macos:
-    if: "!contains(github.event.head_commit.message, '[switch-palette]')"
     runs-on: macos-15
     timeout-minutes: 35
     steps:
