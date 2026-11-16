@@ -14,21 +14,47 @@ fn mask(ui: &Ui, pixels: [usize; 2], radius: f32, stroke: f32) -> Option<Texture
         return Some(texture);
     }
     let [w, h] = pixels;
-    let rep = bitmap_rep(w as isize, h as isize)?;
+    // The 1.2-point "today" outline straddles the cell boundary. Keep both
+    // halves when rasterizing it, including on a 1x display.
+    let samples = if stroke > 0. { 10 } else { 1 };
+    let factor = samples as f64;
+    let canvas = NSRect::new(
+        NSPoint::ZERO,
+        NSSize::new((w * samples) as f64, (h * samples) as f64),
+    );
+    let rep = bitmap_rep((w * samples) as isize, (h * samples) as isize)?;
     let context = NSGraphicsContext::graphicsContextWithBitmapImageRep(&rep)?;
     let shape = CALayer::layer();
-    shape.setBounds(NSRect::new(NSPoint::ZERO, NSSize::new(w as f64, h as f64)));
+    shape.setBounds(canvas);
     shape.setCornerCurve(unsafe { kCACornerCurveContinuous });
-    shape.setCornerRadius(f64::from(radius));
+    shape.setCornerRadius(f64::from(radius) * factor);
     let white = NSColor::whiteColor().CGColor();
     if stroke > 0. {
+        let half = f64::from(stroke) / 2.;
+        let inset = (half.ceil() - half) * factor;
+        shape.setFrame(NSRect::new(
+            NSPoint::new(inset, inset),
+            NSSize::new(
+                canvas.size.width - 2. * inset,
+                canvas.size.height - 2. * inset,
+            ),
+        ));
         shape.setBorderColor(Some(&white));
-        shape.setBorderWidth(f64::from(stroke));
+        shape.setBorderWidth(f64::from(stroke) * factor);
+        let container = CALayer::layer();
+        container.setBounds(canvas);
+        container.addSublayer(&shape);
+        container.renderInContext(&context.CGContext());
     } else {
         shape.setBackgroundColor(Some(&white));
+        shape.renderInContext(&context.CGContext());
     }
-    shape.renderInContext(&context.CGContext());
     let image = bitmap_pixels(&rep)?;
+    let image = if samples > 1 {
+        image::imageops::thumbnail(&image, w as u32, h as u32)
+    } else {
+        image
+    };
     if !image.pixels().any(|p| p[3] != 0) {
         return None;
     }
@@ -50,13 +76,15 @@ pub fn paint_cell(ui: &Ui, rect: Rect, radius: f32, fill: Color32, stroke: Strok
         return;
     }
     let scale = ui.ctx().pixels_per_point();
-    let paint = |bounds: Rect, radius: f32, width: f32, color: Color32| {
-        let bounds = bounds.round_to_pixels(scale);
+    let rect = rect.round_to_pixels(scale);
+    let paint = |width: f32, color: Color32| {
+        let half = width / 2.;
+        let bounds = rect.expand((half * scale).ceil() / scale);
         let size = (bounds.size() * scale).round();
         if let Some(texture) = mask(
             ui,
             [size.x as usize, size.y as usize],
-            radius * scale,
+            (radius + half) * scale,
             width * scale,
         ) {
             ui.painter().image(
@@ -67,19 +95,18 @@ pub fn paint_cell(ui: &Ui, rect: Rect, radius: f32, fill: Color32, stroke: Strok
             );
         } else if width > 0. {
             ui.painter().rect_stroke(
-                bounds,
+                rect,
                 radius.round() as u8,
                 Stroke::new(width, color),
-                StrokeKind::Inside,
+                StrokeKind::Middle,
             );
         } else {
             ui.painter()
                 .rect_filled(bounds, radius.round() as u8, color);
         }
     };
-    paint(rect, radius, 0., fill);
+    paint(0., fill);
     if stroke.width > 0. {
-        let half = stroke.width / 2.;
-        paint(rect.expand(half), radius + half, stroke.width, stroke.color);
+        paint(stroke.width, stroke.color);
     }
 }
