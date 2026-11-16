@@ -11,6 +11,9 @@ import time
 from uuid import UUID
 
 
+BANNER_MESSAGE = "샘플 계정의 연결을 다시 확인하세요."
+
+
 class Controls:
     def __init__(self, folder, child):
         self.folder = folder
@@ -278,7 +281,7 @@ def activity_fixtures(fixture):
 def capture_windows(dashboard, program, folder, library, fixture, output, theme, pixel_reader):
     folder.mkdir()
     env = {**os.environ, **dashboard.fixture_environment(), "DYLD_INSERT_LIBRARIES": str(library),
-           "QUOTABAR_TEST_UI_DIRECTORY": str(folder)}
+           "QUOTABAR_TEST_UI_DIRECTORY": str(folder), "QUOTABAR_TEST_PRIVATE_PASTEBOARD": "1"}
     if program != dashboard.APP:
         env["QUOTABAR_TEST_REFERENCE_INPUT"] = "1"
     observed = {}
@@ -321,9 +324,16 @@ def capture_windows(dashboard, program, folder, library, fixture, output, theme,
                         observed["appMark"] = controls.request("help", "QuotaBar 로고", {"found": True, "help": None})
                     except TimeoutError as error:
                         observed["appMark"] = {"error": str(error)}
-                    message = "샘플 계정의 연결을 다시 확인하세요."
+                    message = BANNER_MESSAGE
                     dashboard.send(app.stdin, {"state": {"_0": {**fixture, "message": message}}})
                     capture("message")
+                    try:
+                        controls.request("selectBanner", message)
+                        capture("message-selected")
+                        controls.request("copyBanner")
+                        observed["messageClipboard"] = controls.request("bannerClipboard")
+                    except (ValueError, TimeoutError) as error:
+                        observed["messageCopyError"] = str(error)
                     try:
                         controls.request("dismissBanner", message)
                         observed["messageDismissal"] = dashboard.wait_for(app.stdout, "message")
@@ -447,7 +457,7 @@ def compare_windows(dashboard, work, original, library):
             results[side][theme] = capture_windows(dashboard, program, work / f"windows-{side}-{theme}",
                                                   library, fixture, output, theme, original)
     for theme in dashboard.THEMES:
-        for route in (*dashboard.ROUTES, "remove", "message", "message-wrapped", "popover-sample", "popover-empty", "popover-overflow",
+        for route in (*dashboard.ROUTES, "remove", "message", "message-selected", "message-wrapped", "popover-sample", "popover-empty", "popover-overflow",
                       "settings-bottom", "licenses-notice", "licenses-apache", "empty", "activity-empty", "activity"):
             name = f"{route}-{theme}"
             lhs, rhs = (dest / side / f"{name}.png" for side in ("original", "rust"))
@@ -472,6 +482,7 @@ def compare_windows(dashboard, work, original, library):
                            for side in ("original", "rust") for theme in dashboard.THEMES)
     message_matches = all(results[side][theme].get("messageDismissal") == {}
                           and results[side][theme].get("messageAfterDismissal") == {"found": False, "help": None}
+                          and results[side][theme].get("messageClipboard") == {"text": BANNER_MESSAGE}
                           for side in ("original", "rust") for theme in dashboard.THEMES)
     documents_match = all(results[side][theme].get("licenseDocuments") == ["NOTICE", "LICENSE", "NOTICE", "closed"]
                           and results[side][theme].get("licenseEscapeClosed") is True

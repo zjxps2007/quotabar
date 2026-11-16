@@ -3,6 +3,7 @@
 #import <AppKit/AppKit.h>
 #import <ScreenCaptureKit/ScreenCaptureKit.h>
 #import <Vision/Vision.h>
+#import <objc/runtime.h>
 #include <math.h>
 #include <stdlib.h>
 
@@ -10,6 +11,15 @@ static NSWindow *dashboardWindow(void) {
     for (NSWindow *window in NSApp.windows)
         if (window.isVisible && !window.sheetParent && [window.title isEqual:@"QuotaBar"]) return window;
     return nil;
+}
+
+// Only window-comparison fixtures use this pasteboard, including the app's
+// normal Command-C handler. Leave the user's general pasteboard untouched.
+static NSPasteboard *fixturePasteboard(id receiver, SEL selector) {
+    static NSPasteboard *board;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{ board = [NSPasteboard pasteboardWithUniqueName]; });
+    return board;
 }
 
 // Both helpers use this identical WindowServer capture path. Only the current
@@ -393,11 +403,35 @@ static NSDictionary *perform(NSDictionary *request) {
     NSWindow *window = dashboardWindow();
     if (!window) return @{@"pending": @"dashboard window"};
     NSString *op = request[@"op"], *label = request[@"label"];
-    if ([op isEqual:@"dismissBanner"]) {
+    if ([op isEqual:@"selectBanner"] || [op isEqual:@"dismissBanner"]) {
         id message = control(window, label, [NSMutableArray array], YES);
         if (![message respondsToSelector:@selector(accessibilityFrame)]) return @{@"pending": @"message text"};
         NSRect textFrame = [message accessibilityFrame];
         if (NSIsEmptyRect(textFrame)) return @{@"pending": @"message frame"};
+        if ([op isEqual:@"selectBanner"]) {
+            [fixturePasteboard(nil, NULL) clearContents];
+            CGFloat left = NSMinX(textFrame) + 0.5, right = NSMaxX(textFrame) + 2;
+            CGFloat middle = NSMidY(textFrame);
+            void (^post)(NSEventType, CGFloat) = ^(NSEventType type, CGFloat x) {
+                NSPoint location = [window convertPointFromScreen:NSMakePoint(x, middle)];
+                NSEvent *event = [NSEvent mouseEventWithType:type location:location modifierFlags:0
+                    timestamp:NSProcessInfo.processInfo.systemUptime windowNumber:window.windowNumber context:nil
+                    eventNumber:0 clickCount:1 pressure:type == NSEventTypeLeftMouseUp ? 0 : 1];
+                [NSApp postEvent:event atStart:NO];
+            };
+            post(NSEventTypeMouseMoved, left);
+            post(NSEventTypeLeftMouseDown, left);
+            // AppKit may enter mouse tracking in mouseDown. Deliver the drag
+            // and release across actual frames in both tracking and default modes.
+            for (int step = 1; step <= 3; ++step) {
+                NSTimer *timer = [NSTimer timerWithTimeInterval:0.07 * step repeats:NO block:^(NSTimer *unused) {
+                    post(step == 3 ? NSEventTypeLeftMouseUp : NSEventTypeLeftMouseDragged,
+                         step == 1 ? (left + right) * 0.5 : right);
+                }];
+                [NSRunLoop.mainRunLoop addTimer:timer forMode:NSRunLoopCommonModes];
+            }
+            return @{@"dragged": @YES};
+        }
         NSRect content = [window convertRectToScreen:[window.contentView convertRect:window.contentView.bounds toView:nil]];
         // Both dashboards place the trailing close symbol inside 14 points of padding.
         NSPoint point = [window convertPointFromScreen:NSMakePoint(NSMaxX(content) - 20, NSMidY(textFrame))];
@@ -408,6 +442,20 @@ static NSDictionary *perform(NSDictionary *request) {
             [NSApp postEvent:event atStart:NO];
         }
         return @{@"clicked": @"dismiss"};
+    }
+    if ([op isEqual:@"copyBanner"]) {
+        for (NSNumber *kind in @[@(NSEventTypeKeyDown), @(NSEventTypeKeyUp)]) {
+            NSEvent *key = [NSEvent keyEventWithType:kind.unsignedIntegerValue location:NSZeroPoint
+                modifierFlags:NSEventModifierFlagCommand timestamp:NSProcessInfo.processInfo.systemUptime
+                windowNumber:window.windowNumber context:nil characters:@"c" charactersIgnoringModifiers:@"c"
+                isARepeat:NO keyCode:8];
+            [NSApp postEvent:key atStart:NO];
+        }
+        return @{@"shortcut": @"Command-C"};
+    }
+    if ([op isEqual:@"bannerClipboard"]) {
+        NSString *value = [fixturePasteboard(nil, NULL) stringForType:NSPasteboardTypeString];
+        return value ? @{@"text": value} : @{@"pending": @"copied banner text"};
     }
     if ([op isEqual:@"scrollContent"]) return scrollContent(window);
     if ([op isEqual:@"scrollerPosition"] || [op isEqual:@"pageSettings"])
@@ -558,6 +606,10 @@ __attribute__((constructor)) static void startDashboardDriver(void) {
     const char *path = getenv("QUOTABAR_TEST_UI_DIRECTORY");
     if (!path) return;
     @autoreleasepool {
+        if (getenv("QUOTABAR_TEST_PRIVATE_PASTEBOARD")) {
+            Method general = class_getClassMethod(NSPasteboard.class, @selector(generalPasteboard));
+            method_setImplementation(general, (IMP)fixturePasteboard);
+        }
         NSURL *dir = [NSURL fileURLWithFileSystemRepresentation:path isDirectory:YES relativeToURL:nil];
         NSURL *input = [dir URLByAppendingPathComponent:@"request.json"];
         NSURL *output = [dir URLByAppendingPathComponent:@"reply.json"];

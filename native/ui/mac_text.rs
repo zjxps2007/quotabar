@@ -270,14 +270,25 @@ impl Renderer {
                 color,
                 format.extra_letter_spacing,
             )?;
-            let origin = text.pos + row.pos.to_vec2() + vec2(0., (row.size.y - run.size.y) * 0.5);
-            shapes.push(run.shape(origin, ctx.pixels_per_point(), color));
+            let origin = text.pos + row.pos.to_vec2();
+            shapes.push(run.centered_shape(
+                origin + vec2(0., row.size.y / 2.),
+                ctx.pixels_per_point(),
+                color,
+            ));
         }
         Some(Shape::Vec(shapes))
     }
 }
 
 impl Run {
+    fn centered_shape(&self, left_center: Pos2, scale: f32, color: Color32) -> Shape {
+        // Center the Core Text bitmap, including its separately rounded ascent
+        // and descent. AppKit puts an odd leftover backing pixel below the run.
+        let top = (left_center.y * scale - self.texture.size_vec2().y / 2.).floor() / scale;
+        self.shape(pos2(left_center.x, top), scale, color)
+    }
+
     fn shape(&self, pos: Pos2, scale: f32, color: Color32) -> Shape {
         let pos = pos2(
             (pos.x * scale).round() / scale,
@@ -497,13 +508,16 @@ fn draw_label(
     };
     let (rect, response) = ui.allocate_exact_size(vec2(run.size.x, height), Sense::hover());
     let scale = ui.ctx().pixels_per_point();
-    let top = if matches!(line_box, LineBox::Centered) {
-        let y = (rect.center().y * scale - run.texture.size_vec2().y / 2.).floor() / scale;
-        pos2(rect.left(), y)
+    let shape = if matches!(line_box, LineBox::Centered) {
+        run.centered_shape(rect.left_center(), scale, color)
     } else {
-        rect.min + vec2(0., (height - run.size.y) * 0.5)
+        run.shape(
+            rect.min + vec2(0., (height - run.size.y) * 0.5),
+            scale,
+            color,
+        )
     };
-    ui.painter().add(run.shape(top, scale, color));
+    ui.painter().add(shape);
     response.widget_info(|| WidgetInfo::labeled(WidgetType::Label, ui.is_enabled(), text));
     Some(response)
 }
