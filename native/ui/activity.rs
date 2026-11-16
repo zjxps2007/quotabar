@@ -613,8 +613,9 @@ impl Dashboard {
             }
             #[cfg(windows)]
             {
-                label(ui, summary, 11., true, p.ink);
-                label(ui, peak, 10., false, p.muted);
+                let footer = crate::windows_text::TextStack::inline(ui);
+                footer.label(ui, &summary, 11., true, p.ink);
+                footer.label(ui, &peak, 10., false, p.muted);
             }
         }
         ui.add_space(12.);
