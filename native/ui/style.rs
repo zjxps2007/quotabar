@@ -811,6 +811,37 @@ mod button_tests {
     use super::*;
 
     #[test]
+    fn stacked_link_centers_its_label_in_the_full_hit_area() {
+        let ctx = Context::default();
+        let p = Palette::new(&ctx, "light");
+        p.apply(&ctx);
+        let title = "계정 관리에서 확인 →";
+        let mut hit = Rect::NOTHING;
+        let input = RawInput {
+            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(252., 100.))),
+            ..Default::default()
+        };
+        let frame = ctx.run(input, |ctx| {
+            CentralPanel::default().frame(Frame::NONE).show(ctx, |ui| {
+                hit = link(ui, title, p, p.card).rect;
+            });
+        });
+        let label = frame
+            .shapes
+            .iter()
+            .find_map(|item| match &item.shape {
+                Shape::Text(text) if text.galley.text() == title => {
+                    Some(Rect::from_min_size(text.pos, text.galley.size()))
+                }
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(hit.width(), 252.);
+        assert!(label.width() < hit.width() && label.height() < hit.height());
+        assert!(label.center().distance(hit.center()) < 1.);
+    }
+
+    #[test]
     fn space_release_focus_loss_and_composed_button_states() {
         let ctx = Context::default();
         let p = Palette::new(&ctx, "light");
@@ -869,9 +900,8 @@ mod button_tests {
 }
 pub fn link(ui: &mut Ui, s: &str, p: Palette, backdrop: Color32) -> Response {
     button_feedback(ui, backdrop, p.ink, vec2(-3., 1.), |ui| {
-        let button = Button::new(rich(s, 12., false, p.ink)).frame(false);
         #[cfg(windows)]
-        let button = {
+        {
             let text = crate::windows_text::natural_size(ui, s, 12., false).unwrap_or_else(|| {
                 ui.painter()
                     .layout_no_wrap(s.to_owned(), FontId::proportional(12.), p.ink)
@@ -884,9 +914,19 @@ pub fn link(ui: &mut Ui, s: &str, p: Palette, backdrop: Color32) -> Response {
             } else {
                 text.x
             };
-            button.min_size(vec2(width, text.y + 8.))
-        };
-        ui.add(button)
+            let (rect, response) = ui.allocate_exact_size(vec2(width, text.y + 8.), Sense::click());
+            ui.painter().text(
+                rect.center(),
+                Align2::CENTER_CENTER,
+                s,
+                FontId::proportional(12.),
+                p.ink,
+            );
+            response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, ui.is_enabled(), s));
+            response
+        }
+        #[cfg(target_os = "macos")]
+        ui.add(Button::new(rich(s, 12., false, p.ink)).frame(false))
     })
     .on_hover_cursor(CursorIcon::PointingHand)
 }
@@ -1127,6 +1167,10 @@ pub fn named_toggle(
         vec2(28., 16.)
     };
     let t = Rect::from_center_size(r.right_center() - vec2(size.x * 0.5, 0.), size);
+    // SwiftUI aligns a mini switch to the caption baseline, one point below
+    // the geometric center of the row.
+    #[cfg(target_os = "macos")]
+    let t = t.translate(vec2(0., 1.));
     #[cfg(target_os = "macos")]
     let native = crate::mac::draw_switch(
         ui,

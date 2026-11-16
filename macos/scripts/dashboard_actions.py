@@ -468,13 +468,13 @@ def compare(dashboard, work, original, fixture, library):
         except (OSError, ValueError, KeyError, RuntimeError, EOFError, subprocess.SubprocessError) as error:
             record["error"] = str(error)
         print(f"{side}: {len(record['observed'])} dashboard actions; {record.get('error', 'complete')}", flush=True)
-    results["identical"] = (results["original"] == results["rust"] and "error" not in results["original"])
+    completed = all("error" not in results[side] for side in ("original", "rust"))
+    results["identical"] = completed and results["original"]["observed"] == results["rust"]["observed"]
     # Keep the full traffic above, including duplicate switch notifications.
     # A user action completes only after its expected command and resulting state are verified.
     def outcomes(side):
         return [action for action in results[side]["observed"] if "repeatedPreference" not in action]
-    results["userActionsIdentical"] = (all("error" not in results[side] for side in ("original", "rust"))
-                                       and outcomes("original") == outcomes("rust"))
+    results["userActionsIdentical"] = completed and outcomes("original") == outcomes("rust")
     expected_help = {"tray": "상단바 요약과 팝업에 표시합니다. 꺼도 사용량 조회는 계속됩니다.",
                      "monitoring": "끄면 이 계정의 조회를 일시 정지합니다."}
     results["switchHelpIdentical"] = all(results[side]["help"].get(key) == {"help": value, "found": True}

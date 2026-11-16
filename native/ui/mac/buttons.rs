@@ -81,8 +81,16 @@ fn control_image(
         let rtl =
             control.userInterfaceLayoutDirection() == NSUserInterfaceLayoutDirection::RightToLeft;
         let (width, height) = rgba.dimensions();
-        let tint =
-            tint.unwrap_or_else(|| Color32::from_gray(if ui.visuals().dark_mode { 92 } else { 0 }));
+        // The provider tint is sRGB. Weight the native accent mask with its
+        // linear components, preserving the neutral thumb, highlights and shadow.
+        let [red, green, blue] = tint.map_or_else(
+            || [if ui.visuals().dark_mode { 92 } else { 0 }; 3],
+            |color| {
+                [color.r(), color.g(), color.b()].map(|channel| {
+                    (eframe::egui::ecolor::linear_f32_from_gamma_u8(channel) * 255.).round() as u8
+                })
+            },
+        );
         for (x, _, pixel) in rgba.enumerate_pixels_mut() {
             let trailing = if rtl { x } else { width - 1 - x };
             if switch || trailing < height {
@@ -90,7 +98,7 @@ fn control_image(
                 let low = r.min(g).min(b);
                 let range = u16::from(r.max(g).max(b) - low);
                 let shade = |channel: u8| low + ((range * u16::from(channel) + 127) / 255) as u8;
-                pixel.0 = [shade(tint.r()), shade(tint.g()), shade(tint.b()), a];
+                pixel.0 = [shade(red), shade(green), shade(blue), a];
             }
         }
     }
