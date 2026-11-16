@@ -155,12 +155,40 @@ impl Factories {
                     .ok()?;
             }
             let utf16: Vec<_> = key.text.encode_utf16().collect();
-            let layout = self
+            let mut layout = self
                 .write
                 .CreateTextLayout(&utf16, &format, width, max_size as f32)
                 .ok()?;
             let mut metrics = DWRITE_TEXT_METRICS::default();
             layout.GetMetrics(&mut metrics).ok()?;
+            let mut draw_x = f32::from(key.origin[0]) / 64.;
+            let mut fraction = 0.;
+            let indent = utf16.iter().take_while(|&&c| c == u16::from(b' ')).count();
+            if indent > 0
+                && indent < utf16.len()
+                && matches!(key.line, LineWidth::Natural)
+                && metrics.lineCount == 1
+            {
+                // WPF's line formatter emits leading spaces as their own run.
+                // It advances in 1/300-DIP units and translates the next run's
+                // coverage texture, retaining the fraction of a display pixel.
+                let (mut x, mut y) = (0., 0.);
+                let mut hit = DWRITE_HIT_TEST_METRICS::default();
+                layout
+                    .HitTestTextPosition(0, true, &mut x, &mut y, &mut hit)
+                    .ok()?;
+                if hit.left == 0. && hit.bidiLevel == 0 {
+                    let scale = f32::from_bits(key.scale);
+                    let space = (x * 300. / scale).round() * scale / 300.;
+                    draw_x += space * indent as f32;
+                    fraction = draw_x.fract();
+                    draw_x = draw_x.floor();
+                    layout = self
+                        .write
+                        .CreateTextLayout(&utf16[indent..], &format, width, max_size as f32)
+                        .ok()?;
+                }
+            }
             let width = metrics.widthIncludingTrailingWhitespace.ceil() as usize + 3;
             let height = metrics.height.ceil() as usize + 2;
             if width > max_size || height > max_size || width.checked_mul(height)? > 1_048_576 {
@@ -212,7 +240,7 @@ impl Factories {
             target.SetTextAntialiasMode(D2D1_TEXT_ANTIALIAS_MODE_CLEARTYPE);
             target.DrawTextLayout(
                 windows_numerics::Vector2 {
-                    X: f32::from(key.origin[0]) / 64.,
+                    X: draw_x,
                     Y: f32::from(key.origin[1]) / 64.,
                 },
                 &layout,
@@ -224,6 +252,18 @@ impl Factories {
             bitmap
                 .CopyPixels(std::ptr::null(), (width * 4) as u32, &mut bytes)
                 .ok()?;
+            for pixel in bytes.chunks_exact_mut(4) {
+                for channel in &mut pixel[..3] {
+                    *channel = self.contrast[usize::from(*channel)];
+                }
+            }
+            if fraction > 0. {
+                let bgr = key.colors.is_some()
+                    && self.lcd_coverage.GetPixelGeometry() == DWRITE_PIXEL_GEOMETRY_BGR;
+                for row in bytes.chunks_exact_mut(width * 4) {
+                    translate_coverage(row, fraction, bgr);
+                }
+            }
             let colors = key.colors.map(|(ink, backdrop)| {
                 let channels = [
                     (ink.r(), backdrop.r()),
@@ -231,8 +271,7 @@ impl Factories {
                     (ink.b(), backdrop.b()),
                 ];
                 channels.map(|(fg, bg)| {
-                    self.contrast
-                        .map(|sample| compose_glyph(sample, fg, bg, self.gamma))
+                    std::array::from_fn::<_, 256, _>(|i| compose_glyph(i as u8, fg, bg, self.gamma))
                 })
             });
             let mask = bytes
@@ -252,7 +291,7 @@ impl Factories {
                         }
                     } else {
                         // For an alpha bitmap WPF samples the center of the coverage texture.
-                        Color32::from_white_alpha(self.contrast[px[1] as usize])
+                        Color32::from_white_alpha(px[1])
                     }
                 })
                 .collect();
@@ -261,6 +300,24 @@ impl Factories {
                 vec2(metrics.widthIncludingTrailingWhitespace, metrics.height),
             ))
         }
+    }
+}
+
+// WPF positions the contrast-adjusted RGB coverage strip before applying
+// foreground gamma. Traverse the BGRA buffer from right to left so that the
+// two source subpixels are still available when writing the destination.
+fn translate_coverage(row: &mut [u8], fraction: f32, bgr: bool) {
+    let thirds = fraction * 3.;
+    let whole = thirds.floor() as usize;
+    let blend = ((thirds - whole as f32) * 65536.) as u32;
+    let index = |i: usize| (i / 3) * 4 + if bgr { i % 3 } else { 2 - i % 3 };
+    for i in (0..row.len() / 4 * 3).rev() {
+        let sample = |distance| {
+            i.checked_sub(distance)
+                .map_or(0, |j| u32::from(row[index(j)]))
+        };
+        let value = sample(whole) * (65536 - blend) + sample(whole + 1) * blend;
+        row[index(i)] = ((value + 32768) >> 16) as u8;
     }
 }
 
@@ -306,6 +363,7 @@ pub fn line_height(size: f32) -> Option<f32> {
 struct RunKey {
     text: String,
     pixels: u32,
+    scale: u32,
     semibold: bool,
     line: LineWidth,
     origin: [u8; 2],
@@ -410,6 +468,7 @@ impl TextRenderer {
             let key = RunKey {
                 text: row.glyphs.iter().map(|glyph| glyph.chr).collect(),
                 pixels: (format.font_id.size * scale).to_bits(),
+                scale: scale.to_bits(),
                 semibold,
                 line: LineWidth::Natural,
                 origin,
@@ -443,6 +502,7 @@ pub fn natural_size(ui: &Ui, text: &str, size: f32, semibold: bool) -> Option<Ve
     let key = RunKey {
         text: text.into(),
         pixels: (size * scale).to_bits(),
+        scale: scale.to_bits(),
         semibold,
         line: LineWidth::Natural,
         origin: [0; 2],
@@ -481,6 +541,7 @@ pub fn draw_label(
     let mut key = RunKey {
         text: text.into(),
         pixels: (size * scale).to_bits(),
+        scale: scale.to_bits(),
         semibold,
         line,
         origin: [0; 2],
@@ -673,6 +734,16 @@ mod tests {
     use super::*;
 
     #[test]
+    fn fractional_run_translation_crosses_pixel_boundaries_in_display_order() {
+        let mut rgb = [60, 30, 0, 255, 150, 120, 90, 255];
+        translate_coverage(&mut rgb, 0.5, false);
+        assert_eq!(rgb, [15, 0, 0, 255, 105, 75, 45, 255]);
+        let mut bgr = [0, 30, 60, 255, 90, 120, 150, 255];
+        translate_coverage(&mut bgr, 0.5, true);
+        assert_eq!(bgr, [0, 0, 15, 255, 45, 75, 105, 255]);
+    }
+
+    #[test]
     fn cleartype_coverage_blends_light_and_dark_ink() {
         let gamma = glyph_gamma(1.75);
         let samples = [0, 67, 127, 189, 255];
@@ -706,6 +777,7 @@ mod tests {
             let run = RunKey {
                 text: "Codex · 계정 연결".into(),
                 pixels: pixels.to_bits(),
+                scale: (pixels / 13.).to_bits(),
                 semibold: false,
                 line: LineWidth::Natural,
                 origin: [0; 2],
