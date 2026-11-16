@@ -549,6 +549,7 @@ def capture_windows(dashboard, program, folder, library, fixture, output, theme,
                         "unused": controls.request("help", f"Claude {today - timedelta(days=2)}, 0 tokens"),
                     }
             observed["providerSwitches"] = {}
+            observed["providerSwitchEvents"] = {}
             for provider in PROVIDERS:
                 state = deepcopy(fixture)
                 account = state["settings"]["accounts"][0]
@@ -559,16 +560,26 @@ def capture_windows(dashboard, program, folder, library, fixture, output, theme,
                 show("dashboard")
                 controls.request("present", label, {"found": True})
                 changes = []
+                events = []
                 for visible in (False, True):
                     capture(f"switch-{provider}-{'on' if account['showInMenuBar'] else 'off'}")
-                    controls.request("press", label)
-                    reply = dashboard.wait_for(app.stdout, "menuBarVisibility")
-                    if reply != {"_0": account["id"], "_1": visible}:
-                        raise ValueError(f"{label}: unexpected switch command {reply}")
-                    changes.append(reply["_1"])
+                    click = controls.request("clickSwitch", label)
+                    replies = []
+                    deadline = time.monotonic() + 3
+                    while (remaining := deadline - time.monotonic()) > 0:
+                        if not select.select([app.stdout], [], [], remaining)[0]:
+                            break
+                        event = dashboard.receive(app.stdout, deadline)
+                        if "menuBarVisibility" in event:
+                            replies.append(event["menuBarVisibility"])
+                            deadline = time.monotonic() + 0.4
+                    events.append({**click, "commands": replies})
+                    if click["before"] == (not visible) and replies == [{"_0": account["id"], "_1": visible}]:
+                        changes.append(visible)
                     account["showInMenuBar"] = visible
                     dashboard.send(app.stdin, {"state": {"_0": state}})
                 observed["providerSwitches"][provider] = changes
+                observed["providerSwitchEvents"][provider] = events
         except (OSError, ValueError, KeyError, RuntimeError, EOFError, subprocess.SubprocessError) as error:
             observed["error"] = str(error)
         finally:

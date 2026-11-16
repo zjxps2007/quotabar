@@ -259,6 +259,15 @@ static id control(NSWindow *window, NSString *name, NSMutableArray *available, B
     return nil;
 }
 
+static void postClick(NSWindow *window, NSPoint point) {
+    for (NSNumber *kind in @[@(NSEventTypeLeftMouseDown), @(NSEventTypeLeftMouseUp)]) {
+        NSEvent *event = [NSEvent mouseEventWithType:kind.unsignedIntegerValue location:point modifierFlags:0
+                        timestamp:NSProcessInfo.processInfo.systemUptime windowNumber:window.windowNumber context:nil
+                        eventNumber:0 clickCount:1 pressure:kind.unsignedIntegerValue == NSEventTypeLeftMouseDown ? 1 : 0];
+        [NSApp postEvent:event atStart:NO];
+    }
+}
+
 // A SwiftUI hosting view can expose only its AppKit-backed controls without an
 // active system accessibility client. Click the visible control in that window.
 // Points are in the original reference layout, relative to its content edges.
@@ -304,12 +313,7 @@ static BOOL clickControl(NSWindow *window, NSString *label) {
     else if ([label isEqual:@"취소"]) { x = w - 103; y = h - 42; }
     else return NO;
     NSPoint point = [view convertPoint:NSMakePoint(x, view.isFlipped ? y : h-y) toView:nil];
-    for (NSNumber *kind in @[@(NSEventTypeLeftMouseDown), @(NSEventTypeLeftMouseUp)]) {
-        NSEvent *event = [NSEvent mouseEventWithType:kind.unsignedIntegerValue location:point modifierFlags:0
-                        timestamp:NSProcessInfo.processInfo.systemUptime windowNumber:window.windowNumber context:nil
-                        eventNumber:0 clickCount:1 pressure:kind.unsignedIntegerValue == NSEventTypeLeftMouseDown ? 1 : 0];
-        [NSApp postEvent:event atStart:NO];
-    }
+    postClick(window, point);
     return YES;
 }
 
@@ -511,6 +515,21 @@ static NSDictionary *perform(NSDictionary *request) {
     NSString *op = request[@"op"], *label = request[@"label"];
     if ([op isEqual:@"editableFields"])
         return @{@"fields": connectionFieldViews(window.attachedSheet ?: window)};
+    if ([op isEqual:@"clickSwitch"]) {
+        id element = control(window, label, [NSMutableArray array], NO);
+        if (![element respondsToSelector:@selector(accessibilityFrame)] ||
+            ![element respondsToSelector:@selector(accessibilityValue)]) return @{@"pending": @"account switch"};
+        NSRect frame = [element accessibilityFrame];
+        if (NSIsEmptyRect(frame)) return @{@"pending": @"account switch frame"};
+        id value = [element accessibilityValue];
+        // The native switch can expose the track alone or a labeled row.
+        CGFloat inset = MIN(13, NSWidth(frame) / 2);
+        BOOL rtl = window.contentView.userInterfaceLayoutDirection == NSUserInterfaceLayoutDirectionRightToLeft;
+        NSPoint target = NSMakePoint(rtl ? NSMinX(frame) + inset : NSMaxX(frame) - inset, NSMidY(frame));
+        postClick(window, [window convertPointFromScreen:target]);
+        return @{@"before": [value respondsToSelector:@selector(boolValue)] ? @([value boolValue]) : NSNull.null,
+                 @"frame": rectangle(frame)};
+    }
     if ([@[@"focusField", @"editField", @"fieldKey", @"fieldValue"] containsObject:op])
         return editTextField(window.attachedSheet ?: window, request);
     if ([op isEqual:@"selectText"] || [op isEqual:@"copySelection"] || [op isEqual:@"selectionStyle"])
