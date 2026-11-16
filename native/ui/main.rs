@@ -150,6 +150,8 @@ struct Dashboard {
     #[cfg(target_os = "macos")]
     banner_label: Option<mac::BannerLabel>,
     #[cfg(target_os = "macos")]
+    account_labels: Option<mac::AccountLabels>,
+    #[cfg(target_os = "macos")]
     local: mac::Local,
 }
 
@@ -317,6 +319,10 @@ impl eframe::App for Dashboard {
         #[cfg(not(target_os = "macos"))]
         let titlebar = 0;
         self.workspace(ctx, colors, titlebar);
+        #[cfg(target_os = "macos")]
+        if let Some(labels) = &mut self.account_labels {
+            labels.finish_frame();
+        }
         self.show_dialog(ctx, frame, colors);
         if let Some(frame_due) = self.activity_scroll_frame {
             // ScrollArea commits a programmatic scroll after laying out its body.
@@ -519,6 +525,8 @@ fn main() -> eframe::Result {
             scroller: mac::NativeScroller::attach(cc),
             #[cfg(target_os = "macos")]
             banner_label: mac::BannerLabel::attach(cc),
+            #[cfg(target_os = "macos")]
+            account_labels: mac::AccountLabels::attach(cc),
         };
         // Queue the initial event ahead of subsequent messages.
         app.wire.initial = Some(first);

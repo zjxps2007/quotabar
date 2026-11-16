@@ -215,15 +215,31 @@ impl Dashboard {
                     ui.set_max_width((width - 16.).max(0.));
                     ellipsis_label(ui, &a.name, 12., p.ink);
                 });
-                #[cfg(target_os = "macos")]
-                ellipsis_label(ui, &a.name, 12., p.ink);
-                if let Some(email) = a.snapshot["email"]
+                let email = a.snapshot["email"]
                     .as_str()
-                    .filter(|s| !email_matches_alias(s, &a.name))
+                    .filter(|s| !email_matches_alias(s, &a.name));
+                #[cfg(target_os = "macos")]
                 {
-                    #[cfg(target_os = "macos")]
-                    ui.add(Label::new(rich(email, 10., false, p.muted)).selectable(true));
-                    #[cfg(windows)]
+                    let fields = self
+                        .account_labels
+                        .as_mut()
+                        .filter(|_| self.capture.is_none() && !Popup::is_any_open(ui.ctx()));
+                    if let Some(fields) = fields {
+                        fields.show(ui, crate::mac::AccountLabel::Name, &a.name);
+                        if let Some(email) = email {
+                            ui.add_space(4.);
+                            fields.show(ui, crate::mac::AccountLabel::Email, email);
+                        }
+                    } else {
+                        ellipsis_label(ui, &a.name, 12., p.ink);
+                        if let Some(email) = email {
+                            ui.add_space(4.);
+                            ui.add(Label::new(rich(email, 10., false, p.muted)).selectable(true));
+                        }
+                    }
+                }
+                #[cfg(windows)]
+                if let Some(email) = email {
                     caption(ui, email, p);
                 }
             });
