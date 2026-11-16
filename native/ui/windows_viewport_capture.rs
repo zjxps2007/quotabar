@@ -10,16 +10,68 @@ use std::{
     time::Duration,
 };
 
-/// WIC's Pbgra32-to-PNG conversion divides the premultiplied components down to whole bytes.
+/// Convert a premultiplied capture pixel to WIC's straight-alpha PNG representation.
 pub fn png_rgba(pixel: &egui::Color32) -> [u8; 4] {
     let [r, g, b, a] = pixel.to_array();
     match a {
         0 => [0; 4],
         255 => [r, g, b, a],
         _ => {
-            let straight = |c: u8| ((u16::from(c) * 255) / u16::from(a)).min(255) as u8;
+            // WIC truncates the reciprocal before multiplying each component.
+            let reciprocal = (255_u32 << 16) / u32::from(a);
+            let straight = |c: u8| ((u32::from(c) * reciprocal) >> 16).min(255) as u8;
             [straight(r), straight(g), straight(b), a]
         }
+    }
+}
+
+#[cfg(test)]
+#[test]
+fn png_components_match_the_windows_imaging_component() {
+    use windows::Win32::{Graphics::Imaging::*, System::Com::*};
+
+    let mut pixels = Vec::new();
+    for alpha in 0..=255 {
+        for c in 0..=alpha {
+            pixels.extend_from_slice(&[c, c, c, alpha]);
+        }
+    }
+    let mut reference = vec![0; pixels.len()];
+    let stride = pixels.len() as u32;
+    unsafe {
+        CoInitializeEx(None, COINIT_APARTMENTTHREADED).ok().unwrap();
+        {
+            let factory: IWICImagingFactory =
+                CoCreateInstance(&CLSID_WICImagingFactory, None, CLSCTX_INPROC_SERVER).unwrap();
+            let bitmap = factory
+                .CreateBitmapFromMemory(
+                    stride / 4,
+                    1,
+                    &GUID_WICPixelFormat32bppPBGRA,
+                    stride,
+                    &pixels,
+                )
+                .unwrap();
+            let converted = WICConvertBitmapSource(&GUID_WICPixelFormat32bppBGRA, &bitmap).unwrap();
+            converted
+                .CopyPixels(std::ptr::null(), stride, &mut reference)
+                .unwrap();
+        }
+        CoUninitialize();
+    }
+    for ([r, g, b, a], expected) in pixels
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .copied()
+        .zip(reference.as_chunks::<4>().0)
+    {
+        let pixel = egui::Color32::from_rgba_premultiplied(r, g, b, a);
+        assert_eq!(
+            &png_rgba(&pixel),
+            expected,
+            "premultiplied {r} at alpha {a}"
+        );
     }
 }
 
