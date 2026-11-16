@@ -243,7 +243,7 @@ static id control(NSWindow *window, NSString *name, NSMutableArray *available, B
         [seen addObject:node];
         NSString *role = [node respondsToSelector:@selector(accessibilityRole)] ? [node accessibilityRole] : nil;
         if (lookingForHelp || [@[NSAccessibilityButtonRole, NSAccessibilityRadioButtonRole, NSAccessibilityCheckBoxRole,
-              NSAccessibilityPopUpButtonRole, @"AXSwitch"] containsObject:role ?: @""]) {
+              NSAccessibilityPopUpButtonRole, NSAccessibilityDisclosureTriangleRole, @"AXSwitch"] containsObject:role ?: @""]) {
             for (NSString *label in names(node)) {
                 if ([label isEqual:name] || ([name isEqual:@"계정 연결"] && [label hasPrefix:@"+"] && [label hasSuffix:name]))
                     return node;
@@ -403,6 +403,7 @@ static NSDictionary *perform(NSDictionary *request) {
     NSWindow *window = dashboardWindow();
     if (!window) return @{@"pending": @"dashboard window"};
     NSString *op = request[@"op"], *label = request[@"label"];
+    if ([op isEqual:@"selectText"] || [op isEqual:@"copySelection"]) window = window.attachedSheet ?: window;
     if ([op isEqual:@"selectText"] || [op isEqual:@"dismissBanner"]) {
         id message = control(window, label, [NSMutableArray array], YES);
         if (![message respondsToSelector:@selector(accessibilityFrame)]) return @{@"pending": @"message text"};

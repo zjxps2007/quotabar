@@ -13,6 +13,9 @@ from uuid import UUID
 
 BANNER_MESSAGE = "샘플 계정의 연결을 다시 확인하세요."
 ACCOUNT_EMAIL = "account-selection@example.test"
+SOURCE_PATH = "/tmp/QuotaBar 샘플/auth.json"
+DATA_PATH = str(Path.home() / "Library/Application Support/AIUsage Lite")
+CONNECTION_ERROR = "검증용 연결 오류"
 
 
 class Controls:
@@ -51,7 +54,8 @@ class Controls:
 def exercise(dashboard, executable, folder, library, fixture, observed, help_text):
     folder.mkdir()
     env = {**os.environ, **dashboard.fixture_environment(), "HOME": str(folder),
-           "DYLD_INSERT_LIBRARIES": str(library), "QUOTABAR_TEST_UI_DIRECTORY": str(folder)}
+           "DYLD_INSERT_LIBRARIES": str(library), "QUOTABAR_TEST_UI_DIRECTORY": str(folder),
+           "QUOTABAR_TEST_PRIVATE_PASTEBOARD": "1"}
     if executable != dashboard.APP:
         env["QUOTABAR_TEST_REFERENCE_INPUT"] = "1"
     with subprocess.Popen([executable, "--dashboard-helper"], stdin=subprocess.PIPE,
@@ -193,9 +197,16 @@ def exercise(dashboard, executable, folder, library, fixture, observed, help_tex
                 raise ValueError(f"Invalid Claude connection command {request}")
             observed.append({"claudeConsentEnablesSubmit": True})
             observed.append({"connect": request})
-            send({"reply": {"id": request_id, "error": "검증용 연결 오류"}})
+            send({"reply": {"id": request_id, "error": CONNECTION_ERROR}})
             time.sleep(0.35)
             controls.request("sheet", expected={"sheet": True})
+            try:
+                controls.request("selectText", CONNECTION_ERROR)
+                time.sleep(0.7)
+                controls.request("copySelection")
+                help_text["connectionErrorClipboard"] = controls.request("selectionClipboard")
+            except (TimeoutError, ValueError) as error:
+                help_text["connectionErrorCopyError"] = str(error)
             controls.request("press", "취소")
             controls.request("sheet", expected={"sheet": False})
             observed.append({"failedConnectionCanBeCancelled": True})
@@ -335,6 +346,13 @@ def capture_windows(dashboard, program, folder, library, fixture, output, theme,
                     dashboard.send(app.stdin, {"state": {"_0": contact}})
                     copy_selection("accountName", account["name"], "account-name-selected")
                     copy_selection("accountEmail", ACCOUNT_EMAIL, "account-email-selected")
+                    contact["settings"]["accounts"][0]["sourcePath"] = SOURCE_PATH
+                    dashboard.send(app.stdin, {"state": {"_0": contact}})
+                    try:
+                        controls.request("press", "연결한 로그인 파일")
+                        copy_selection("sourcePath", SOURCE_PATH, "source-path-selected")
+                    except (TimeoutError, ValueError) as error:
+                        observed["sourcePathCopyError"] = str(error)
                     dashboard.send(app.stdin, {"state": {"_0": fixture}})
                 if route == "dashboard":
                     # AccessKit publishes its first tree on the next UI frame.
@@ -400,6 +418,7 @@ def capture_windows(dashboard, program, folder, library, fixture, output, theme,
             except (OSError, ValueError) as error:
                 observed["settingsScrollerError"] = str(error)
             capture("settings-bottom")
+            copy_selection("dataPath", DATA_PATH, "settings-path-selected")
             controls.request("press", "라이선스 및 고지 보기")
             controls.request("sheet", expected={"sheet": True})
             journey = []
@@ -471,7 +490,8 @@ def compare_windows(dashboard, work, original, library):
                                                   library, fixture, output, theme, original)
     for theme in dashboard.THEMES:
         for route in (*dashboard.ROUTES, "remove", "message", "message-selected", "message-wrapped", "account-name-selected", "account-email-selected", "popover-sample", "popover-empty", "popover-overflow",
-                      "settings-bottom", "licenses-notice", "licenses-apache", "empty", "activity-empty", "activity"):
+                      "source-path-selected", "settings-path-selected", "settings-bottom", "licenses-notice",
+                      "licenses-apache", "empty", "activity-empty", "activity"):
             name = f"{route}-{theme}"
             lhs, rhs = (dest / side / f"{name}.png" for side in ("original", "rust"))
             if not lhs.is_file() or not rhs.is_file():
@@ -500,6 +520,8 @@ def compare_windows(dashboard, work, original, library):
     copied_accounts = all(
         results[side][theme].get("accountNameClipboard") == {"text": fixture["settings"]["accounts"][0]["name"]}
         and results[side][theme].get("accountEmailClipboard") == {"text": ACCOUNT_EMAIL}
+        and results[side][theme].get("sourcePathClipboard") == {"text": SOURCE_PATH}
+        and results[side][theme].get("dataPathClipboard") == {"text": DATA_PATH}
         for side in ("original", "rust") for theme, fixture in fixtures.items())
     documents_match = all(results[side][theme].get("licenseDocuments") == ["NOTICE", "LICENSE", "NOTICE", "closed"]
                           and results[side][theme].get("licenseEscapeClosed") is True
@@ -540,5 +562,8 @@ def compare(dashboard, work, original, fixture, library):
                      "monitoring": "끄면 이 계정의 조회를 일시 정지합니다."}
     results["switchHelpIdentical"] = all(results[side]["help"].get(key) == {"help": value, "found": True}
                                         for side in ("original", "rust") for key, value in expected_help.items())
+    results["connectionErrorCopies"] = all(
+        results[side]["help"].get("connectionErrorClipboard") == {"text": CONNECTION_ERROR}
+        for side in ("original", "rust"))
     (dashboard.REPORT / "actions.json").write_text(json.dumps(results, ensure_ascii=False, indent=2))
-    return results["identical"] and results["switchHelpIdentical"]
+    return results["identical"] and results["switchHelpIdentical"] and results["connectionErrorCopies"]
