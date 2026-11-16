@@ -2818,6 +2818,7 @@ dependencies = [
  "uuid",
  "wgpu",
  "windows 0.61.3",
+ "windows-core 0.61.2",
  "windows-numerics",
  "windows-sys 0.61.2",
  "winresource",

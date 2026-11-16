@@ -12,6 +12,7 @@ use windows::{
     },
     core::{Result, w},
 };
+mod glyphs;
 
 struct Factories {
     write: IDWriteFactory,
@@ -238,15 +239,16 @@ impl Factories {
                 &self.coverage
             });
             target.SetTextAntialiasMode(D2D1_TEXT_ANTIALIAS_MODE_CLEARTYPE);
-            target.DrawTextLayout(
-                windows_numerics::Vector2 {
-                    X: draw_x,
-                    Y: f32::from(key.origin[1]) / 64.,
-                },
-                &layout,
-                &brush,
-                D2D1_DRAW_TEXT_OPTIONS_NONE,
-            );
+            let origin = windows_numerics::Vector2 {
+                X: draw_x,
+                Y: f32::from(key.origin[1]) / 64.,
+            };
+            if glyphs::draw(&target, &brush, &layout, origin, f32::from_bits(key.scale)).is_err() {
+                // An inline object or decoration can require the system renderer.
+                // Clear any runs already painted before replaying the whole layout.
+                target.Clear(Some(&black));
+                target.DrawTextLayout(origin, &layout, &brush, D2D1_DRAW_TEXT_OPTIONS_NONE);
+            }
             target.EndDraw(None, None).ok()?;
             let mut bytes = vec![0; width * height * 4];
             bitmap
