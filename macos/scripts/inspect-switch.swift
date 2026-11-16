@@ -7,7 +7,7 @@ import ObjectiveC
 let destination = URL(fileURLWithPath: CommandLine.arguments[1], isDirectory: true)
 try FileManager.default.createDirectory(at: destination, withIntermediateDirectories: true)
 let app = NSApplication.shared
-app.setActivationPolicy(.accessory)
+app.setActivationPolicy(.regular)
 app.finishLaunching()
 
 func rgb(_ r: Double, _ g: Double, _ b: Double) -> NSColor {
@@ -93,6 +93,7 @@ for (theme, appearanceName) in [("light", NSAppearance.Name.aqua), ("dark", NSAp
     for (name, color) in samples {
         let toggle = Toggle("test", isOn: .constant(true)).labelsHidden().toggleStyle(.switch)
             .controlSize(.mini).font(.caption).tint(color.map { Color(nsColor: $0) })
+            .environment(\.controlActiveState, .key)
             .frame(width: cell.width, height: cell.height)
         install(name, NSHostingView(rootView: toggle))
     }
@@ -106,11 +107,26 @@ for (theme, appearanceName) in [("light", NSAppearance.Name.aqua), ("dark", NSAp
     control.frame = control.frame(forAlignmentRect: alignment)
     plain.addSubview(control)
     install("appkit", plain)
-    window.makeKeyAndOrderFront(nil)
+    window.center()
     app.activate(ignoringOtherApps: true)
-    RunLoop.main.run(until: Date().addingTimeInterval(0.5))
+    window.makeKeyAndOrderFront(nil)
+    window.makeMain()
+    let until = Date().addingTimeInterval(1)
+    while Date() < until {
+        if let event = app.nextEvent(matching: .any, until: Date().addingTimeInterval(0.02), inMode: .default, dequeue: true) {
+            app.sendEvent(event)
+        }
+        app.updateWindows()
+    }
     window.displayIfNeeded()
+    let screen = Process()
+    screen.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
+    screen.arguments = ["-x", "-o", "-l" + String(window.windowNumber), destination.appendingPathComponent(theme + "-window.png").path]
+    try screen.run()
+    screen.waitUntilExit()
     var info = [String: Any]()
+    info["window"] = ["active": app.isActive, "key": window.isKeyWindow, "main": window.isMainWindow,
+                      "frame": NSStringFromRect(window.frame), "scale": window.backingScaleFactor]
     for (name, view) in entries {
         let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds)!
         view.cacheDisplay(in: view.bounds, to: rep)
