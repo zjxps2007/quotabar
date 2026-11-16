@@ -463,11 +463,30 @@ impl Dashboard {
             let card = p.frame(20);
             let content_width = (w - card.total_margin().sum().x).max(1.);
             for (title, value, sub, symbol, color) in stats {
-                card.show(ui, |ui| {
+                let content = |ui: &mut Ui| {
                     ui.vertical(|ui| {
                         ui.set_width(content_width);
-                        ui.spacing_mut().interact_size.y = 0.;
+                        #[cfg(windows)]
+                        {
+                            ui.spacing_mut().interact_size.y = 0.;
+                        }
+                        #[cfg(target_os = "macos")]
+                        {
+                            let title_height = crate::mac_text::system_line_height(ui, 11.);
+                            let symbol = crate::mac::symbol_size(
+                                ui.ctx(),
+                                system_symbol_name(symbol),
+                                13.,
+                                false,
+                            );
+                            ui.spacing_mut().interact_size.y =
+                                symbol.map_or(title_height, |s| s.y.max(title_height));
+                        }
                         ui.horizontal(|ui| {
+                            #[cfg(target_os = "macos")]
+                            crate::mac_text::stacked_label(ui, title, 11., false, p.muted)
+                                .unwrap_or_else(|| system_label(ui, title, 11., false, p.muted));
+                            #[cfg(windows)]
                             system_label(ui, title, 11., false, p.muted);
                             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                                 #[cfg(target_os = "macos")]
@@ -511,7 +530,29 @@ impl Dashboard {
                         #[cfg(windows)]
                         ellipsis_label(ui, &sub, 10., p.muted);
                     })
-                });
+                };
+                #[cfg(target_os = "macos")]
+                {
+                    // A SwiftUI HStack centers each complete card, including its
+                    // background. Give the grid its intrinsic height before painting.
+                    let id = ui.make_persistent_id(("stat tile height", symbol));
+                    let height = ui.data(|d| d.get_temp::<f32>(id)).unwrap_or_default();
+                    ui.allocate_ui_with_layout(
+                        vec2(w, height),
+                        Layout::top_down(Align::Min),
+                        |ui| {
+                            let measured = card.show(ui, content).response.rect.height();
+                            if measured != height {
+                                ui.data_mut(|d| d.insert_temp(id, measured));
+                                ui.ctx().request_discard(
+                                    "Align statistics cards with their measured heights",
+                                );
+                            }
+                        },
+                    );
+                }
+                #[cfg(windows)]
+                card.show(ui, content);
             }
         };
         #[cfg(target_os = "macos")]
@@ -915,9 +956,11 @@ pub fn section_title(ui: &mut Ui, title: &str, subtitle: &str, p: Palette) {
     }
     #[cfg(windows)]
     {
-        label(ui, title, 15., true, p.ink);
+        let stack = crate::windows_text::TextStack::inline(ui);
+        stack.label(ui, title, 15., true, p.ink);
         ui.add_space(4.);
-        caption(ui, subtitle, p);
+        stack.advance(4.);
+        stack.label(ui, subtitle, 11., false, p.muted);
     }
 }
 pub fn columns(width: f32, min: f32, gap: f32) -> usize {

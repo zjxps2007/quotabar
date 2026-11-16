@@ -487,14 +487,29 @@ enum LineWidth {
 
 /// WPF stacks natural text heights with whole-DIP margins and padding. Keep
 /// that sum independently of egui's 1/32-DIP widget allocation grid.
-pub struct TextStack(std::cell::Cell<f64>);
+pub struct TextStack {
+    cursor: std::cell::Cell<f64>,
+    fill_width: bool,
+}
 
 impl TextStack {
     pub fn begin(ui: &Ui) -> Self {
         if let Some(renderer) = ui.ctx().plugin_opt::<TextRenderer>() {
             renderer.lock().stacked_viewport = Some(ui.ctx().viewport_id());
         }
-        Self(std::cell::Cell::new(f64::from(ui.next_widget_position().y)))
+        Self {
+            fill_width: true,
+            ..Self::inline(ui)
+        }
+    }
+
+    /// A column of TextBlocks beside another control uses its natural width.
+    /// Only its own glyph runs use TextFormatter's fractional measurements.
+    pub fn inline(ui: &Ui) -> Self {
+        Self {
+            cursor: std::cell::Cell::new(f64::from(ui.next_widget_position().y)),
+            fill_width: false,
+        }
     }
 
     pub fn line_height(size: f32) -> Option<f32> {
@@ -502,13 +517,13 @@ impl TextStack {
     }
 
     pub fn top(&self, allocated: f32) -> f32 {
-        let anchor = self.0.get();
+        let anchor = self.cursor.get();
         (anchor + (f64::from(allocated) - anchor).round()) as f32
     }
 
     pub fn advance(&self, height: f32) {
         let height = (f64::from(height) * 300.).round_ties_even() / 300.;
-        self.0.set(self.0.get() + height);
+        self.cursor.set(self.cursor.get() + height);
     }
 
     pub fn label(
@@ -700,10 +715,17 @@ pub struct MeasuredLabel {
 
 impl MeasuredLabel {
     pub fn natural(ui: &Ui, text: &str, size: f32, semibold: bool) -> Option<Self> {
-        Self::new(ui, text, size, semibold, LineWidth::Natural)
+        Self::new(ui, text, size, semibold, LineWidth::Natural, false)
     }
 
-    fn new(ui: &Ui, text: &str, size: f32, semibold: bool, line: LineWidth) -> Option<Self> {
+    fn new(
+        ui: &Ui,
+        text: &str,
+        size: f32,
+        semibold: bool,
+        line: LineWidth,
+        stacked: bool,
+    ) -> Option<Self> {
         let scale = ui.ctx().pixels_per_point();
         let renderer = ui.ctx().plugin_opt::<TextRenderer>()?;
         let mut renderer = renderer.lock();
@@ -712,7 +734,7 @@ impl MeasuredLabel {
             pixels: (size * scale).to_bits(),
             scale: scale.to_bits(),
             semibold,
-            stacked: renderer.stacked_viewport == Some(ui.ctx().viewport_id()),
+            stacked: stacked || renderer.stacked_viewport == Some(ui.ctx().viewport_id()),
             line,
             origin: RasterOrigin::default(),
             colors: None,
@@ -732,7 +754,8 @@ impl MeasuredLabel {
         width: f32,
         layout: LabelLayout<'_>,
     ) -> Option<Self> {
-        let measure = |line| Self::new(ui, text, size, semibold, line);
+        let stacked = matches!(layout, LabelLayout::Stacked(_));
+        let measure = |line| Self::new(ui, text, size, semibold, line, stacked);
         if let Some(label) = measure(LineWidth::Natural)
             && label.size.x <= width
         {
@@ -780,10 +803,15 @@ pub fn draw_label(
     // WPF measures TextBlocks before arranging their parent. Retain the
     // fractional natural size across stacked rows, independently of the bitmap.
     let mut desired = measured.size;
-    desired.x = if matches!(layout, LabelLayout::Inline) {
-        desired.x.min(width)
-    } else {
+    let fill_width = match layout {
+        LabelLayout::Inline => false,
+        LabelLayout::Stacked(stack) => stack.fill_width,
+        LabelLayout::Block | LabelLayout::SingleLine => true,
+    };
+    desired.x = if fill_width {
         width
+    } else {
+        desired.x.min(width)
     };
     let (rect, response) = ui.allocate_exact_size(desired, Sense::hover());
     let mut pos = rect.min;
@@ -1081,7 +1109,10 @@ mod tests {
     fn wrapped_help_and_consent_keep_the_original_device_baselines() {
         let _apartment = Apartment::open();
         let factories = Factories::new().unwrap();
-        let stack = TextStack(std::cell::Cell::new(28.));
+        let stack = TextStack {
+            cursor: std::cell::Cell::new(28.),
+            fill_width: true,
+        };
         // Title, subtitle, provider, path caption, editor and browse button.
         for (size, bold) in [
             (24., true),

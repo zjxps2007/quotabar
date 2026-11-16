@@ -527,12 +527,29 @@ impl Dashboard {
             let peak = format!("활동 {active}일 · 최고 {} ({day})", number(*peak));
             #[cfg(target_os = "macos")]
             {
-                ui.horizontal_wrapped(|ui| {
-                    ui.spacing_mut().item_spacing.x = 6.;
+                let width = ui.available_width();
+                // SwiftUI's ViewThatFits uses one centered row, including its
+                // body-font separator, or two leading-aligned captions.
+                let natural = PreferredFont::CaptionSemibold.text_width(ui, &summary)
+                    + PreferredFont::Body.text_width(ui, "·")
+                    + PreferredFont::Caption2.text_width(ui, &peak)
+                    + 3. * 6.;
+                if natural <= width {
+                    ui.allocate_ui_with_layout(
+                        vec2(width, PreferredFont::Body.line_height(ui)),
+                        Layout::left_to_right(Align::Center),
+                        |ui| {
+                            ui.spacing_mut().item_spacing.x = 6.;
+                            preferred_label(ui, &summary, PreferredFont::CaptionSemibold, p.ink);
+                            preferred_label(ui, "·", PreferredFont::Body, p.tertiary);
+                            preferred_label(ui, &peak, PreferredFont::Caption2, p.muted);
+                        },
+                    );
+                } else {
                     preferred_label(ui, &summary, PreferredFont::CaptionSemibold, p.ink);
-                    system_label(ui, "·", 13., false, p.tertiary);
+                    ui.add_space(3.);
                     preferred_label(ui, &peak, PreferredFont::Caption2, p.muted);
-                });
+                }
                 return;
             }
             #[cfg(windows)]

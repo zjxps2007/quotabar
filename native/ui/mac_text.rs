@@ -80,6 +80,26 @@ impl PreferredFont {
     pub fn line_height(self, ui: &Ui) -> f32 {
         Self::metrics(&self.base(), ui).height
     }
+
+    pub fn text_width(self, ui: &Ui, text: &str) -> f32 {
+        let size = self.base().pointSize() as f32;
+        let ink = ui.visuals().text_color();
+        let native = ui.ctx().plugin_opt::<Renderer>().and_then(|renderer| {
+            Some(
+                renderer
+                    .lock()
+                    .run(ui.ctx(), text, size, Face::Preferred(self), ink)?
+                    .size
+                    .x,
+            )
+        });
+        native.unwrap_or_else(|| {
+            ui.painter()
+                .layout_no_wrap(text.to_owned(), FontId::proportional(size), ink)
+                .size()
+                .x
+        })
+    }
 }
 
 #[derive(Clone, Copy, Hash, Eq, PartialEq)]

@@ -127,15 +127,21 @@ impl CardSurface {
     pub fn show<R>(self, ui: &mut Ui, content: impl FnOnce(&mut Ui) -> R) -> InnerResponse<R> {
         let result = self.frame.show(ui, content);
         #[cfg(target_os = "macos")]
-        ui.painter().add(
-            epaint::RectShape::stroke(
-                result.response.rect,
-                self.frame.corner_radius,
-                Stroke::new(1_f32, self.border),
-                StrokeKind::Middle,
-            )
-            .with_round_to_pixels(false),
-        );
+        {
+            use eframe::emath::GuiRounding;
+            // SwiftUI snaps the card frame to backing pixels. The centered
+            // stroke still covers half a pixel on either side at 1x.
+            let bounds = result.response.rect.round_to_pixels(ui.pixels_per_point());
+            ui.painter().add(
+                epaint::RectShape::stroke(
+                    bounds,
+                    self.frame.corner_radius,
+                    Stroke::new(1_f32, self.border),
+                    StrokeKind::Middle,
+                )
+                .with_round_to_pixels(false),
+            );
+        }
         result
     }
 }
