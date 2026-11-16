@@ -1,3 +1,5 @@
+#[cfg(target_os = "macos")]
+use crate::mac_text::{PreferredFont, preferred_label};
 use crate::{
     Dashboard,
     dashboard::{cell_width, columns},
@@ -205,7 +207,7 @@ impl Dashboard {
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 5.;
             crate::mac::intrinsic_symbol(ui, "info.circle", 10., false, p.muted);
-            system_label(ui, NOTE, 10., false, p.muted);
+            preferred_label(ui, NOTE, PreferredFont::Caption, p.muted);
         });
         #[cfg(windows)]
         {
@@ -239,7 +241,10 @@ impl Dashboard {
             |ui| {
                 ui.spacing_mut().item_spacing.x = if MAC { 6. } else { 10. };
                 self.assets.logo(ui, provider, 26.);
-                system_label(ui, provider, if MAC { 11. } else { 13. }, true, tint);
+                #[cfg(target_os = "macos")]
+                preferred_label(ui, provider, PreferredFont::SubheadlineSemibold, tint);
+                #[cfg(windows)]
+                system_label(ui, provider, 13., true, tint);
             },
         );
         let cal = Calendar::new(&self.state.report, provider);
@@ -252,13 +257,17 @@ impl Dashboard {
                     ui.spacing_mut().item_spacing.x = 10.;
                     crate::mac::intrinsic_symbol(ui, "square.grid.3x3", 15., false, p.muted);
                     ui.vertical(|ui| {
-                        system_label(ui, "아직 사용 기록이 없습니다", 11., true, p.ink);
+                        preferred_label(
+                            ui,
+                            "아직 사용 기록이 없습니다",
+                            PreferredFont::SubheadlineSemibold,
+                            p.ink,
+                        );
                         ui.add_space(2.);
-                        system_label(
+                        preferred_label(
                             ui,
                             "로컬 로그가 확인되면 일별 토큰이 표시됩니다.",
-                            10.,
-                            false,
+                            PreferredFont::Caption2,
                             p.muted,
                         );
                     });
@@ -508,17 +517,21 @@ impl Dashboard {
             #[cfg(target_os = "macos")]
             let day = crate::platform::activity_date(*date, "MMMd");
             let peak = format!("활동 {active}일 · 최고 {} ({day})", number(*peak));
-            if MAC {
+            #[cfg(target_os = "macos")]
+            {
                 ui.horizontal_wrapped(|ui| {
                     ui.spacing_mut().item_spacing.x = 6.;
-                    system_label(ui, &summary, 10., true, p.ink);
-                    label(ui, "·", 10., false, p.muted);
-                    system_label(ui, &peak, 10., false, p.muted);
+                    preferred_label(ui, &summary, PreferredFont::CaptionSemibold, p.ink);
+                    system_label(ui, "·", 13., false, p.tertiary);
+                    preferred_label(ui, &peak, PreferredFont::Caption2, p.muted);
                 });
                 return;
             }
-            label(ui, summary, 11., true, p.ink);
-            label(ui, peak, 10., false, p.muted);
+            #[cfg(windows)]
+            {
+                label(ui, summary, 11., true, p.ink);
+                label(ui, peak, 10., false, p.muted);
+            }
         }
         ui.add_space(12.);
         disclosure(

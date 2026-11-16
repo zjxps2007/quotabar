@@ -274,18 +274,12 @@ pub fn intrinsic_symbol(
     semibold: bool,
     tint: eframe::egui::Color32,
 ) -> bool {
-    use eframe::egui::{Pos2, Rect, Sense, pos2};
     let Some(texture) = symbol_texture(ui.ctx(), name, points, semibold) else {
         return false;
     };
     let size = texture.size_vec2() / ui.ctx().pixels_per_point();
-    let (rect, _) = ui.allocate_exact_size(size, Sense::hover());
-    ui.painter().image(
-        texture.id(),
-        rect,
-        Rect::from_min_max(Pos2::ZERO, pos2(1., 1.)),
-        tint,
-    );
+    let (rect, _) = ui.allocate_exact_size(size, eframe::egui::Sense::hover());
+    paint_symbol(ui.painter(), rect, &texture, tint);
     true
 }
 
@@ -297,10 +291,20 @@ pub fn symbol(
     semibold: bool,
     tint: eframe::egui::Color32,
 ) -> bool {
-    use eframe::egui::{Pos2, Rect, pos2};
     let Some(texture) = symbol_texture(painter.ctx(), name, points, semibold) else {
         return false;
     };
+    paint_symbol(painter, bounds, &texture, tint);
+    true
+}
+
+fn paint_symbol(
+    painter: &eframe::egui::Painter,
+    bounds: eframe::egui::Rect,
+    texture: &eframe::egui::TextureHandle,
+    tint: eframe::egui::Color32,
+) {
+    use eframe::egui::{Pos2, Rect, pos2};
     let size = texture.size_vec2() / painter.ctx().pixels_per_point();
     let fit = (bounds.width() / size.x)
         .min(bounds.height() / size.y)
@@ -319,7 +323,6 @@ pub fn symbol(
         Rect::from_min_max(Pos2::ZERO, pos2(1., 1.)),
         tint,
     );
-    true
 }
 
 fn home() -> PathBuf {

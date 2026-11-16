@@ -812,6 +812,17 @@ struct Surface {
 }
 
 impl Surface {
+    fn painted_bounds(shape: &Shape, clip: Rect) -> Rect {
+        // Rotating an empty galley's inverted mesh bounds can span the entire
+        // clip. The text tessellator draws nothing for these runs.
+        if let Shape::Text(text) = shape
+            && (text.galley.num_indices == 0 || text.opacity_factor <= 0.)
+        {
+            return Rect::NOTHING;
+        }
+        shape.visual_bounding_rect().intersect(clip)
+    }
+
     fn behind(surfaces: &[Self], area: Rect) -> Option<Color32> {
         let surface = surfaces
             .iter()
@@ -843,7 +854,7 @@ impl Surface {
             }
             return;
         }
-        let bounds = shape.visual_bounding_rect().intersect(clip);
+        let bounds = Self::painted_bounds(shape, clip);
         if !bounds.is_positive() {
             return;
         }
@@ -936,10 +947,7 @@ impl egui::Plugin for TextRenderer {
                 };
                 if let Some(list) = g.get(layer) {
                     for (index, entry) in list.all_entries().enumerate() {
-                        let area = entry
-                            .shape
-                            .visual_bounding_rect()
-                            .intersect(entry.clip_rect);
+                        let area = Surface::painted_bounds(&entry.shape, entry.clip_rect);
                         if !area.is_positive() {
                             continue;
                         }
@@ -1133,6 +1141,31 @@ mod tests {
         assert_eq!(measure(true), TextStack::line_height(13.).unwrap());
         assert_ne!(ordinary, TextStack::line_height(13.).unwrap());
         assert_eq!(measure(false), ordinary);
+    }
+
+    #[test]
+    fn empty_picker_text_leaves_the_underlying_cleartype_surface_visible() {
+        let ctx = Context::default();
+        let _ = ctx.run(Default::default(), |ctx| {
+            let clip = Rect::from_min_size(Pos2::ZERO, vec2(400., 300.));
+            let area = Rect::from_min_size(pos2(20., 150.), vec2(200., 20.));
+            let mut surfaces = Vec::new();
+            Surface::record(
+                &mut surfaces,
+                &Shape::rect_filled(clip, 0, Color32::WHITE),
+                clip,
+            );
+            let text = |s: &str| {
+                let galley = ctx.fonts_mut(|f| {
+                    f.layout_no_wrap(s.to_owned(), FontId::proportional(12.), Color32::BLACK)
+                });
+                Shape::galley(area.min, galley, Color32::BLACK)
+            };
+            Surface::record(&mut surfaces, &text(""), clip);
+            assert_eq!(Surface::behind(&surfaces, area), Some(Color32::WHITE));
+            Surface::record(&mut surfaces, &text("Claude"), clip);
+            assert_eq!(Surface::behind(&surfaces, area), None);
+        });
     }
 
     #[test]

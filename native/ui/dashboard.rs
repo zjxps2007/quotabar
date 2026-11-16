@@ -557,13 +557,19 @@ impl Dashboard {
                     }
                     #[cfg(target_os = "macos")]
                     {
-                        use objc2_app_kit::{NSFontTextStyleBody, NSFontTextStyleTitle3};
+                        use crate::mac_text::PreferredFont;
                         crate::mac_text::preferred_label(
-                            ui, TITLE, unsafe { NSFontTextStyleTitle3 }, true, p.ink,
+                            ui,
+                            TITLE,
+                            PreferredFont::Title3Bold,
+                            p.ink,
                         );
                         ui.add_space(15.);
                         crate::mac_text::preferred_label(
-                            ui, DESCRIPTION, unsafe { NSFontTextStyleBody }, false, p.muted,
+                            ui,
+                            DESCRIPTION,
+                            PreferredFont::Body,
+                            p.muted,
                         );
                     }
                     ui.add_space(if MAC { 15. } else { 16. });

@@ -27,6 +27,47 @@ use objc2_app_kit::{
 use std::collections::HashMap;
 
 #[derive(Clone, Copy, Hash, Eq, PartialEq)]
+pub enum PreferredFont {
+    Body,
+    Title3Bold,
+    SubheadlineSemibold,
+    Caption,
+    CaptionSemibold,
+    Caption2,
+}
+
+impl PreferredFont {
+    fn base(self) -> Retained<NSFont> {
+        use objc2_app_kit::{
+            NSFontTextStyleBody, NSFontTextStyleCaption1, NSFontTextStyleCaption2,
+            NSFontTextStyleSubheadline, NSFontTextStyleTitle3,
+        };
+        unsafe {
+            let style = match self {
+                Self::Body => NSFontTextStyleBody,
+                Self::Title3Bold => NSFontTextStyleTitle3,
+                Self::SubheadlineSemibold => NSFontTextStyleSubheadline,
+                Self::Caption | Self::CaptionSemibold => NSFontTextStyleCaption1,
+                Self::Caption2 => NSFontTextStyleCaption2,
+            };
+            NSFont::preferredFontForTextStyle_options(style, &objc2_foundation::NSDictionary::new())
+        }
+    }
+
+    fn resolved(self) -> Retained<NSFont> {
+        let font = self.base();
+        let weight = unsafe {
+            match self {
+                Self::Title3Bold => NSFontWeightBold,
+                Self::SubheadlineSemibold | Self::CaptionSemibold => NSFontWeightSemibold,
+                _ => return font,
+            }
+        };
+        NSFont::systemFontOfSize_weight(font.pointSize(), weight)
+    }
+}
+
+#[derive(Clone, Copy, Hash, Eq, PartialEq)]
 enum Face {
     Regular,
     Medium,
@@ -36,6 +77,7 @@ enum Face {
     Bold,
     TabularDigits,
     RoundedDigits,
+    Preferred(PreferredFont),
 }
 
 impl Face {
@@ -63,14 +105,18 @@ fn attributed(value: &str, size: f64, face: Face, tracking: f32) -> CFMutableAtt
     // logical point size so Retina drawing preserves its optical size.
     let weight = unsafe {
         match face {
-            Face::Regular | Face::Monospace | Face::Underlined => NSFontWeightRegular,
+            Face::Regular | Face::Monospace | Face::Underlined | Face::Preferred(_) => {
+                NSFontWeightRegular
+            }
             Face::Medium => NSFontWeightMedium,
             Face::Bold => NSFontWeightBold,
             Face::Emphasized if size >= 17. => NSFontWeightBold,
             Face::Emphasized | Face::TabularDigits | Face::RoundedDigits => NSFontWeightSemibold,
         }
     };
-    let nsfont = if face == Face::RoundedDigits {
+    let nsfont = if let Face::Preferred(style) = face {
+        style.resolved()
+    } else if face == Face::RoundedDigits {
         let digits = NSFont::monospacedDigitSystemFontOfSize_weight(size, weight);
         digits
             .fontDescriptor()
@@ -446,20 +492,28 @@ pub fn plan_label(ui: &mut Ui, text: &str, color: Color32) -> Option<Response> {
     draw_label(ui, text, 9., Face::Medium, color, LineBox::Stack)
 }
 
-pub fn preferred_label(
-    ui: &mut Ui,
-    text: &str,
-    style: &objc2_app_kit::NSFontTextStyle,
-    bold: bool,
-    color: Color32,
-) -> Response {
-    let font = unsafe {
-        NSFont::preferredFontForTextStyle_options(style, &objc2_foundation::NSDictionary::new())
-    };
+pub fn preferred_label(ui: &mut Ui, text: &str, style: PreferredFont, color: Color32) -> Response {
+    let font = style.base();
+    let scale = f64::from(ui.pixels_per_point());
     let size = font.pointSize() as f32;
-    let face = if bold { Face::Bold } else { Face::Regular };
-    draw_label(ui, text, size, face, color, LineBox::Stack)
-        .unwrap_or_else(|| ui.label(crate::style::rich(text, size, bold, color)))
+    // The preferred font supplies line spacing even when its glyphs come
+    // from a fallback face. In particular caption and caption2 both reserve
+    // 13 points on macOS, but caption2 uses the system's medium face.
+    let height = ((font.ascender() - font.descender() + font.leading()) * scale).round() / scale;
+    let ascent = (font.ascender() * scale).ceil() / scale;
+    let line = LineBox::Preferred {
+        height: height as f32,
+        ascent: ascent as f32,
+    };
+    draw_label(ui, text, size, Face::Preferred(style), color, line).unwrap_or_else(|| {
+        let heavy = matches!(
+            style,
+            PreferredFont::Title3Bold
+                | PreferredFont::SubheadlineSemibold
+                | PreferredFont::CaptionSemibold
+        );
+        ui.label(crate::style::rich(text, size, heavy, color))
+    })
 }
 
 pub fn quota_percent(ui: &mut Ui, text: &str, color: Color32) -> Option<Response> {
@@ -542,6 +596,7 @@ enum LineBox {
     System,
     CenteredSystem,
     Stack,
+    Preferred { height: f32, ascent: f32 },
 }
 
 fn draw_label(
@@ -573,6 +628,7 @@ fn draw_label(
             run.size.y.max(system as f32)
         }
         LineBox::Control => system_line_height(ui, f64::from(size)),
+        LineBox::Preferred { height, .. } => height.max(run.metrics.height),
         LineBox::Stack => run
             .metrics
             .height
@@ -581,6 +637,11 @@ fn draw_label(
     let (rect, response) = ui.allocate_exact_size(vec2(run.size.x, height), Sense::hover());
     let scale = ui.ctx().pixels_per_point();
     let shape = match line_box {
+        LineBox::Preferred { ascent, .. } => run.shape(
+            rect.min + vec2(0., (ascent - run.metrics.ascent).max(0.)),
+            scale,
+            color,
+        ),
         LineBox::Centered | LineBox::CenteredSystem => {
             run.centered_shape(rect.left_center(), scale, color)
         }
