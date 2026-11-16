@@ -28,7 +28,8 @@ fn sheet_picker_label(ui: &mut Ui, title: &str, p: Palette) {
             vec2(width, 22.),
             Layout::left_to_right(Align::Center),
             |ui| {
-                label(ui, title, 13., false, p.ink);
+                crate::mac_text::centered_label(ui, title, 13., false, p.ink)
+                    .unwrap_or_else(|| label(ui, title, 13., false, p.ink));
             },
         );
         return;
@@ -761,7 +762,9 @@ impl Dashboard {
         if MAC {
             let dismissed = ui
                 .horizontal(|ui| {
-                    label(ui, title, 17., true, p.ink);
+                    #[cfg(target_os = "macos")]
+                    crate::mac_text::centered_label(ui, title, 17., true, p.ink)
+                        .unwrap_or_else(|| label(ui, title, 17., true, p.ink));
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         let (_rect, mut close) =
                             ui.allocate_exact_size(vec2(16., 16.), Sense::click());

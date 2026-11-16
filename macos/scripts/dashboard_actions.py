@@ -644,7 +644,8 @@ def compare_window_placement(dashboard, work, original, library, fixture):
                     dashboard.wait_for(app.stdout, "ready")
                     dashboard.send(app.stdin, {"state": {"_0": fixture}})
                     dashboard.send(app.stdin, {"show": {"route": "dashboard"}})
-                    dashboard.wait_for(app.stdout, "route")
+                    # Both helpers start on Dashboard. Opening that route makes the
+                    # window visible without publishing a navigation change.
                     observed[phase] = controls.request("windowPlacement")
                     if phase == "fresh":
                         observed["moved"] = controls.request("moveDashboard")

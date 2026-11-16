@@ -690,7 +690,7 @@ pub fn text_block(ui: &mut Ui, text: &str, size: f32, semibold: bool, color: Col
 }
 
 pub fn natural_size(ui: &Ui, text: &str, size: f32, semibold: bool) -> Option<Vec2> {
-    Some(MeasuredLabel::new(ui, text, size, semibold, LineWidth::Natural)?.size)
+    Some(MeasuredLabel::natural(ui, text, size, semibold)?.size)
 }
 
 pub struct MeasuredLabel {
@@ -699,6 +699,10 @@ pub struct MeasuredLabel {
 }
 
 impl MeasuredLabel {
+    pub fn natural(ui: &Ui, text: &str, size: f32, semibold: bool) -> Option<Self> {
+        Self::new(ui, text, size, semibold, LineWidth::Natural)
+    }
+
     fn new(ui: &Ui, text: &str, size: f32, semibold: bool, line: LineWidth) -> Option<Self> {
         let scale = ui.ctx().pixels_per_point();
         let renderer = ui.ctx().plugin_opt::<TextRenderer>()?;

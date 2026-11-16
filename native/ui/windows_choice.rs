@@ -251,6 +251,42 @@ pub fn choose_document(
     )
 }
 
+// The template aligns a one-DIP stroked Path (0,0 → 4,4 → 8,0) inside
+// its border. WPF includes the miter and the far end of the flat cap in
+// the Path's desired size, then centers that box vertically.
+fn draw_arrow(ui: &Ui, field: Rect, ink: Color32) {
+    let diagonal = std::f32::consts::FRAC_1_SQRT_2;
+    let size = vec2(8. + diagonal / 2., 4. + diagonal);
+    let origin = pos2(field.right() - 11. - size.x, field.center().y - size.y / 2.);
+    let bounds = Rect::from_min_max(origin - Vec2::splat(diagonal / 2.), origin + size);
+    if !ui.is_rect_visible(bounds) {
+        return;
+    }
+    let scale = ui.pixels_per_point();
+    let bounds = bounds * scale;
+    let mut mesh = Mesh::default();
+    for y in bounds.top().floor() as i32..bounds.bottom().ceil() as i32 {
+        for x in bounds.left().floor() as i32..bounds.right().ceil() as i32 {
+            let mut covered = 0;
+            for sy in 0..8 {
+                let py = (y as f32 + (sy as f32 + 0.5) / 8.) / scale - origin.y;
+                for sx in 0..8 {
+                    let px = (x as f32 + (sx as f32 + 0.5) / 8.) / scale - origin.x;
+                    let arm = px.min(8. - px);
+                    if (py - arm).abs() <= diagonal && py + arm >= 0. {
+                        covered += 1;
+                    }
+                }
+            }
+            if covered > 0 {
+                let pixel = Rect::from_min_size(pos2(x as f32, y as f32), Vec2::splat(1.));
+                mesh.add_colored_rect(pixel / scale, ink.gamma_multiply(covered as f32 / 64.));
+            }
+        }
+    }
+    ui.painter().add(Shape::mesh(mesh));
+}
+
 fn choose_presented(
     ui: &mut Ui,
     name: &str,
@@ -367,15 +403,16 @@ fn choose_presented(
     let widgets = ui.visuals().widgets.clone();
     let surface = widgets.inactive.weak_bg_fill;
     let interact_size = ui.spacing().interact_size;
+    let button_padding = ui.spacing().button_padding;
+    // The selection presenter starts 10 DIPs inside the field. This margin
+    // belongs to the ComboBox even when the surrounding page uses wider buttons.
+    ui.spacing_mut().button_padding = vec2(10., 7.);
     let line_height = super::windows_text::line_height(size).unwrap_or(size);
     let document = documents.map(|docs| &docs[state.chosen]);
-    let show_default_arrow = document.is_none();
     let lines = document.map_or(1, |(_, body)| {
         body.bytes().filter(|&b| b == b'\n').count() + 1
     });
-    if document.is_some() {
-        ui.spacing_mut().interact_size.y = line_height * lines as f32 + 14.;
-    }
+    ui.spacing_mut().interact_size.y = line_height * lines as f32 + 14.;
     {
         let field = &mut ui.visuals_mut().widgets;
         field.active.weak_bg_fill = surface;
@@ -384,32 +421,11 @@ fn choose_presented(
     }
     let response = ComboBox::from_id_salt(name)
         .width(width)
-        .selected_text(
-            super::style::rich(
-                if document.is_some() {
-                    ""
-                } else {
-                    labels[state.chosen].as_ref()
-                },
-                size,
-                false,
-                ink,
-            )
-            .line_height(super::windows_text::line_height(size)),
-        )
-        .icon(move |ui, rect, visuals, _| {
-            if !show_default_arrow {
-                return;
-            }
-            let center = pos2(rect.right() - 5., rect.center().y);
-            let arrow = [vec2(-4., -2.), vec2(0., 2.), vec2(4., -2.)].map(|v| center + v);
-            ui.painter().add(Shape::line(
-                arrow.to_vec(),
-                Stroke::new(1.0_f32, visuals.fg_stroke.color),
-            ));
-        })
+        .selected_text("")
+        .icon(|_, _, _, _| {})
         .show_ui(ui, |ui| {
             ui.spacing_mut().interact_size = interact_size;
+            ui.spacing_mut().button_padding = button_padding;
             ui.visuals_mut().widgets = widgets.clone();
             for (index, label) in labels.iter().enumerate() {
                 let item = ui.selectable_label(state.highlighted == index, label.as_ref());
@@ -427,15 +443,16 @@ fn choose_presented(
         })
         .response;
     ui.spacing_mut().interact_size = interact_size;
+    ui.spacing_mut().button_padding = button_padding;
     ui.visuals_mut().widgets = widgets;
+    let bounds = response.rect;
+    let start = bounds.min + vec2(10., 7.);
+    let content = Rect::from_min_max(start, bounds.right_bottom() - vec2(28., 7.));
+    let clip = ui.clip_rect().intersect(content);
     if let Some((title, body)) = document {
         // The WPF ContentPresenter displays the selected record's ToString().
         // DisplayMemberPath supplies just the title to items in the open list.
         // Lay out its complete height but rasterize only visible lines of long notices.
-        let bounds = response.rect;
-        let start = bounds.min + vec2(10., 7.);
-        let content = Rect::from_min_max(start, bounds.right_bottom() - vec2(28., 7.));
-        let clip = ui.clip_rect().intersect(content);
         if clip.is_positive() {
             let first = ((clip.top() - start.y) / line_height).floor().max(0.) as usize;
             let end = ((clip.bottom() - start.y) / line_height).ceil() as usize;
@@ -464,11 +481,23 @@ fn choose_presented(
                 }
             }
         }
-        let center = pos2(bounds.right() - 14., bounds.center().y);
-        let arrow = [vec2(-4., -2.), vec2(0., 2.), vec2(4., -2.)].map(|v| center + v);
-        ui.painter()
-            .add(Shape::line(arrow.to_vec(), Stroke::new(1.0_f32, ink)));
+    } else if clip.is_positive() {
+        // WPF clips the selection to its presenter when the field is narrow.
+        let text = labels[state.chosen].as_ref();
+        let painter = ui.painter().with_clip_rect(clip);
+        if let Some(label) = super::windows_text::MeasuredLabel::natural(ui, text, size, false) {
+            label.paint(&painter, start, ink);
+        } else {
+            painter.text(
+                content.left_center(),
+                Align2::LEFT_CENTER,
+                text,
+                FontId::proportional(size),
+                ink,
+            );
+        }
     }
+    draw_arrow(ui, response.rect, ink);
     let open = ComboBox::is_open(ui.ctx(), id);
     if open {
         ui.data_mut(|d| d.insert_temp(highlight, state.highlighted));
@@ -531,6 +560,29 @@ fn choose_presented(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn long_selection_stays_inside_the_fixed_width_presenter() {
+        let ctx = Context::default();
+        let name = "Provider 필터";
+        let title = "A selected item wider than the entire field";
+        let mut field = Rect::NOTHING;
+        let output = ctx.run(RawInput::default(), |ctx| {
+            CentralPanel::default().show(ctx, |ui| {
+                let id = ui.make_persistent_id(Id::new(name));
+                choose(ui, name, 100., &[title], 0, 12.);
+                field = ctx.read_response(id).unwrap().rect;
+            });
+        });
+        assert_eq!(field.width(), 100.);
+        let label = output
+            .shapes
+            .iter()
+            .find(|entry| matches!(&entry.shape, Shape::Text(text) if text.galley.text() == title))
+            .expect("selected text");
+        assert_eq!(label.clip_rect.left(), field.left() + 10.);
+        assert_eq!(label.clip_rect.right(), field.right() - 28.);
+    }
 
     #[test]
     fn horizontal_focus_dash_covers_one_device_pixel_at_the_native_phase() {
