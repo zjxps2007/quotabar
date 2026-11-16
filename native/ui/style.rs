@@ -258,6 +258,9 @@ impl Palette {
             };
             style.spacing.scroll = egui::style::ScrollStyle::solid();
             if cfg!(windows) {
+                // WPF ToolTipService.InitialShowDelay and BetweenShowDelay, in seconds.
+                style.interaction.tooltip_delay = 1.0;
+                style.interaction.tooltip_grace_time = 0.1;
                 style.spacing.scroll.bar_width = 13.;
                 style.spacing.scroll.bar_inner_margin = 2.;
                 style.spacing.scroll.bar_outer_margin = 2.;
