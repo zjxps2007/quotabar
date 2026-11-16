@@ -176,8 +176,9 @@ def main():
             for theme in THEMES:
                 state = json.loads((REPORT / f"fixture-{theme}.json").read_text())
                 send(child.stdin, {"state": {"_0": state}})
-                send(child.stdin, {"show": {"route": "dashboard"}})
-                wait_for(child.stdout, "route")
+                for page in ("settings", "dashboard"):
+                    send(child.stdin, {"show": {"route": page}})
+                    assert wait_for(child.stdout, "route") == {"_0": page}
                 for route in ROUTES:
                     path = REPORT / f"{route}-{theme}.png"
                     send(child.stdin, {"capture": {"route": route, "path": str(path), "width": 1120, "height": 810}})

@@ -589,7 +589,11 @@ impl Dashboard {
                 );
             });
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                if link(ui, "계정 관리 →", p, p.bg).clicked() {
+                #[cfg(target_os = "macos")]
+                let button = crate::mac_text::plain_button(ui, "계정 관리 →", p.accent);
+                #[cfg(windows)]
+                let button = link(ui, "계정 관리 →", p, p.bg);
+                if button.clicked() {
                     self.navigate(ui.ctx(), "accounts", true);
                 }
             });

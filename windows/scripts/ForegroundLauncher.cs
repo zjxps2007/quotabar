@@ -38,6 +38,8 @@ namespace QuotaBarSmoke
         [DllImport("user32.dll")] private static extern bool SetWindowPos(IntPtr hwnd, IntPtr after, int x, int y, int w, int h, uint flags);
         [DllImport("user32.dll", SetLastError = true)] private static extern bool GetCursorPos(out Point point);
         [DllImport("user32.dll")] private static extern bool SetCursorPos(int x, int y);
+        [DllImport("user32.dll")] private static extern IntPtr WindowFromPoint(Point point);
+        [DllImport("user32.dll")] private static extern IntPtr SetFocus(IntPtr window);
         [DllImport("user32.dll")] private static extern void mouse_event(uint flags, uint x, uint y, uint data, UIntPtr extra);
         [DllImport("user32.dll")] private static extern IntPtr GetForegroundWindow();
         [DllImport("user32.dll")] private static extern bool GetGUIThreadInfo(uint thread, ref GuiThread info);
@@ -69,19 +71,32 @@ namespace QuotaBarSmoke
 
         public void TakeFocus()
         {
-            if (!SetWindowPos(Window, new IntPtr(-1), 35, 35, 340, 130, 0x50) || !SetCursorPos(95, 95))
-                throw new InvalidOperationException("Cannot place the foreground launcher's input target.");
-            mouse_event(2, 0, 0, 0, UIntPtr.Zero);
-            mouse_event(4, 0, 0, 0, UIntPtr.Zero);
-            if (!WaitForFocus(Window).Matches) throw new InvalidOperationException("Cannot focus the test launcher.");
-            if (!SetWindowPos(Window, new IntPtr(-2), 0, 0, 0, 0, 0x13))
-                throw new InvalidOperationException("Cannot restore launcher z-order.");
-            var stable = Stopwatch.StartNew();
-            while (stable.ElapsedMilliseconds < 400)
+            var deadline = Stopwatch.StartNew();
+            var point = new Point { X = 95, Y = 95 };
+            do
             {
+                if (!SetWindowPos(Window, new IntPtr(-1), 35, 35, 340, 130, 0x40) || !SetCursorPos(point.X, point.Y))
+                    throw new InvalidOperationException("Cannot place the foreground launcher's input target.");
                 Pump();
-                if (!ReadFocus(Window).Matches) throw new InvalidOperationException("Test launcher lost focus before launch.");
-            }
+                if (WindowFromPoint(point) != Window) continue;
+                mouse_event(2, 0, 0, 0, UIntPtr.Zero);
+                mouse_event(4, 0, 0, 0, UIntPtr.Zero);
+                Pump();
+                if (GetForegroundWindow() != Window) continue;
+                SetFocus(Window);
+                if (!SetWindowPos(Window, new IntPtr(-2), 0, 0, 0, 0, 0x13))
+                    throw new InvalidOperationException("Cannot restore launcher z-order.");
+                // A new dashboard may still be finishing its first activation.
+                // Start the next launch only after the click holds keyboard focus.
+                var stable = Stopwatch.StartNew();
+                while (ReadFocus(Window).Matches)
+                {
+                    if (stable.ElapsedMilliseconds >= 400) return;
+                    Pump();
+                }
+            } while (deadline.Elapsed < TimeSpan.FromSeconds(8));
+            var final = ReadFocus(Window);
+            throw new TimeoutException($"Launcher {final.Window} could not hold focus. Foreground {final.Foreground}, keyboard {final.Keyboard}, hit {WindowFromPoint(point)}.");
         }
 
         public sealed class Focus

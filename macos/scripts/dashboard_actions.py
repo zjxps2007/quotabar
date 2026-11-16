@@ -598,6 +598,21 @@ def capture_windows(dashboard, program, folder, library, fixture, output, theme,
                 refresh["help"] = controls.request("help", "새로고침")
             except (TimeoutError, ValueError) as error:
                 refresh["error"] = str(error)
+            label = "계정 관리 →"
+            manage = observed["manageAccountsButton"] = {}
+            manage["frame"] = controls.request("clickButton", label)["frame"]
+            manage["click"] = commands_after_input(dashboard, app.stdout, "route")
+            show("dashboard")
+            controls.request("press", label)
+            manage["press"] = commands_after_input(dashboard, app.stdout, "route")
+            show("settings")
+            controls.request("scrollerPosition", expected={"position": "top"})
+            controls.request("scrollContent")
+            reopen = observed["repeatSettingsShow"] = {}
+            reopen["before"] = controls.request("scrollerPosition", expected={"position": "bottom"})
+            dashboard.send(app.stdin, {"show": {"route": "settings"}})
+            reopen["routes"] = commands_after_input(dashboard, app.stdout, "route")
+            reopen["after"] = controls.request("scrollerPosition")
         except (OSError, ValueError, KeyError, RuntimeError, EOFError, subprocess.SubprocessError) as error:
             observed["error"] = str(error)
         finally:
@@ -653,13 +668,23 @@ def compare_windows(dashboard, work, original, library):
     frames_match = len(frames["original"]) == len(dashboard.THEMES) * len(PROVIDERS) * 4 and frames["original"] == frames["rust"]
     results["providerSwitchFramesIdentical"] = frames_match
     refresh_matches = True
+    manage_matches = True
     for theme in dashboard.THEMES:
         expected = results["original"][theme].get("refreshButton", {})
         actual = results["rust"][theme].get("refreshButton", {})
         refresh_matches &= (expected == actual and bool(expected.get("frame"))
                             and expected.get("click") == [{}] and expected.get("press") == [{}]
                             and expected.get("help") == {"found": True, "help": "새로고침 (⌘R)"})
+        expected = results["original"][theme].get("manageAccountsButton", {})
+        actual = results["rust"][theme].get("manageAccountsButton", {})
+        manage_matches &= (expected == actual and bool(expected.get("frame"))
+                           and expected.get("click") == expected.get("press") == [{"_0": "accounts"}])
     results["refreshButtonsIdentical"] = refresh_matches
+    results["manageAccountsButtonsIdentical"] = manage_matches
+    expected_reopen = {"before": {"position": "bottom"}, "routes": [], "after": {"position": "bottom"}}
+    reopen_matches = all(results[side][theme].get("repeatSettingsShow") == expected_reopen
+                         for side in ("original", "rust") for theme in dashboard.THEMES)
+    results["repeatSettingsShowIdentical"] = reopen_matches
     (dest / "comparison.json").write_text(json.dumps(results, ensure_ascii=False, indent=2))
     app_mark_matches = all(results[side][theme].get("appMark") == {"found": True, "help": None}
                            for side in ("original", "rust") for theme in dashboard.THEMES)
@@ -690,7 +715,9 @@ def compare_windows(dashboard, work, original, library):
     switch_matches = all(results[side][theme].get(kind) == {p: [False, True] for p in PROVIDERS}
                          for side in ("original", "rust") for theme in dashboard.THEMES
                          for kind in ("providerSwitches", "accessibleProviderSwitches"))
-    return app_mark_matches and message_matches and copied_accounts and documents_match and scroll_matches and activity_matches and switch_matches and frames_match and refresh_matches and all(row["identical"] for row in results["comparisons"].values())
+    return (app_mark_matches and message_matches and copied_accounts and documents_match and scroll_matches
+            and activity_matches and switch_matches and frames_match and refresh_matches and manage_matches and reopen_matches
+            and all(row["identical"] for row in results["comparisons"].values()))
 
 
 def compare(dashboard, work, original, fixture, library):

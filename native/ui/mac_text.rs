@@ -455,6 +455,31 @@ pub fn quota_percent(ui: &mut Ui, text: &str, color: Color32) -> Option<Response
     draw_label(ui, text, 11., Face::TabularDigits, color, LineBox::Stack)
 }
 
+pub fn plain_button(ui: &mut Ui, title: &str, color: Color32) -> Response {
+    let points = NSFont::systemFontSize() as f32;
+    let native = ui.ctx().plugin_opt::<Renderer>().and_then(|renderer| {
+        use eframe::emath::GuiRounding;
+        let mut renderer = renderer.lock();
+        let run = renderer.run(ui.ctx(), title, points, Face::Regular, color)?;
+        let scale = ui.pixels_per_point();
+        let size = vec2(
+            (run.size.x * scale).ceil() / scale,
+            system_line_height(ui, f64::from(points)),
+        );
+        let (id, slot) = ui.allocate_space(size);
+        let rect = Rect::from_min_size(slot.min.round_to_pixels(scale), size);
+        let response = ui.interact(rect, id, Sense::click());
+        ui.painter()
+            .add(run.centered_shape(rect.left_center(), scale, color));
+        Some(response)
+    });
+    let response = native.unwrap_or_else(|| {
+        ui.add(Button::new(crate::style::rich(title, points, false, color)).frame(false))
+    });
+    response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, ui.is_enabled(), title));
+    response.on_hover_cursor(CursorIcon::PointingHand)
+}
+
 pub fn hyperlink(
     ui: &mut Ui,
     title: &str,

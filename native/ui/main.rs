@@ -160,6 +160,15 @@ struct Dashboard {
 impl Dashboard {
     fn navigate(&mut self, ctx: &egui::Context, page: &str, notify: bool) {
         #[cfg(target_os = "macos")]
+        if notify && page == self.route {
+            // Showing an existing SwiftUI page keeps its scroll position. A
+            // minimized or hidden window has detached its hosting view.
+            if self.visible == Some(false) {
+                self.scroll_top = true;
+            }
+            return;
+        }
+        #[cfg(target_os = "macos")]
         if page == "accounts" && self.route != page {
             self.focus_query = true;
         } else if self.route == "accounts" && page != "accounts" {

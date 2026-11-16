@@ -195,6 +195,9 @@ try {
     $data | Add-Member -NotePropertyName includedFrameworks -NotePropertyValue @()
     $data | ConvertTo-Json | Set-Content -LiteralPath $result -Encoding utf8
     $data | ConvertTo-Json
+} catch {
+    if ($VerifyForeground) { $focus.error = $_.Exception.Message }
+    throw
 } finally {
     if ($launcher) { $launcher.Dispose() }
     if ($VerifyForeground) {
