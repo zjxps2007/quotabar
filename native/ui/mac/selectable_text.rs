@@ -77,6 +77,10 @@ impl SelectableText {
         self.parent.window()?.attachedSheet()?.contentView()
     }
 
+    pub fn content_view(&self) -> Retained<NSView> {
+        self.parent.clone()
+    }
+
     fn new(parent: Retained<NSView>) -> Self {
         Self {
             parent,

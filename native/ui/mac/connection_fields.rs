@@ -17,6 +17,7 @@ use std::cell::Cell;
 struct Editing {
     context: Context,
     command: Cell<Option<Key>>,
+    sheet: bool,
 }
 
 define_class!(
@@ -53,7 +54,7 @@ define_class!(
             } else {
                 None
             };
-            if let Some(key) = key.filter(|_| !editor.hasMarkedText()) {
+            if let Some(key) = key.filter(|_| self.ivars().sheet && !editor.hasMarkedText()) {
                 self.ivars().command.set(Some(key));
                 self.ivars().context.request_repaint_of(ViewportId::ROOT);
                 true
@@ -64,16 +65,51 @@ define_class!(
     }
 );
 
+impl Delegate {
+    fn new(parent: &NSView, context: &Context, sheet: bool) -> Retained<Self> {
+        unsafe {
+            msg_send![
+                super(Self::alloc(parent.mtm()).set_ivars(Editing {
+                    context: context.clone(),
+                    command: Cell::new(None),
+                    sheet,
+                })),
+                init
+            ]
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+struct FieldSpec {
+    id: &'static str,
+    label: &'static str,
+    placeholder: &'static str,
+}
+const SEARCH: FieldSpec = FieldSpec {
+    id: "accounts-query",
+    label: "계정 이름 또는 이메일 검색",
+    placeholder: "계정 이름 또는 이메일 검색",
+};
+
 pub enum Input {
     Alias,
     Path,
 }
 
 impl Input {
-    fn labels(&self) -> (&'static str, &'static str, &'static str) {
+    fn spec(&self) -> FieldSpec {
         match self {
-            Self::Alias => ("connect-alias", "계정 이름", "예: 개인 계정, 연구실"),
-            Self::Path => ("connect-path", "경로", "경로"),
+            Self::Alias => FieldSpec {
+                id: "connect-alias",
+                label: "계정 이름",
+                placeholder: "예: 개인 계정, 연구실",
+            },
+            Self::Path => FieldSpec {
+                id: "connect-path",
+                label: "경로",
+                placeholder: "경로",
+            },
         }
     }
 }
@@ -86,15 +122,14 @@ struct Editor {
 }
 
 impl Editor {
-    fn new(parent: &NSView, delegate: &Delegate, kind: Input) -> Self {
-        let (_, label, hint) = kind.labels();
+    fn new(parent: &NSView, delegate: &Delegate, spec: FieldSpec) -> Self {
         let field = NSTextField::textFieldWithString(&NSString::new(), parent.mtm());
         field.setBezeled(true);
         field.setBezelStyle(NSTextFieldBezelStyle::RoundedBezel);
         field.setUsesSingleLineMode(true);
-        field.setPlaceholderString(Some(&NSString::from_str(hint)));
-        field.setAccessibilityLabel(Some(&NSString::from_str(label)));
-        // AppKit's delegate is weak. ConnectionFields owns it for both editors.
+        field.setPlaceholderString(Some(&NSString::from_str(spec.placeholder)));
+        field.setAccessibilityLabel(Some(&NSString::from_str(spec.label)));
+        // AppKit's delegate is weak. The owner retains it until the field is removed.
         unsafe { field.setDelegate(Some(ProtocolObject::from_ref(delegate))) };
         let clip = NSView::initWithFrame(NSView::alloc(parent.mtm()), NSRect::ZERO);
         clip.setHidden(true);
@@ -145,18 +180,10 @@ pub struct ConnectionFields {
 
 impl ConnectionFields {
     pub fn new(parent: Retained<NSView>, context: &Context) -> Self {
-        let delegate: Retained<Delegate> = unsafe {
-            msg_send![
-                super(Delegate::alloc(parent.mtm()).set_ivars(Editing {
-                    context: context.clone(),
-                    command: Cell::new(None),
-                })),
-                init
-            ]
-        };
+        let delegate = Delegate::new(&parent, context, true);
         Self {
-            alias: Editor::new(&parent, &delegate, Input::Alias),
-            path: Editor::new(&parent, &delegate, Input::Path),
+            alias: Editor::new(&parent, &delegate, Input::Alias.spec()),
+            path: Editor::new(&parent, &delegate, Input::Path.spec()),
             parent,
             delegate,
         }
@@ -175,6 +202,35 @@ impl ConnectionFields {
     }
 }
 
+pub struct AccountSearch {
+    parent: Retained<NSView>,
+    editor: Editor,
+    _delegate: Retained<Delegate>,
+}
+
+impl AccountSearch {
+    pub fn new(parent: Retained<NSView>, context: &Context) -> Self {
+        let delegate = Delegate::new(&parent, context, false);
+        Self {
+            editor: Editor::new(&parent, &delegate, SEARCH),
+            parent,
+            _delegate: delegate,
+        }
+    }
+
+    pub fn show(
+        field: Option<&mut Self>,
+        ui: &mut Ui,
+        value: &mut String,
+        width: f32,
+        focus: bool,
+        palette: style::Palette,
+    ) {
+        let native = field.map(|field| (&*field.parent, &mut field.editor));
+        text_input(native, ui, SEARCH, value, width, focus, palette);
+    }
+}
+
 pub fn connection_input(
     fields: Option<&mut ConnectionFields>,
     ui: &mut Ui,
@@ -184,34 +240,42 @@ pub fn connection_input(
     focus: bool,
     palette: style::Palette,
 ) {
-    let (id, label, hint) = kind.labels();
-    let Some(fields) = fields else {
+    let spec = kind.spec();
+    let native = fields.map(|fields| {
+        let editor = match kind {
+            Input::Alias => &mut fields.alias,
+            Input::Path => &mut fields.path,
+        };
+        (&*fields.parent, editor)
+    });
+    text_input(native, ui, spec, value, width, focus, palette);
+}
+
+fn text_input(
+    native: Option<(&NSView, &mut Editor)>,
+    ui: &mut Ui,
+    spec: FieldSpec,
+    value: &mut String,
+    width: f32,
+    focus: bool,
+    palette: style::Palette,
+) {
+    let Some((parent, editor)) = native else {
         // An offscreen framebuffer cannot composite an AppKit subview.
-        let field = style::mac_field(ui, value, hint, id, width, palette);
+        let field = style::mac_field(ui, value, spec.placeholder, spec.id, width, palette);
         if focus {
             field.request_focus();
         }
-        accessibility::text_value(ui, field, value, label);
+        accessibility::text_value(ui, field, value, spec.label);
         return;
     };
-    let editor = match kind {
-        Input::Alias => &mut fields.alias,
-        Input::Path => &mut fields.path,
-    };
     let (rect, _) = ui.allocate_exact_size(vec2(width, 22.), Sense::hover());
-    let response = ui.interact(rect, Id::new(id), Sense::focusable_noninteractive());
+    let response = ui.interact(rect, Id::new(spec.id), Sense::focusable_noninteractive());
     let zoom = f64::from(ui.ctx().zoom_factor());
     // The native focus ring extends outside the field. Clip only where the
-    // sheet's scroll view actually clips the control.
+    // containing UI actually clips the control.
     let visible = rect.expand(5.).intersect(ui.clip_rect());
-    place_clipped_view(
-        &fields.parent,
-        &editor.clip,
-        &editor.field,
-        rect,
-        visible,
-        zoom,
-    );
+    place_clipped_view(parent, &editor.clip, &editor.field, rect, visible, zoom);
     let font = NSFont::systemFontOfSize(13. * zoom);
     if editor.field.font().as_ref() != Some(&font) {
         editor.field.setFont(Some(&font));
@@ -219,21 +283,22 @@ pub fn connection_input(
     if editor.field.isEnabled() != ui.is_enabled() {
         if !ui.is_enabled()
             && editor.field.currentEditor().is_some()
-            && let Some(window) = fields.parent.window()
+            && let Some(window) = parent.window()
         {
             window.makeFirstResponder(None);
         }
         editor.field.setEnabled(ui.is_enabled());
     }
     editor.sync(value);
-    response.widget_info(|| WidgetInfo::text_edit(ui.is_enabled(), &*value, &*value, hint));
+    response
+        .widget_info(|| WidgetInfo::text_edit(ui.is_enabled(), &*value, &*value, spec.placeholder));
     let gain = response.gained_focus();
     let editing = editor.field.currentEditor().is_some();
     if editing && !editor.was_editing {
         response.request_focus();
     }
     editor.was_editing = editing;
-    accessibility::text_value(ui, response, value, label);
+    accessibility::text_value(ui, response, value, spec.label);
     if editor.last_value.as_ref() != Some(value) {
         editor.sync(value);
     }
@@ -241,7 +306,7 @@ pub fn connection_input(
         && visible.is_positive()
         && (focus || gain)
         && editor.field.currentEditor().is_none()
-        && let Some(window) = fields.parent.window()
+        && let Some(window) = parent.window()
     {
         window.makeFirstResponder(Some(&editor.field));
     }

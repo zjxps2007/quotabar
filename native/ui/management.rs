@@ -41,20 +41,17 @@ impl Dashboard {
             }
             let w = (width - 300.).clamp(64., 280.);
             #[cfg(target_os = "macos")]
-            let field = {
-                let field = mac_field(
-                    ui,
-                    &mut self.query,
-                    "계정 이름 또는 이메일 검색",
-                    "accounts-query",
-                    w,
-                    p,
-                );
-                if std::mem::take(&mut self.focus_query) {
-                    field.request_focus();
+            {
+                if self.capture.is_some() {
+                    self.account_search = None;
+                } else if self.account_search.is_none() && let Some(host) = &self.selectable_text {
+                    self.account_search = Some(crate::mac::AccountSearch::new(host.content_view(), ui.ctx()));
                 }
-                field
-            };
+                crate::mac::AccountSearch::show(
+                    self.account_search.as_mut(), ui, &mut self.query, w,
+                    std::mem::take(&mut self.focus_query), p,
+                );
+            }
             #[cfg(windows)]
             let field = ui.add_sized(
                 [w, 46.],
@@ -62,6 +59,7 @@ impl Dashboard {
                     .hint_text(rich("계정 이름 또는 이메일 검색", 11., false, p.muted))
                     .margin(Margin::symmetric(11, 15)),
             );
+            #[cfg(windows)]
             crate::accessibility::text_value(
                 ui,
                 field,

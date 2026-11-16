@@ -159,6 +159,23 @@ def exercise(dashboard, executable, folder, library, fixture, observed, help_tex
             send({"show": {"route": "accounts"}})
             route("accounts")
             time.sleep(0.35)
+            search_hint = "계정 이름 또는 이메일 검색"
+            monitor_label = f"Codex({account['name']}) 모니터링"
+            monitor_help = {"help": "끄면 이 계정의 조회를 일시 정지합니다.", "found": True}
+            for term, matches in ((account["name"], True), ("찾을 수 없는 계정 🧪", False)):
+                controls.request("focusField", search_hint)
+                edited_search = controls.request("editField", search_hint, value=term)
+                if edited_search["value"] != term or edited_search["marked"]:
+                    raise ValueError(f"Search composition did not commit: {edited_search}")
+                controls.request("help", monitor_label, monitor_help if matches else {"help": None, "found": False})
+                observed.append({"searchMatchesAccount": matches})
+            menu("Dashboard 열기", "route", "dashboard")
+            controls.request("fieldValue", search_hint, {"found": False})
+            send({"show": {"route": "accounts"}})
+            route("accounts")
+            controls.request("fieldValue", search_hint, {"value": ""})
+            controls.request("help", monitor_label, monitor_help)
+            observed.append({"reopeningAccountsClearsSearch": True})
             for previous, provider in (("전체 Provider", "Gemini"), ("Gemini", "전체 Provider")):
                 selection = controls.request("providerSelect", provider)
                 if selection["checked"] != [previous] or selection["choices"] != ["전체 Provider", "Codex", "Claude", "Gemini"]:

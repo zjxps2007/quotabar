@@ -135,6 +135,8 @@ struct Dashboard {
     query: String,
     #[cfg(target_os = "macos")]
     focus_query: bool,
+    #[cfg(target_os = "macos")]
+    account_search: Option<mac::AccountSearch>,
     attention: bool,
     dialog: Option<dialogs::Dialog>,
     assets: style::Assets,
@@ -160,6 +162,12 @@ impl Dashboard {
         #[cfg(target_os = "macos")]
         if page == "accounts" && self.route != page {
             self.focus_query = true;
+        } else if self.route == "accounts" && page != "accounts" {
+            // The reference owns these filters in the AccountsView's local state.
+            self.account_search = None;
+            self.query.clear();
+            self.filter = "전체 Provider".into();
+            self.attention = false;
         }
         // WPF dispatches the activity anchor at Loaded priority, after the
         // window and its ScrollViewer have measured their final client area.
@@ -514,6 +522,8 @@ fn main() -> eframe::Result {
             query: String::new(),
             #[cfg(target_os = "macos")]
             focus_query: false,
+            #[cfg(target_os = "macos")]
+            account_search: None,
             attention: false,
             dialog: None,
             capture: None,

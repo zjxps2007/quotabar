@@ -465,22 +465,24 @@ static NSArray *insertionColor(NSTextView *editor) {
     return rgb ?: @[];
 }
 
-static NSDictionary *editConnectionField(NSWindow *sheet, NSDictionary *request) {
+static NSDictionary *editTextField(NSWindow *window, NSDictionary *request) {
     NSString *op = request[@"op"], *label = request[@"label"];
-    for (NSTextField *field in connectionFields(sheet)) {
+    for (NSTextField *field in connectionFields(window)) {
         if (![field.placeholderString isEqualToString:label]) continue;
+        if ([op isEqual:@"fieldValue"])
+            return @{@"value": field.currentEditor.string ?: field.stringValue};
         if ([op isEqual:@"focusField"]) {
             NSPoint point = [field convertPoint:NSMakePoint(NSMidX(field.bounds), NSMidY(field.bounds)) toView:nil];
             for (NSNumber *kind in @[@(NSEventTypeLeftMouseDown), @(NSEventTypeLeftMouseUp)]) {
                 NSEvent *event = [NSEvent mouseEventWithType:kind.unsignedIntegerValue location:point modifierFlags:0
-                    timestamp:NSProcessInfo.processInfo.systemUptime windowNumber:sheet.windowNumber context:nil
+                    timestamp:NSProcessInfo.processInfo.systemUptime windowNumber:window.windowNumber context:nil
                     eventNumber:0 clickCount:1 pressure:kind.unsignedIntegerValue == NSEventTypeLeftMouseDown ? 1 : 0];
                 [NSApp postEvent:event atStart:NO];
             }
             return @{@"clicked": label};
         }
         NSTextView *editor = (NSTextView *)field.currentEditor;
-        if (![editor isKindOfClass:NSTextView.class] || sheet.firstResponder != editor)
+        if (![editor isKindOfClass:NSTextView.class] || window.firstResponder != editor)
             return @{@"pending": @"clicked field has no first responder", @"field": label};
         if ([op isEqual:@"editField"]) {
             NSString *value = request[@"value"];
@@ -494,12 +496,13 @@ static NSDictionary *editConnectionField(NSWindow *sheet, NSDictionary *request)
         BOOL escape = [request[@"value"] isEqual:@"Escape"];
         NSString *characters = escape ? @"\x1b" : @"\r";
         NSEvent *event = [NSEvent keyEventWithType:NSEventTypeKeyDown location:NSZeroPoint modifierFlags:0
-            timestamp:NSProcessInfo.processInfo.systemUptime windowNumber:sheet.windowNumber context:nil
+            timestamp:NSProcessInfo.processInfo.systemUptime windowNumber:window.windowNumber context:nil
             characters:characters charactersIgnoringModifiers:characters isARepeat:NO keyCode:(escape ? 53 : 36)];
         [NSApp postEvent:event atStart:NO];
         return @{@"key": request[@"value"]};
     }
-    return @{@"pending": @"editable field", @"field": label, @"visible": connectionFieldViews(sheet)};
+    if ([op isEqual:@"fieldValue"]) return @{@"found": @NO};
+    return @{@"pending": @"editable field", @"field": label, @"visible": connectionFieldViews(window)};
 }
 
 static NSDictionary *perform(NSDictionary *request) {
@@ -507,8 +510,8 @@ static NSDictionary *perform(NSDictionary *request) {
     if (!window) return @{@"pending": @"dashboard window"};
     NSString *op = request[@"op"], *label = request[@"label"];
     if ([op isEqual:@"connectionFields"]) return @{@"fields": connectionFieldViews(window.attachedSheet)};
-    if ([@[@"focusField", @"editField", @"fieldKey"] containsObject:op])
-        return editConnectionField(window.attachedSheet, request);
+    if ([@[@"focusField", @"editField", @"fieldKey", @"fieldValue"] containsObject:op])
+        return editTextField(window.attachedSheet ?: window, request);
     if ([op isEqual:@"selectText"] || [op isEqual:@"copySelection"] || [op isEqual:@"selectionStyle"])
         window = window.attachedSheet ?: window;
     if ([op isEqual:@"selectionStyle"]) return selectionStyle(window);
