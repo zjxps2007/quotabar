@@ -1,4 +1,4 @@
-param([string]$ApplicationDirectory)
+param([string]$ApplicationDirectory, [switch]$VerifyForeground)
 . "$PSScriptRoot\common.ps1"
 if (-not $ApplicationDirectory) { $ApplicationDirectory = Join-Path $RepoRoot 'artifacts\QuotaBar-Windows-x64' }
 $exe = Join-Path $ApplicationDirectory 'QuotaBar.Monitor.exe'
@@ -104,6 +104,18 @@ if (-not ('QuotaBarSmoke.Window' -as [type])) {
         [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr window);
 '@
 }
+$launcher = $null
+if ($VerifyForeground) {
+    if (-not ('QuotaBarSmoke.ForegroundLauncher' -as [type])) { Add-Type -Path "$PSScriptRoot/ForegroundLauncher.cs" }
+    $focus = [ordered]@{ monitorSHA256 = (Get-FileHash $exe -Algorithm SHA256).Hash; phases = [ordered]@{} }
+}
+function Assert-WindowFocus($Phase, [IntPtr]$ExpectedWindow) {
+    $actual = [QuotaBarSmoke.ForegroundLauncher]::WaitForFocus($ExpectedWindow)
+    $focus.phases[$Phase] = $actual
+    if (-not $actual.Matches) {
+        throw "$Phase expected window $ExpectedWindow, foreground $($actual.Foreground), keyboard focus $($actual.Keyboard)."
+    }
+}
 $monitor = [Diagnostics.Process]::Start($start)
 try {
     $deadline = [DateTime]::UtcNow.AddSeconds(10)
@@ -112,8 +124,18 @@ try {
         Start-Sleep -Milliseconds 50
     }
     $childFilter = "ParentProcessId=$($monitor.Id) AND Name='QuotaBar.Dashboard.exe'"
+    if ($VerifyForeground) {
+        $launcher = [QuotaBarSmoke.ForegroundLauncher]::new()
+        $focus.launcher = $launcher.Window.ToInt64()
+        $focus.monitorPid = $monitor.Id
+        $launcher.TakeFocus()
+    }
     Invoke-SecondaryMonitor
     if (Get-CimInstance Win32_Process -Filter $childFilter) { throw 'A background relaunch opened a dashboard.' }
+    if ($VerifyForeground) {
+        Assert-WindowFocus 'background' $launcher.Window
+        $launcher.TakeFocus()
+    }
     [void]$start.ArgumentList.Remove('--background')
     Invoke-SecondaryMonitor
     $deadline = [DateTime]::UtcNow.AddSeconds(10)
@@ -129,18 +151,27 @@ try {
     } while ($true)
     $childId = $dashboard.Id
     $window = $dashboard.MainWindowHandle
+    if ($VerifyForeground) {
+        $focus.dashboardPid = $childId
+        Assert-WindowFocus 'firstOpen' $window
+        $launcher.TakeFocus()
+        Invoke-SecondaryMonitor
+        Assert-WindowFocus 'alreadyVisible' $window
+    }
     [void][QuotaBarSmoke.Window]::ShowWindowAsync($window, 6) # SW_MINIMIZE
     $deadline = [DateTime]::UtcNow.AddSeconds(5)
     while (-not [QuotaBarSmoke.Window]::IsIconic($window)) {
         if ([DateTime]::UtcNow -ge $deadline) { throw 'The dashboard did not minimize.' }
         Start-Sleep -Milliseconds 50
     }
+    if ($VerifyForeground) { $launcher.TakeFocus() }
     Invoke-SecondaryMonitor
     $deadline = [DateTime]::UtcNow.AddSeconds(10)
     while ([QuotaBarSmoke.Window]::IsIconic($window)) {
         if ([DateTime]::UtcNow -ge $deadline) { throw 'Relaunch did not restore the existing window.' }
         Start-Sleep -Milliseconds 50
     }
+    if ($VerifyForeground) { Assert-WindowFocus 'minimized' $window }
     $dashboard.Refresh()
     $children = @(Get-CimInstance Win32_Process -Filter $childFilter)
     if ($children.Count -ne 1 -or $children[0].ProcessId -ne $childId -or $dashboard.MainWindowHandle -ne $window) {
@@ -164,4 +195,11 @@ try {
     $data | Add-Member -NotePropertyName includedFrameworks -NotePropertyValue @()
     $data | ConvertTo-Json | Set-Content -LiteralPath $result -Encoding utf8
     $data | ConvertTo-Json
-} finally { if (-not $monitor.HasExited) { $monitor.Kill($true) }; $monitor.Dispose() }
+} finally {
+    if ($launcher) { $launcher.Dispose() }
+    if ($VerifyForeground) {
+        $focus | ConvertTo-Json -Depth 4 | Set-Content -Encoding utf8 -LiteralPath (Join-Path $RepoRoot 'artifacts/windows/foreground.json')
+    }
+    if (-not $monitor.HasExited) { $monitor.Kill($true) }
+    $monitor.Dispose()
+}

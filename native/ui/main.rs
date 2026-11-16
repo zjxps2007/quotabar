@@ -223,6 +223,9 @@ impl Dashboard {
                 self.navigate(ctx, &page, true);
                 ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
                 ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
+                #[cfg(windows)]
+                platform::activate_dashboard(frame);
+                #[cfg(target_os = "macos")]
                 ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
                 self.visibility(true);
             }

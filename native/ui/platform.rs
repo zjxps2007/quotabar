@@ -213,6 +213,31 @@ pub fn confirm_remove(
 }
 
 #[cfg(windows)]
+pub fn activate_dashboard(frame: &eframe::Frame) {
+    use windows_sys::Win32::UI::{
+        Input::KeyboardAndMouse::IsWindowEnabled, WindowsAndMessaging::*,
+    };
+    let Some(owner) = crate::hwnd(frame) else {
+        return;
+    };
+    unsafe {
+        if IsIconic(owner) != 0 {
+            ShowWindow(owner, SW_RESTORE);
+        } else if IsWindowVisible(owner) == 0 {
+            ShowWindow(owner, SW_SHOW);
+        }
+        let popup = GetLastActivePopup(owner);
+        let target =
+            if IsWindowEnabled(owner) == 0 && !popup.is_null() && IsWindowVisible(popup) != 0 {
+                popup
+            } else {
+                owner
+            };
+        SetForegroundWindow(target);
+    }
+}
+
+#[cfg(windows)]
 pub fn dialog_hwnd(
     frame: &eframe::Frame,
     title: &str,

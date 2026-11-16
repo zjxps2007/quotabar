@@ -113,6 +113,12 @@ impl Host {
         Ok(())
     }
     fn send_route(&self, session: &Session) {
+        // The dashboard owns the user-facing window in a separate process.
+        unsafe {
+            windows_sys::Win32::UI::WindowsAndMessaging::AllowSetForegroundWindow(
+                session.child.pid(),
+            )
+        };
         let route = self.route.borrow();
         let message =
             serde_json::json!({"version":1, "type":"show", "requestId":null, "payload": &*route});

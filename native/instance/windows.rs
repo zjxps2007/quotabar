@@ -15,6 +15,7 @@ use windows_sys::Win32::{
     Security::Authorization::SE_KERNEL_OBJECT,
     Storage::FileSystem::*,
     System::{IO::*, Pipes::*, Threading::*},
+    UI::WindowsAndMessaging::AllowSetForegroundWindow,
 };
 
 fn event() -> io::Result<OwnedHandle> {
@@ -146,6 +147,15 @@ impl Activation {
             }
         };
         self.owner.check_owner(&pipe, SE_KERNEL_OBJECT)?;
+        // A user launch can pass its foreground permission to the resident monitor.
+        // Keep the one-byte activation message compatible with existing installs.
+        let mut monitor = 0;
+        unsafe {
+            if GetNamedPipeServerProcessId(pipe.as_raw_handle(), &mut monitor) != 0 && monitor != 0
+            {
+                AllowSetForegroundWindow(monitor);
+            }
+        }
         let remaining = deadline
             .saturating_duration_since(Instant::now())
             .as_millis() as u32;

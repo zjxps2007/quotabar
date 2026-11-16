@@ -88,8 +88,8 @@ jobs:
         run: |
           $env:QUOTABAR_TEST_HELPER = Join-Path $PWD 'artifacts/QuotaBar-Windows-x64/StatusLine/QuotaBar.StatusLine.exe'
           ./windows/scripts/test.ps1 -NoBuild
-      - name: Packaged Dashboard lifetime and parent crash cleanup
-        run: ./windows/scripts/smoke.ps1
+      - name: Packaged Dashboard lifetime, foreground relaunch and parent crash cleanup
+        run: ./windows/scripts/smoke.ps1 -VerifyForeground
       - name: Per-user Windows EXE installer
         id: installer
         if: ${{ !cancelled() && steps.package.outcome == 'success' }}
@@ -103,6 +103,7 @@ jobs:
           name: windows-validation-logs
           path: |
             artifacts/windows/tests.log
+            artifacts/windows/foreground.json
             artifacts/windows/installer-test-*/*.log
           if-no-files-found: warn
       - uses: actions/upload-artifact@v7

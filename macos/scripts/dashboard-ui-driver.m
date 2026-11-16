@@ -669,6 +669,14 @@ static NSDictionary *perform(NSDictionary *request) {
     BOOL lookingForHelp = [op isEqual:@"help"];
     BOOL lookingForElement = [op isEqual:@"present"];
     id element = control(target, label, available, lookingForHelp || lookingForElement);
+    if ([op isEqual:@"clickButton"]) {
+        if (![element respondsToSelector:@selector(accessibilityFrame)])
+            return @{@"pending": @"accessible button", @"label": label, @"available": available};
+        NSRect frame = [target convertRectFromScreen:[element accessibilityFrame]];
+        if (NSIsEmptyRect(frame)) return @{@"pending": @"button frame"};
+        postClick(target, NSMakePoint(NSMidX(frame), NSMidY(frame)));
+        return @{@"frame": rectangle(frame)};
+    }
     if (lookingForElement) return @{@"found": @(element != nil)};
     if (lookingForHelp) {
         NSString *help = [element respondsToSelector:@selector(accessibilityHelp)] ? [element accessibilityHelp] : nil;

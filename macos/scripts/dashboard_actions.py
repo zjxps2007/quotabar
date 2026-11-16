@@ -57,6 +57,19 @@ class Controls:
         raise TimeoutError(f"{op} {label}: expected {expected}, observed {result}")
 
 
+def commands_after_input(dashboard, stream, name):
+    events = []
+    deadline = time.monotonic() + 3
+    while (remaining := deadline - time.monotonic()) > 0:
+        if not select.select([stream], [], [], remaining)[0]:
+            break
+        message = dashboard.receive(stream, deadline)
+        if name in message:
+            events.append(message[name])
+            deadline = time.monotonic() + 0.4
+    return events
+
+
 def exercise(dashboard, executable, folder, library, fixture, observed, help_text):
     folder.mkdir()
     env = {**os.environ, **dashboard.fixture_environment(), "HOME": str(folder),
@@ -568,20 +581,23 @@ def capture_windows(dashboard, program, folder, library, fixture, output, theme,
                         if op == "clickSwitch":
                             capture(f"switch-{provider}-{'on' if account['showInMenuBar'] else 'off'}")
                         click = controls.request(op, label, value=not visible)
-                        replies = []
-                        deadline = time.monotonic() + 3
-                        while (remaining := deadline - time.monotonic()) > 0:
-                            if not select.select([app.stdout], [], [], remaining)[0]:
-                                break
-                            event = dashboard.receive(app.stdout, deadline)
-                            if "menuBarVisibility" in event:
-                                replies.append(event["menuBarVisibility"])
-                                deadline = time.monotonic() + 0.4
+                        replies = commands_after_input(dashboard, app.stdout, "menuBarVisibility")
                         events.append({**click, "commands": replies})
                         if click["before"] == (not visible) and replies == [{"_0": account["id"], "_1": visible}]:
                             changes.append(visible)
                         account["showInMenuBar"] = visible
                         dashboard.send(app.stdin, {"state": {"_0": state}})
+            # Exercise the header after capturing the unhovered reference scenes.
+            refresh = observed["refreshButton"] = {}
+            try:
+                click = controls.request("clickButton", "새로고침")
+                refresh["frame"] = click["frame"]
+                refresh["click"] = commands_after_input(dashboard, app.stdout, "refreshAll")
+                controls.request("press", "새로고침")
+                refresh["press"] = commands_after_input(dashboard, app.stdout, "refreshAll")
+                refresh["help"] = controls.request("help", "새로고침")
+            except (TimeoutError, ValueError) as error:
+                refresh["error"] = str(error)
         except (OSError, ValueError, KeyError, RuntimeError, EOFError, subprocess.SubprocessError) as error:
             observed["error"] = str(error)
         finally:
@@ -636,6 +652,14 @@ def compare_windows(dashboard, work, original, library):
     }
     frames_match = len(frames["original"]) == len(dashboard.THEMES) * len(PROVIDERS) * 4 and frames["original"] == frames["rust"]
     results["providerSwitchFramesIdentical"] = frames_match
+    refresh_matches = True
+    for theme in dashboard.THEMES:
+        expected = results["original"][theme].get("refreshButton", {})
+        actual = results["rust"][theme].get("refreshButton", {})
+        refresh_matches &= (expected == actual and bool(expected.get("frame"))
+                            and expected.get("click") == [{}] and expected.get("press") == [{}]
+                            and expected.get("help") == {"found": True, "help": "새로고침 (⌘R)"})
+    results["refreshButtonsIdentical"] = refresh_matches
     (dest / "comparison.json").write_text(json.dumps(results, ensure_ascii=False, indent=2))
     app_mark_matches = all(results[side][theme].get("appMark") == {"found": True, "help": None}
                            for side in ("original", "rust") for theme in dashboard.THEMES)
@@ -666,7 +690,7 @@ def compare_windows(dashboard, work, original, library):
     switch_matches = all(results[side][theme].get(kind) == {p: [False, True] for p in PROVIDERS}
                          for side in ("original", "rust") for theme in dashboard.THEMES
                          for kind in ("providerSwitches", "accessibleProviderSwitches"))
-    return app_mark_matches and message_matches and copied_accounts and documents_match and scroll_matches and activity_matches and switch_matches and frames_match and all(row["identical"] for row in results["comparisons"].values())
+    return app_mark_matches and message_matches and copied_accounts and documents_match and scroll_matches and activity_matches and switch_matches and frames_match and refresh_matches and all(row["identical"] for row in results["comparisons"].values())
 
 
 def compare(dashboard, work, original, fixture, library):

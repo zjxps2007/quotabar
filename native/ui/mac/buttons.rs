@@ -1,11 +1,13 @@
 use super::{bitmap_pixels, bitmap_rep};
 use block2::StackBlock;
 use eframe::egui::*;
+use eframe::emath::GuiRounding;
 use objc2::{MainThreadMarker, MainThreadOnly, msg_send, rc::Retained, sel};
 use objc2_app_kit::{
-    NSAppearance, NSAppearanceCustomization, NSApplication, NSButton, NSCellImagePosition, NSColor,
-    NSControl, NSControlSize, NSFont, NSImage, NSPopUpButton, NSSegmentDistribution,
-    NSSegmentSwitchTracking, NSSegmentedControl, NSSwitch, NSUserInterfaceLayoutDirection,
+    NSAppearance, NSAppearanceCustomization, NSApplication, NSAttributedStringNSStringDrawing,
+    NSButton, NSCellImagePosition, NSColor, NSControl, NSControlSize, NSFont, NSImage,
+    NSPopUpButton, NSSegmentDistribution, NSSegmentSwitchTracking, NSSegmentedControl, NSSwitch,
+    NSTextAlignment, NSUserInterfaceLayoutDirection,
 };
 use objc2_foundation::{NSArray, NSObjectProtocol, NSPoint, NSRect, NSSize, NSString};
 
@@ -169,6 +171,13 @@ fn push_button(
     }) {
         button.setImage(Some(&icon));
         button.setImagePosition(NSCellImagePosition::ImageLeading);
+        let rtl =
+            button.userInterfaceLayoutDirection() == NSUserInterfaceLayoutDirection::RightToLeft;
+        button.setAlignment(if rtl {
+            NSTextAlignment::Left
+        } else {
+            NSTextAlignment::Right
+        });
     }
     button
 }
@@ -431,7 +440,15 @@ pub fn standard_button(
             *d.get_temp_mut_or_insert_with(key, || {
                 let button = push_button(main, title, symbol, control_size, font_size);
                 button.sizeToFit();
-                let size = button.alignmentRectForFrame(button.frame()).size;
+                let mut size = button.alignmentRectForFrame(button.frame()).size;
+                if let Some(image) = button.image() {
+                    // A SwiftUI Label places its symbol and title eight points
+                    // apart, with eight points of padding on each side.
+                    size.width = image.size().width
+                        + 8.
+                        + button.attributedTitle().size().width.ceil()
+                        + 16.;
+                }
                 vec2(size.width as f32, size.height as f32)
             })
         })
@@ -448,7 +465,14 @@ pub fn standard_button(
         )
     };
     let normal = button_image(ui, title, symbol, control_size, font_size, size, false)?;
-    let (rect, response) = ui.allocate_exact_size(size, Sense::click());
+    let (rect, response) = if symbol.is_some() {
+        // SwiftUI aligns the label's control and its accessibility frame to the backing pixel grid.
+        let (id, slot) = ui.allocate_space(size);
+        let rect = Rect::from_min_size(slot.min.round_to_pixels(ui.pixels_per_point()), size);
+        (rect, ui.interact(rect, id, Sense::click()))
+    } else {
+        ui.allocate_exact_size(size, Sense::click())
+    };
     let image = if response.is_pointer_button_down_on() {
         button_image(ui, title, symbol, control_size, font_size, size, true).unwrap_or(normal)
     } else {
