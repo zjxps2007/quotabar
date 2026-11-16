@@ -391,7 +391,7 @@ impl Dashboard {
             });
         });
         if !a.path.is_empty() {
-            ui.add_space(if MAC { 16. } else { 14. });
+            ui.add_space(if MAC { 15. } else { 14. });
             let title = if a.provider == "Claude" {
                 "연결한 설정 폴더"
             } else {
@@ -665,7 +665,7 @@ impl Dashboard {
                 }
                 ui.add_space(12.);
                 system_label(ui, "설정 위치", 10., false, p.muted);
-                ui.add_space(12.);
+                ui.add_space(13.);
                 let path = crate::mac::data_path();
                 let path = path.to_string_lossy();
                 if let Some(fields) = self.native_selectable_text(ui) {

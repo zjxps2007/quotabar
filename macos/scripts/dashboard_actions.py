@@ -347,6 +347,7 @@ def capture_windows(dashboard, program, folder, library, fixture, output, theme,
             try:
                 controls.request("selectText", label)
                 capture(scene)
+                observed[key + "SelectionStyle"] = controls.request("selectionStyle")
                 controls.request("copySelection")
                 observed[key + "Clipboard"] = controls.request("selectionClipboard")
             except (ValueError, TimeoutError) as error:

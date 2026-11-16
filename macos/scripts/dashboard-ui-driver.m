@@ -399,11 +399,38 @@ static NSDictionary *visibleText(NSURL *frame, BOOL activity) {
     return @{@"error": @"could not identify the visible license document", @"recognized": body};
 }
 
+static NSDictionary *selectionStyle(NSWindow *window) {
+    NSMutableDictionary *result = [NSMutableDictionary dictionary];
+    NSResponder *responder = window.firstResponder;
+    result[@"responder"] = responder ? NSStringFromClass(responder.class) : @"none";
+    [window.effectiveAppearance performAsCurrentDrawingAppearance:^{
+        void (^color)(NSString *, NSColor *) = ^(NSString *key, NSColor *value) {
+            NSColor *rgb = [value colorUsingColorSpace:NSColorSpace.sRGBColorSpace];
+            if (rgb) result[key] = @[@(rgb.redComponent), @(rgb.greenComponent), @(rgb.blueComponent), @(rgb.alphaComponent)];
+        };
+        color(@"primaryLabel", NSColor.labelColor);
+        color(@"secondaryLabel", NSColor.secondaryLabelColor);
+        if (![responder isKindOfClass:NSTextView.class]) return;
+        NSTextView *editor = (NSTextView *)responder;
+        NSRange range = editor.selectedRange;
+        result[@"selectedLength"] = @(range.length);
+        color(@"selectedInk", editor.selectedTextAttributes[NSForegroundColorAttributeName]);
+        color(@"selectedBackground", editor.selectedTextAttributes[NSBackgroundColorAttributeName]);
+        if (range.location < editor.textStorage.length) {
+            color(@"textInk", [editor.textStorage attribute:NSForegroundColorAttributeName
+                                                    atIndex:range.location effectiveRange:NULL]);
+        }
+    }];
+    return result;
+}
+
 static NSDictionary *perform(NSDictionary *request) {
     NSWindow *window = dashboardWindow();
     if (!window) return @{@"pending": @"dashboard window"};
     NSString *op = request[@"op"], *label = request[@"label"];
-    if ([op isEqual:@"selectText"] || [op isEqual:@"copySelection"]) window = window.attachedSheet ?: window;
+    if ([op isEqual:@"selectText"] || [op isEqual:@"copySelection"] || [op isEqual:@"selectionStyle"])
+        window = window.attachedSheet ?: window;
+    if ([op isEqual:@"selectionStyle"]) return selectionStyle(window);
     if ([op isEqual:@"selectText"] || [op isEqual:@"dismissBanner"]) {
         id message = control(window, label, [NSMutableArray array], YES);
         if (![message respondsToSelector:@selector(accessibilityFrame)]) return @{@"pending": @"message text"};
