@@ -28,6 +28,7 @@ pub const QUIT: i32 = 4;
 pub const CLOSED: i32 = 5;
 pub const POPOVER: i32 = 6;
 pub const OPENED: i32 = 7;
+const DARK_PANEL_GRAY: f64 = 0.075;
 
 struct Actions {
     context: *mut c_void,
@@ -673,7 +674,7 @@ impl Status {
             dark,
             m,
         };
-        let background = if dark { 0.075 } else { 1. };
+        let background = if dark { DARK_PANEL_GRAY } else { 1. };
         root.setWantsLayer(true);
         if let Some(layer) = root.layer() {
             layer.setBackgroundColor(Some(
@@ -919,7 +920,13 @@ impl View<'_> {
                         // The vibrant label colors encode the strength of white or black
                         // ink as gray. SwiftUI attenuates the rasterized primary glyphs.
                         let channel = color.redComponent();
-                        let strength = if self.dark { channel } else { 1. - channel };
+                        // Dark vibrancy adds light to the material. A normal view
+                        // layer blends toward white from the panel's existing gray.
+                        let strength = if self.dark {
+                            channel / (1. - DARK_PANEL_GRAY)
+                        } else {
+                            1. - channel
+                        };
                         if primary.alphaComponent() > 0. {
                             t.setWantsLayer(true);
                             t.setTextColor(Some(&primary));

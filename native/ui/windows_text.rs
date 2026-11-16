@@ -402,10 +402,10 @@ fn compose_glyph(sample: u8, foreground: u8, background: u8, [g1, g2, g3, g4]: [
     let alpha = f32::from(sample) / 255.;
     let ink = f32::from(foreground) / 255.;
     let corrected = alpha + alpha * (1. - alpha) * ((g1 * ink + g2) * alpha + (g3 * ink + g4));
-    // The display target blends an 8-bit coverage value with the destination channel.
-    let coverage = (255. * corrected.clamp(0., 1.)).round() as u32;
-    ((u32::from(foreground) * coverage + u32::from(background) * (255 - coverage) + 127) / 255)
-        as u8
+    // The display shader keeps fractional coverage through the blend. Only the
+    // final destination channel is stored in an eight-bit render target.
+    let bg = f32::from(background);
+    (bg + (f32::from(foreground) - bg) * corrected.clamp(0., 1.)).round() as u8
 }
 
 // WPF's software ClearType scan operation uses two byte coefficients for
@@ -931,14 +931,15 @@ mod tests {
     #[test]
     fn cleartype_coverage_blends_light_and_dark_ink() {
         let gamma = glyph_gamma(1.75);
-        let samples = [0, 67, 127, 189, 255];
+        // Paired glyph edges from the original license window on the console.
+        let samples = [0, 59, 109, 153, 191, 225, 255];
         assert_eq!(
             samples.map(|s| compose_glyph(s, 23, 255, gamma)),
-            [255, 211, 172, 117, 23]
+            [255, 216, 185, 152, 114, 71, 23]
         );
         assert_eq!(
-            samples.map(|s| compose_glyph(s, 229, 24, gamma)),
-            [24, 106, 154, 191, 229]
+            samples.map(|s| compose_glyph(s, 242, 28, gamma)),
+            [28, 108, 154, 185, 207, 225, 242]
         );
         assert_eq!(compose_glyph(127, 255, 0, glyph_gamma(1.)), 127);
         assert_eq!(glyph_gamma(3.), glyph_gamma(2.25));
