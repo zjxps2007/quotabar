@@ -469,8 +469,10 @@ pub fn plain_button(ui: &mut Ui, title: &str, color: Color32) -> Response {
         let (id, slot) = ui.allocate_space(size);
         let rect = Rect::from_min_size(slot.min.round_to_pixels(scale), size);
         let response = ui.interact(rect, id, Sense::click());
-        ui.painter()
-            .add(run.centered_shape(rect.left_center(), scale, color));
+        // SwiftUI lays out a plain button's Text using the typographic line.
+        // A Core Text bitmap can have an extra pixel of ascent or descent.
+        let top = pos2(rect.left(), rect.center().y - run.size.y * 0.5);
+        ui.painter().add(run.shape(top, scale, color));
         Some(response)
     });
     let response = native.unwrap_or_else(|| {
