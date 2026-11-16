@@ -89,16 +89,18 @@ fn auto_size_background(
     let mut mesh = Mesh::default();
     if height == pixels.ceil() && height > 0. {
         let edge = client.bottom() - 1. / scale;
-        mesh.add_colored_rect(
-            Rect::from_min_max(client.min, pos2(client.right(), edge)),
-            background,
-        );
+        if content_only {
+            mesh.add_colored_rect(
+                Rect::from_min_max(client.min, pos2(client.right(), edge)),
+                background,
+            );
+        }
         let strip = Rect::from_min_max(pos2(client.left(), edge), client.max);
-        mesh.add_colored_rect(
-            strip,
-            auto_size_edge_color(pixels - height + 1., background, content_only),
-        );
-    } else {
+        let color = auto_size_edge_color(pixels - height + 1., background, content_only);
+        if content_only || color != background {
+            mesh.add_colored_rect(strip, color);
+        }
+    } else if content_only {
         mesh.add_colored_rect(client, background);
     }
     mesh
@@ -376,26 +378,26 @@ impl Dashboard {
             #[cfg(windows)]
             let background = p.bg;
             #[cfg(windows)]
-            let background_shape = if matches!(dialog, Dialog::Connect(_) | Dialog::Rename(..)) {
-                let painter = ctx.layer_painter(LayerId::background());
-                let slot = painter.add(Shape::Noop);
-                Some((painter, slot))
-            } else {
-                None
-            };
+            let painter = ctx.layer_painter(LayerId::background());
             #[cfg(windows)]
-            let panel_fill = if background_shape.is_some() {
+            let capture_slot = (capture.is_some()
+                && matches!(dialog, Dialog::Connect(_) | Dialog::Rename(..)))
+            .then(|| painter.add(Shape::Noop));
+            #[cfg(windows)]
+            let panel_fill = if capture_slot.is_some() {
                 Color32::TRANSPARENT
             } else {
+                // ClearType determines the text backdrop from this opaque panel.
                 background
             };
             #[cfg(windows)]
             let paint_background = |natural_height| {
-                if let Some((painter, slot)) = &background_shape {
-                    painter.set(
-                        *slot,
-                        auto_size_background(ctx, natural_height, background, capture.is_some()),
-                    );
+                let mesh =
+                    auto_size_background(ctx, natural_height, background, capture_slot.is_some());
+                if let Some(slot) = capture_slot {
+                    painter.set(slot, mesh);
+                } else if !mesh.is_empty() {
+                    painter.add(mesh);
                 }
             };
             #[cfg(target_os = "macos")]
