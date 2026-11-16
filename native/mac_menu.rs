@@ -898,8 +898,9 @@ impl View<'_> {
             )
         };
         b.setTag(tag as isize);
-        b.setFrame(self.rect(x, y, w, h));
+        let alignment = self.rect(x, y, w, h);
         if tag == REFRESH {
+            b.setFrame(alignment);
             b.setBordered(false);
             b.setContentTintColor(Some(&NSColor::labelColor()));
             b.setToolTip(Some(&s("새로고침")));
@@ -911,36 +912,14 @@ impl View<'_> {
                 b.setImagePosition(NSCellImagePosition::ImageOnly);
             }
         } else {
-            b.setBordered(false);
-            let font = NSFont::systemFontOfSize(10.);
-            let ink = NSColor::labelColor();
-            // SwiftUI's caption button centers the text one point below the
-            // borderless NSButtonCell baseline, inside the same hit rectangle.
-            let baseline = NSNumber::new_f64(-1.);
-            let keys = unsafe {
-                [
-                    NSFontAttributeName,
-                    NSForegroundColorAttributeName,
-                    NSBaselineOffsetAttributeName,
-                ]
-            };
-            let attrs = NSDictionary::from_slices(
-                &keys,
-                &[font.as_ref() as &AnyObject, ink.as_ref(), baseline.as_ref()],
-            );
-            let caption = unsafe {
-                NSAttributedString::initWithString_attributes(
-                    NSAttributedString::alloc(),
-                    &s(title),
-                    Some(&attrs),
+            let font = unsafe {
+                NSFont::preferredFontForTextStyle_options(
+                    NSFontTextStyleCaption1,
+                    &NSDictionary::new(),
                 )
             };
-            b.setAttributedTitle(&caption);
-            b.setWantsLayer(true);
-            if let Some(layer) = b.layer() {
-                layer.setCornerRadius(5.);
-                layer.setBackgroundColor(Some(&self.overlay(0.10, 0.26).CGColor()));
-            }
+            b.setFont(Some(&font));
+            b.setFrame(b.frameForAlignmentRect(alignment));
         }
         self.native.addSubview(&b);
     }
@@ -1016,18 +995,24 @@ impl View<'_> {
         for w in periods(a) {
             let n = w["remaining"].as_f64().unwrap_or(0.).clamp(0., 100.);
             self.label(text(w, "title"), [0., top, 190., 16.], 11., false, true);
+            let percentage = format!("{}% 남음", n.round());
+            let font = NSFont::monospacedDigitSystemFontOfSize_weight(11., unsafe {
+                NSFontWeightSemibold
+            });
+            // The trailing Text in the HStack occupies its own pixel-aligned
+            // layout box. Start the glyph run at the leading edge of that box.
+            let natural = attributed_title(&percentage, &font, &NSColor::labelColor())
+                .size()
+                .width;
+            let fitted = (natural * scale).ceil() / scale;
             let remaining = self.label(
-                &format!("{}% 남음", n.round()),
-                [width - 62., top, 62., 16.],
+                &percentage,
+                [width - fitted, top, fitted, 16.],
                 11.,
                 true,
                 false,
             );
-            remaining.setAlignment(NSTextAlignment::Right);
-            remaining.setFont(Some(&NSFont::monospacedDigitSystemFontOfSize_weight(
-                11.,
-                unsafe { NSFontWeightSemibold },
-            )));
+            remaining.setFont(Some(&font));
             if n <= 20. {
                 remaining.setTextColor(Some(&NSColor::systemOrangeColor()));
             }

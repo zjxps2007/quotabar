@@ -98,7 +98,10 @@ def compare_popovers(work, app, originals, results, save_results, library):
                 def visible(side):
                     return {**env, "QUOTABAR_TEST_POPOVER_FRAME": str(dashboard.REPORT / "windows" / side / f"{name}.png")}
                 subprocess.run([app, state, "popover", original, wire, "--demo", "--reference-ui"], env=visible("original"), timeout=30, check=True)
-                subprocess.run([probe, wire, native], env=visible("rust"), timeout=30, check=True)
+                native_env = visible("rust")
+                if kind == "sample":
+                    native_env["QUOTABAR_TEST_POPOVER_TEXT"] = str(dashboard.REPORT / "popover-text" / theme)
+                subprocess.run([probe, wire, native], env=native_env, timeout=30, check=True)
                 subprocess.run([app, "--pixels", original, native, result, "--reference-ui"], env=env, timeout=30, check=True)
                 results[name] = json.loads(result.read_text())
                 print(f"{name}: {results[name]['changedPixels']} different pixels", flush=True)
