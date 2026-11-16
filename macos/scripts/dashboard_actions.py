@@ -330,6 +330,9 @@ def capture_windows(dashboard, program, folder, library, fixture, output, theme,
                         observed["messageAfterDismissal"] = controls.request("help", message, {"found": False, "help": None})
                     except (ValueError, TimeoutError) as error:
                         observed["messageError"] = str(error)
+                    long_message = (message + " 연결한 로그인 파일의 위치와 계정의 모니터링 상태를 확인하세요. ") * 4
+                    dashboard.send(app.stdin, {"state": {"_0": {**fixture, "message": long_message.strip()}}})
+                    capture("message-wrapped")
                     dashboard.send(app.stdin, {"state": {"_0": fixture}})
             show("accounts")
             time.sleep(0.35)
@@ -444,7 +447,7 @@ def compare_windows(dashboard, work, original, library):
             results[side][theme] = capture_windows(dashboard, program, work / f"windows-{side}-{theme}",
                                                   library, fixture, output, theme, original)
     for theme in dashboard.THEMES:
-        for route in (*dashboard.ROUTES, "remove", "message", "popover-sample", "popover-empty", "popover-overflow",
+        for route in (*dashboard.ROUTES, "remove", "message", "message-wrapped", "popover-sample", "popover-empty", "popover-overflow",
                       "settings-bottom", "licenses-notice", "licenses-apache", "empty", "activity-empty", "activity"):
             name = f"{route}-{theme}"
             lhs, rhs = (dest / side / f"{name}.png" for side in ("original", "rust"))

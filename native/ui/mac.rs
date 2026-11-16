@@ -259,6 +259,15 @@ fn symbol_texture(
     })
 }
 
+pub fn symbol_size(
+    ctx: &Context,
+    name: &str,
+    points: f32,
+    semibold: bool,
+) -> Option<eframe::egui::Vec2> {
+    Some(symbol_texture(ctx, name, points, semibold)?.size_vec2() / ctx.pixels_per_point())
+}
+
 pub fn intrinsic_symbol(
     ui: &mut eframe::egui::Ui,
     name: &str,

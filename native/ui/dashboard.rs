@@ -12,36 +12,53 @@ fn mac_message_banner(ui: &mut Ui, message: &str, palette: Palette) -> bool {
         .inner_margin(14)
         .fill(surface_fill(palette.bg, palette.warning, 0.08))
         .show(ui, |ui| {
-            ui.set_width(ui.available_width());
-            ui.spacing_mut().interact_size.y = 0.;
-            ui.spacing_mut().item_spacing.x = 8.;
-            ui.horizontal(|ui| {
-                crate::mac::intrinsic_symbol(
-                    ui,
-                    "exclamationmark.triangle",
-                    12.,
-                    false,
-                    palette.warning,
-                );
-                let close_size = vec2(12., crate::mac_text::system_line_height(ui, 12.));
-                let width =
-                    (ui.available_width() - close_size.x - ui.spacing().item_spacing.x).max(1.);
-                ui.allocate_ui_with_layout(vec2(width, 0.), Layout::top_down(Align::Min), |ui| {
-                    ui.set_width(width);
-                    ui.add(
-                        Label::new(rich(message, 12., false, palette.warning))
-                            .wrap()
-                            .selectable(true),
-                    );
-                });
-                let (rect, close) = ui.allocate_exact_size(close_size, Sense::click());
-                crate::mac::symbol(ui.painter(), rect, "xmark", 12., false, palette.warning);
-                close.widget_info(|| {
-                    WidgetInfo::labeled(WidgetType::Button, ui.is_enabled(), "닫기")
-                });
-                close.clicked()
-            })
-            .inner
+            let warning = "exclamationmark.triangle";
+            let line_height = crate::mac_text::system_line_height(ui, 12.);
+            let icon =
+                crate::mac::symbol_size(ui.ctx(), warning, 12., false).unwrap_or(Vec2::splat(14.));
+            let close_size = vec2(12., line_height);
+            let width = ui.available_width();
+            let text_width = (width - icon.x - close_size.x - 16.).max(1.);
+            let text = WidgetText::from(
+                rich(message, 12., false, palette.warning).line_height(Some(line_height)),
+            )
+            .into_galley(ui, Some(TextWrapMode::Wrap), text_width, TextStyle::Body);
+            // SwiftUI centers both symbols against the final wrapped text height.
+            let height = text.size().y.max(icon.y).max(close_size.y);
+            let (row, _) = ui.allocate_exact_size(vec2(width, height), Sense::hover());
+            let icon_rect = Rect::from_center_size(row.left_center() + vec2(icon.x / 2., 0.), icon);
+            crate::mac::symbol(
+                ui.painter(),
+                icon_rect,
+                warning,
+                12.,
+                false,
+                palette.warning,
+            );
+            let text_origin = pos2(icon_rect.right() + 8., row.center().y - text.size().y / 2.);
+            ui.place(
+                Rect::from_min_size(text_origin, text.size()),
+                Label::new(text).selectable(true),
+            );
+            let close_rect = Rect::from_center_size(
+                row.right_center() - vec2(close_size.x / 2., 0.),
+                close_size,
+            );
+            crate::mac::symbol(
+                ui.painter(),
+                close_rect,
+                "xmark",
+                12.,
+                false,
+                palette.warning,
+            );
+            let close = ui.interact(
+                close_rect,
+                ui.make_persistent_id("dismiss dashboard message"),
+                Sense::click(),
+            );
+            close.widget_info(|| WidgetInfo::labeled(WidgetType::Button, ui.is_enabled(), "닫기"));
+            close.clicked()
         })
         .inner
 }
