@@ -515,20 +515,35 @@ static NSDictionary *perform(NSDictionary *request) {
     NSString *op = request[@"op"], *label = request[@"label"];
     if ([op isEqual:@"editableFields"])
         return @{@"fields": connectionFieldViews(window.attachedSheet ?: window)};
-    if ([op isEqual:@"clickSwitch"]) {
+    if ([op isEqual:@"clickSwitch"] || [op isEqual:@"pressSwitch"]) {
         id element = control(window, label, [NSMutableArray array], NO);
         if (![element respondsToSelector:@selector(accessibilityFrame)] ||
             ![element respondsToSelector:@selector(accessibilityValue)]) return @{@"pending": @"account switch"};
         NSRect frame = [element accessibilityFrame];
         if (NSIsEmptyRect(frame)) return @{@"pending": @"account switch frame"};
         id value = [element accessibilityValue];
-        // The native switch can expose the track alone or a labeled row.
-        CGFloat inset = MIN(13, NSWidth(frame) / 2);
-        BOOL rtl = window.contentView.userInterfaceLayoutDirection == NSUserInterfaceLayoutDirectionRightToLeft;
-        NSPoint target = NSMakePoint(rtl ? NSMinX(frame) + inset : NSMaxX(frame) - inset, NSMidY(frame));
-        postClick(window, [window convertPointFromScreen:target]);
-        return @{@"before": [value respondsToSelector:@selector(boolValue)] ? @([value boolValue]) : NSNull.null,
-                 @"frame": rectangle(frame)};
+        if (![value respondsToSelector:@selector(boolValue)] || [value boolValue] != [request[@"value"] boolValue])
+            return @{@"pending": @"previous switch state"};
+        NSString *input;
+        if ([op isEqual:@"clickSwitch"]) {
+            // The native switch can expose the track alone or a labeled row.
+            CGFloat inset = MIN(13, NSWidth(frame) / 2);
+            BOOL rtl = window.contentView.userInterfaceLayoutDirection == NSUserInterfaceLayoutDirectionRightToLeft;
+            NSPoint target = NSMakePoint(rtl ? NSMinX(frame) + inset : NSMaxX(frame) - inset, NSMidY(frame));
+            postClick(window, [window convertPointFromScreen:target]);
+            input = @"mouse";
+        } else if ([element respondsToSelector:@selector(accessibilityActionNames)] &&
+                   [[element accessibilityActionNames] containsObject:NSAccessibilityPressAction]) {
+            [element accessibilityPerformAction:NSAccessibilityPressAction];
+            input = NSAccessibilityPressAction;
+        } else if ([element respondsToSelector:@selector(accessibilityPerformPress)]) {
+            // Invoke one accessibility entry point per user gesture.
+            [element accessibilityPerformPress];
+            input = @"accessibilityPerformPress";
+        } else {
+            return @{@"error": @"switch has no accessibility press action"};
+        }
+        return @{@"before": @([value boolValue]), @"frame": rectangle(frame), @"input": input};
     }
     if ([@[@"focusField", @"editField", @"fieldKey", @"fieldValue"] containsObject:op])
         return editTextField(window.attachedSheet ?: window, request);

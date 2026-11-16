@@ -549,6 +549,7 @@ def capture_windows(dashboard, program, folder, library, fixture, output, theme,
                         "unused": controls.request("help", f"Claude {today - timedelta(days=2)}, 0 tokens"),
                     }
             observed["providerSwitches"] = {}
+            observed["accessibleProviderSwitches"] = {}
             observed["providerSwitchEvents"] = {}
             for provider in PROVIDERS:
                 state = deepcopy(fixture)
@@ -559,27 +560,28 @@ def capture_windows(dashboard, program, folder, library, fixture, output, theme,
                 dashboard.send(app.stdin, {"state": {"_0": state}})
                 show("dashboard")
                 controls.request("present", label, {"found": True})
-                changes = []
-                events = []
-                for visible in (False, True):
-                    capture(f"switch-{provider}-{'on' if account['showInMenuBar'] else 'off'}")
-                    click = controls.request("clickSwitch", label)
-                    replies = []
-                    deadline = time.monotonic() + 3
-                    while (remaining := deadline - time.monotonic()) > 0:
-                        if not select.select([app.stdout], [], [], remaining)[0]:
-                            break
-                        event = dashboard.receive(app.stdout, deadline)
-                        if "menuBarVisibility" in event:
-                            replies.append(event["menuBarVisibility"])
-                            deadline = time.monotonic() + 0.4
-                    events.append({**click, "commands": replies})
-                    if click["before"] == (not visible) and replies == [{"_0": account["id"], "_1": visible}]:
-                        changes.append(visible)
-                    account["showInMenuBar"] = visible
-                    dashboard.send(app.stdin, {"state": {"_0": state}})
-                observed["providerSwitches"][provider] = changes
-                observed["providerSwitchEvents"][provider] = events
+                details = observed["providerSwitchEvents"][provider] = {}
+                for op, result in (("clickSwitch", "providerSwitches"), ("pressSwitch", "accessibleProviderSwitches")):
+                    changes = observed[result][provider] = []
+                    events = details[op] = []
+                    for visible in (False, True):
+                        if op == "clickSwitch":
+                            capture(f"switch-{provider}-{'on' if account['showInMenuBar'] else 'off'}")
+                        click = controls.request(op, label, value=not visible)
+                        replies = []
+                        deadline = time.monotonic() + 3
+                        while (remaining := deadline - time.monotonic()) > 0:
+                            if not select.select([app.stdout], [], [], remaining)[0]:
+                                break
+                            event = dashboard.receive(app.stdout, deadline)
+                            if "menuBarVisibility" in event:
+                                replies.append(event["menuBarVisibility"])
+                                deadline = time.monotonic() + 0.4
+                        events.append({**click, "commands": replies})
+                        if click["before"] == (not visible) and replies == [{"_0": account["id"], "_1": visible}]:
+                            changes.append(visible)
+                        account["showInMenuBar"] = visible
+                        dashboard.send(app.stdin, {"state": {"_0": state}})
         except (OSError, ValueError, KeyError, RuntimeError, EOFError, subprocess.SubprocessError) as error:
             observed["error"] = str(error)
         finally:
@@ -653,8 +655,9 @@ def compare_windows(dashboard, work, original, library):
                                "unused": {"found": False, "help": None},
                            }
                            for side in ("original", "rust") for theme in dashboard.THEMES)
-    switch_matches = all(results[side][theme].get("providerSwitches") == {p: [False, True] for p in PROVIDERS}
-                         for side in ("original", "rust") for theme in dashboard.THEMES)
+    switch_matches = all(results[side][theme].get(kind) == {p: [False, True] for p in PROVIDERS}
+                         for side in ("original", "rust") for theme in dashboard.THEMES
+                         for kind in ("providerSwitches", "accessibleProviderSwitches"))
     return app_mark_matches and message_matches and copied_accounts and documents_match and scroll_matches and activity_matches and switch_matches and all(row["identical"] for row in results["comparisons"].values())
 
 
