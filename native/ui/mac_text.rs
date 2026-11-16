@@ -524,7 +524,11 @@ pub fn bold_label(ui: &mut Ui, text: &str, size: f32, color: Color32) -> Option<
 }
 
 pub fn plan_label(ui: &mut Ui, text: &str, color: Color32) -> Option<Response> {
-    draw_label(ui, text, 9., Face::Medium, color, LineBox::Stack)
+    medium_label(ui, text, 9., color)
+}
+
+pub fn medium_label(ui: &mut Ui, text: &str, size: f32, color: Color32) -> Option<Response> {
+    draw_label(ui, text, size, Face::Medium, color, LineBox::Stack)
 }
 
 pub fn preferred_label(ui: &mut Ui, text: &str, style: PreferredFont, color: Color32) -> Response {
@@ -566,6 +570,8 @@ pub fn symbol_label(ui: &mut Ui, name: &str, text: &str, style: PreferredFont, c
         vec2(ui.available_width(), height),
         Layout::left_to_right(Align::Center),
         |ui| {
+            // A SwiftUI Label uses its own icon gap inside the wider account grid.
+            ui.spacing_mut().item_spacing.x = 8.;
             crate::mac::intrinsic_symbol(ui, name, points, false, color);
             preferred_label(ui, text, style, color);
         },
@@ -722,6 +728,11 @@ fn draw_label(
             scale,
             color,
         ),
+        // The tile's number keeps its intrinsic line height. Center the actual
+        // rounded-digit bitmap, whose separately rounded descent can add a pixel.
+        LineBox::Stack if face == Face::RoundedDigits => {
+            run.centered_shape(rect.left_center(), scale, color)
+        }
         LineBox::Centered | LineBox::CenteredSystem => {
             run.centered_shape(rect.left_center(), scale, color)
         }

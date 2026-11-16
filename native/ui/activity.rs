@@ -227,7 +227,7 @@ impl Dashboard {
             if row > 0 {
                 ui.add_space(16.);
             }
-            ui.horizontal_top(|ui| {
+            let _row = ui.horizontal_top(|ui| {
                 let width = cell_width(ui.available_width(), cols, 16.);
                 #[cfg(target_os = "macos")]
                 let width = width.min(560.);
@@ -249,6 +249,17 @@ impl Dashboard {
                     });
                 }
             });
+            #[cfg(target_os = "macos")]
+            {
+                // The adaptive grid reserves a whole backing-pixel row before
+                // the next card or footer. A populated calendar can be fractional.
+                let height = _row.response.rect.height();
+                let scale = ui.pixels_per_point();
+                let remainder = (height * scale).ceil() / scale - height;
+                if remainder > 0. {
+                    ui.add_space(remainder);
+                }
+            }
         }
         #[cfg(target_os = "macos")]
         self.activity_selection
@@ -709,7 +720,10 @@ fn mac_activity_tooltip(
     let width = (viewport.width() - 24.).clamp(220., 304.);
     let id = cell.id.with("activity details");
     // SwiftUI measures the actual overlay, preferring the space above the cell.
+    // An accessibility press opens the reference overlay without a pointer
+    // layout pass. Its initial height reserves a row for each visible model.
     let height = AreaState::load(ui.ctx(), id)
+        .filter(|_| cell.hovered())
         .and_then(|state| state.size)
         .map_or_else(
             || 90. + 32. * calendar.days.get(&date).map_or(0, |rows| rows.len().min(4)) as f32,
@@ -803,7 +817,8 @@ fn mac_tooltip(ui: &mut Ui, date: NaiveDate, calendar: &Calendar, tint: Color32,
                 ui.painter().circle_filled(dot.center(), 3., tint);
                 ui.vertical(|ui| {
                     ui.spacing_mut().item_spacing.y = 1.;
-                    label(ui, model, 10.5, true, p.ink);
+                    crate::mac_text::medium_label(ui, model, 10.5, p.ink)
+                        .unwrap_or_else(|| label(ui, model, 10.5, false, p.ink));
                     let detail = format!(
                         "입력 {} · 출력 {} · 캐시 {}",
                         number(counts.input),

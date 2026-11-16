@@ -374,9 +374,15 @@ def activity_fixtures(fixture):
     for provider, amounts in (("claude", (100, 220, 240)), ("codex", (240, 270, 300))):
         for days_ago, total in zip((57, 23, 1), amounts):
             report["days"].append({"day": (today - timedelta(days=days_ago)).isoformat(),
-                                   "provider": provider, "model": f"{provider}-fixture",
+                                   "provider": provider, "model": "Claude Opus" if provider == "claude" else "GPT-5",
                                    "counts": {"input": total - 20, "cached": 10, "output": 20}})
     yield "activity", state
+
+
+def scroll_activity_to_bottom(controls):
+    for _ in range(3):
+        controls.request("scrollContent")
+        time.sleep(0.30)
 
 
 def quota_status_fixture(fixture):
@@ -572,9 +578,7 @@ def capture_windows(dashboard, program, folder, library, fixture, output, theme,
                 show("dashboard")
                 if scene != "empty":
                     time.sleep(0.35)
-                    for _ in range(3):
-                        controls.request("scrollContent")
-                        time.sleep(0.30)
+                    scroll_activity_to_bottom(controls)
                 capture(scene)
                 if scene != "empty":
                     observed[scene + "Scroll"] = controls.request("scrollerPosition")["position"]
@@ -591,9 +595,14 @@ def capture_windows(dashboard, program, folder, library, fixture, output, theme,
                         capture("activity-detail")
                         observed["activityDayOpened"] = controls.request("activityDetail")
                         controls.request("activityEscape")
-                        time.sleep(0.35)
-                        controls.request("snapshot", "dashboard")
-                        observed["activityDayClosed"] = controls.request("activityDetail")
+                        capture("activity-escape")
+                        observed["activityDayAfterEscape"] = controls.request("activityDetail")
+                        show("accounts")
+                        show("dashboard")
+                        scroll_activity_to_bottom(controls)
+                        capture("activity-return")
+                        observed["activityDayReturnScroll"] = controls.request("scrollerPosition")["position"]
+                        observed["activityDayAfterReturn"] = controls.request("activityDetail")
                     except (TimeoutError, ValueError) as error:
                         observed["activityDayError"] = str(error)
             observed["providerSwitches"] = {}
@@ -727,6 +736,7 @@ def compare_windows(dashboard, work, original, library):
         for route in (*dashboard.ROUTES, "remove", "message", "message-selected", "message-wrapped", "account-name-selected", "account-email-selected", "popover-sample", "popover-empty", "popover-overflow",
                       "source-path-selected", "settings-path-selected", "settings-bottom", "licenses-notice",
                       "licenses-apache", "empty", "quota-status", "activity-empty", "activity", "activity-detail",
+                      "activity-escape", "activity-return",
                       *(f"switch-{provider}-{state}" for provider in PROVIDERS for state in ("on", "off"))):
             name = f"{route}-{theme}"
             lhs, rhs = (dest / side / f"{name}.png" for side in ("original", "rust"))
@@ -804,9 +814,16 @@ def compare_windows(dashboard, work, original, library):
     switch_matches = all(results[side][theme].get(kind) == {p: [False, True] for p in PROVIDERS}
                          for side in ("original", "rust") for theme in dashboard.THEMES
                          for kind in ("providerSwitches", "accessibleProviderSwitches"))
-    day_detail_matches = all(results[side][theme].get("activityDayOpened", {}).get("model") is True
-                             and results[side][theme].get("activityDayClosed", {}).get("model") is False
-                             for side in ("original", "rust") for theme in dashboard.THEMES)
+    # SwiftUI routes Escape through the current first responder. Activating a
+    # date via AX can leave the dashboard's keyboard focus elsewhere.
+    escape_states = {side: [results[side][theme].get("activityDayAfterEscape", {}).get("model")
+                            for theme in dashboard.THEMES] for side in ("original", "rust")}
+    day_detail_matches = (all(isinstance(v, bool) for v in escape_states["original"])
+                          and escape_states["original"] == escape_states["rust"]
+                          and all(results[side][theme].get("activityDayOpened", {}).get("model") is True
+                             and results[side][theme].get("activityDayReturnScroll") == "bottom"
+                             and results[side][theme].get("activityDayAfterReturn", {}).get("model") is False
+                             for side in ("original", "rust") for theme in dashboard.THEMES))
     results["activityDetailIdentical"] = day_detail_matches
     (dest / "comparison.json").write_text(json.dumps(results, ensure_ascii=False, indent=2))
     return (app_mark_matches and message_matches and copied_accounts and documents_match and scroll_matches

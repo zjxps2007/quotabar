@@ -392,7 +392,14 @@ static NSDictionary *visibleText(NSURL *frame, NSString *operation) {
     NSString *letters = [[body componentsSeparatedByCharactersInSet:NSCharacterSet.alphanumericCharacterSet.invertedSet]
                          componentsJoinedByString:@""];
     if ([operation isEqual:@"activityDetail"]) {
-        return @{@"model": @([letters containsString:@"claudefixture"]), @"recognized": body};
+        for (VNRecognizedTextObservation *line in request.results) {
+            for (VNRecognizedText *candidate in [line topCandidates:3]) {
+                NSString *normalized = [[candidate.string.lowercaseString componentsSeparatedByCharactersInSet:
+                    NSCharacterSet.alphanumericCharacterSet.invertedSet] componentsJoinedByString:@""];
+                if ([normalized containsString:@"claudeopus"]) return @{@"model": @YES, @"recognized": body};
+            }
+        }
+        return @{@"model": @NO, @"recognized": body};
     }
     if ([operation isEqual:@"activityTotals"]) {
         BOOL claude = [letters containsString:@"560tokens"], codex = [letters containsString:@"810tokens"];
