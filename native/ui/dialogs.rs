@@ -54,43 +54,54 @@ fn rename_content_height() -> f32 {
 }
 
 #[cfg(windows)]
-fn auto_size_edge_color(last_row: f32, background: Color32) -> Color32 {
-    // WPF retains the fractional height of both the Window background and its
-    // ScrollViewer inside a whole-pixel HWND. Edges snap to 1/16 pixel before
-    // scan conversion across eight vertical samples.
+fn auto_size_edge_color(last_row: f32, background: Color32, content_only: bool) -> Color32 {
+    // WPF snaps the fractional edge to 1/16 pixel, then uses eight vertical samples.
     let samples = ((last_row * 16.).round() as u32).div_ceil(2).min(8);
     let alpha = (255 * samples + 4) / 8;
     let channel = |component: u8| {
         let first = (u32::from(component) * samples + 4) / 8;
-        (first + (first * (255 - alpha) + 127) / 255) as u8
+        if content_only {
+            first as u8
+        } else {
+            // A displayed HWND also has the Window brush behind its ScrollViewer.
+            (first + (first * (255 - alpha) + 127) / 255) as u8
+        }
     };
-    Color32::from_rgb(
+    Color32::from_rgba_premultiplied(
         channel(background.r()),
         channel(background.g()),
         channel(background.b()),
+        if content_only { alpha as u8 } else { 255 },
     )
 }
 
 #[cfg(windows)]
-fn paint_auto_size_edge(ctx: &Context, natural_height: f32, background: Color32) {
+fn auto_size_background(
+    ctx: &Context,
+    natural_height: f32,
+    background: Color32,
+    content_only: bool,
+) -> Mesh {
     let scale = ctx.pixels_per_point();
     let client = ctx.content_rect();
     let pixels = natural_height * scale;
     let height = (client.height() * scale).round();
-    if height != pixels.ceil() {
-        return;
-    }
-    let color = auto_size_edge_color(pixels - (height - 1.), background);
-    if color == background {
-        return;
-    }
-    let strip = Rect::from_min_max(
-        pos2(client.left(), client.bottom() - 1. / scale),
-        client.right_bottom(),
-    );
     let mut mesh = Mesh::default();
-    mesh.add_colored_rect(strip, color);
-    ctx.layer_painter(LayerId::background()).add(mesh);
+    if height == pixels.ceil() && height > 0. {
+        let edge = client.bottom() - 1. / scale;
+        mesh.add_colored_rect(
+            Rect::from_min_max(client.min, pos2(client.right(), edge)),
+            background,
+        );
+        let strip = Rect::from_min_max(pos2(client.left(), edge), client.max);
+        mesh.add_colored_rect(
+            strip,
+            auto_size_edge_color(pixels - height + 1., background, content_only),
+        );
+    } else {
+        mesh.add_colored_rect(client, background);
+    }
+    mesh
 }
 
 #[cfg(all(windows, test))]
@@ -103,7 +114,7 @@ fn fractional_dialog_edge_matches_wpf_background_layers() {
         let coverage = n as f32 / 8.;
         for (background, expected) in [(245, light), (14, dark)] {
             assert_eq!(
-                auto_size_edge_color(coverage, Color32::from_gray(background)),
+                auto_size_edge_color(coverage, Color32::from_gray(background), false),
                 Color32::from_gray(expected),
             );
         }
@@ -111,7 +122,14 @@ fn fractional_dialog_edge_matches_wpf_background_layers() {
     // These are the measured client edges at 100% and 175% in the rename dialog.
     for (coverage, expected) in [(0.18, 107), (0.565, 211)] {
         assert_eq!(
-            auto_size_edge_color(coverage, Color32::from_gray(245)).r(),
+            auto_size_edge_color(coverage, Color32::from_gray(245), false).r(),
+            expected
+        );
+    }
+    for (background, expected) in [(245, [244, 244, 244, 223]), (14, [13, 13, 13, 223])] {
+        let content = auto_size_edge_color(0.875, Color32::from_gray(background), true);
+        assert_eq!(
+            crate::windows_viewport_capture::png_rgba(&content),
             expected
         );
     }
@@ -148,6 +166,8 @@ pub struct Connect {
     pub browser: bool,
     pub pending: Option<(String, Instant)>,
     pub error: Option<String>,
+    #[cfg(target_os = "macos")]
+    error_text: Option<crate::mac::SelectableText>,
     #[cfg(target_os = "macos")]
     pub login: Option<quotabar::mac_login::Attempt>,
     #[cfg(target_os = "macos")]
@@ -247,6 +267,8 @@ impl Dashboard {
             browser: true,
             pending: None,
             error: None,
+            #[cfg(target_os = "macos")]
+            error_text: None,
             #[cfg(target_os = "macos")]
             login: None,
             #[cfg(target_os = "macos")]
@@ -352,8 +374,33 @@ impl Dashboard {
             };
             #[cfg(windows)]
             let background = p.bg;
+            #[cfg(windows)]
+            let background_shape = if matches!(dialog, Dialog::Connect(_) | Dialog::Rename(..)) {
+                let painter = ctx.layer_painter(LayerId::background());
+                let slot = painter.add(Shape::Noop);
+                Some((painter, slot))
+            } else {
+                None
+            };
+            #[cfg(windows)]
+            let panel_fill = if background_shape.is_some() {
+                Color32::TRANSPARENT
+            } else {
+                background
+            };
+            #[cfg(windows)]
+            let paint_background = |natural_height| {
+                if let Some((painter, slot)) = &background_shape {
+                    painter.set(
+                        *slot,
+                        auto_size_background(ctx, natural_height, background, capture.is_some()),
+                    );
+                }
+            };
+            #[cfg(target_os = "macos")]
+            let panel_fill = background;
             CentralPanel::default()
-                .frame(Frame::new().fill(background).inner_margin(
+                .frame(Frame::new().fill(panel_fill).inner_margin(
                     if matches!(&dialog, Dialog::Licenses { .. }) {
                         24
                     } else {
@@ -388,7 +435,7 @@ impl Dashboard {
                         let natural_height = scroll.content_size.y + 56.;
                         let pixels = natural_height * scale;
                         #[cfg(windows)]
-                        paint_auto_size_edge(ctx, natural_height.min(limit), background);
+                        paint_background(natural_height.min(limit));
                         // SizeToContent reserves the full natural extent of the controls.
                         let measured = (pixels.ceil() / scale).min(limit);
                         if c.content_height != Some(measured) {
@@ -401,7 +448,7 @@ impl Dashboard {
                     }
                     Dialog::Rename(a, name) => {
                         #[cfg(windows)]
-                        paint_auto_size_edge(ctx, rename_content_height(), background);
+                        paint_background(rename_content_height());
                         form_text(ui, "계정 이름", 20., true, p.ink);
                         ui.add_space(18.);
                         let field = ui.add(
@@ -894,6 +941,15 @@ impl Dashboard {
             };
             form_text(ui, note, 12., false, p.muted);
         }
+        #[cfg(target_os = "macos")]
+        if c.error.is_none() || self.capture_dialog || Popup::is_any_open(ui.ctx()) {
+            c.error_text = None;
+        } else if c.error_text.is_none() {
+            c.error_text = self
+                .selectable_text
+                .as_ref()
+                .and_then(|fields| fields.attached_sheet());
+        }
         if let Some(error) = &c.error {
             ui.add_space(if MAC { 20. } else { 10. });
             let color = if MAC {
@@ -905,6 +961,13 @@ impl Dashboard {
             } else {
                 p.warning
             };
+            #[cfg(target_os = "macos")]
+            if let Some(fields) = &mut c.error_text {
+                fields.show(ui, crate::mac::TextRole::ConnectionError, error);
+            } else {
+                ui.add(Label::new(rich(error, 12., false, color)).selectable(true));
+            }
+            #[cfg(windows)]
             ui.add(Label::new(rich(error, 12., false, color)).selectable(true));
         }
         ui.add_space(if MAC { 20. } else { 22. });

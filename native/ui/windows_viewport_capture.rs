@@ -10,6 +10,19 @@ use std::{
     time::Duration,
 };
 
+/// WIC's Pbgra32-to-PNG conversion divides the premultiplied components down to whole bytes.
+pub fn png_rgba(pixel: &egui::Color32) -> [u8; 4] {
+    let [r, g, b, a] = pixel.to_array();
+    match a {
+        0 => [0; 4],
+        255 => [r, g, b, a],
+        _ => {
+            let straight = |c: u8| ((u16::from(c) * 255) / u16::from(a)).min(255) as u8;
+            [straight(r), straight(g), straight(b), a]
+        }
+    }
+}
+
 #[derive(Default)]
 pub struct ViewportFrame {
     requested: Option<[u32; 2]>,

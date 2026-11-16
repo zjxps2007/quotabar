@@ -164,6 +164,13 @@ impl Dashboard {
         #[cfg(windows)]
         cards(ui);
     }
+    #[cfg(target_os = "macos")]
+    fn native_selectable_text(&mut self, ui: &Ui) -> Option<&mut crate::mac::SelectableText> {
+        self.selectable_text
+            .as_mut()
+            .filter(|_| self.capture.is_none() && !Popup::is_any_open(ui.ctx()))
+    }
+
     fn connection_card(&mut self, ui: &mut Ui, p: Palette, a: &Account) {
         ui.set_width(ui.available_width());
         let tint = p.tint(a.provider);
@@ -208,6 +215,19 @@ impl Dashboard {
             };
             ui.allocate_ui_with_layout(vec2(width, 36.), Layout::top_down(Align::Min), |ui| {
                 ui.set_max_width(width);
+                let email = a.snapshot["email"]
+                    .as_str()
+                    .filter(|s| !email_matches_alias(s, &a.name));
+                #[cfg(target_os = "macos")]
+                {
+                    if email.is_none() {
+                        let stack = crate::mac_text::title_stack_height(ui, 13., 12., 4.);
+                        ui.add_space(((36. - stack) / 2.).max(0.));
+                    }
+                    crate::mac_text::stacked_label(ui, a.provider, 13., true, p.ink)
+                        .unwrap_or_else(|| label(ui, a.provider, 13., true, p.ink));
+                }
+                #[cfg(windows)]
                 label(ui, a.provider, 13., true, p.ink);
                 ui.add_space(4.);
                 #[cfg(windows)]
@@ -215,20 +235,13 @@ impl Dashboard {
                     ui.set_max_width((width - 16.).max(0.));
                     ellipsis_label(ui, &a.name, 12., p.ink);
                 });
-                let email = a.snapshot["email"]
-                    .as_str()
-                    .filter(|s| !email_matches_alias(s, &a.name));
                 #[cfg(target_os = "macos")]
                 {
-                    let fields = self
-                        .account_labels
-                        .as_mut()
-                        .filter(|_| self.capture.is_none() && !Popup::is_any_open(ui.ctx()));
-                    if let Some(fields) = fields {
-                        fields.show(ui, crate::mac::AccountLabel::Name, &a.name);
+                    if let Some(fields) = self.native_selectable_text(ui) {
+                        fields.show(ui, crate::mac::TextRole::AccountName, &a.name);
                         if let Some(email) = email {
                             ui.add_space(4.);
-                            fields.show(ui, crate::mac::AccountLabel::Email, email);
+                            fields.show(ui, crate::mac::TextRole::AccountEmail, email);
                         }
                     } else {
                         ellipsis_label(ui, &a.name, 12., p.ink);
@@ -386,10 +399,14 @@ impl Dashboard {
             };
             disclosure(ui, (&a.id, "source"), title, 11., p, |ui| {
                 #[cfg(target_os = "macos")]
-                ui.add(
-                    Label::new(RichText::new(&a.path).monospace().size(11.).color(p.muted))
-                        .selectable(true),
-                );
+                if let Some(fields) = self.native_selectable_text(ui) {
+                    fields.show(ui, crate::mac::TextRole::SourcePath, &a.path);
+                } else {
+                    ui.add(
+                        Label::new(RichText::new(&a.path).monospace().size(11.).color(p.muted))
+                            .selectable(true),
+                    );
+                }
                 #[cfg(windows)]
                 caption(ui, &a.path, p);
                 let detail = match (MAC, a.provider) {
@@ -640,7 +657,13 @@ impl Dashboard {
                 ui.add_space(12.);
                 system_label(ui, "설정 위치", 10., false, p.muted);
                 ui.add_space(12.);
-                ui.add(Label::new(RichText::new(crate::mac::data_path().to_string_lossy()).monospace().size(11.)).selectable(true));
+                let path = crate::mac::data_path();
+                let path = path.to_string_lossy();
+                if let Some(fields) = self.native_selectable_text(ui) {
+                    fields.show(ui, crate::mac::TextRole::DataPath, &path);
+                } else {
+                    ui.add(Label::new(RichText::new(path).monospace().size(11.)).selectable(true));
+                }
                 ui.add_space(12.);
                 if ui.add_enabled_ui(!self.state.demo, |ui| {
                     crate::mac::standard_button(ui, "데이터 폴더 열기", None,

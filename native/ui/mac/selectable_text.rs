@@ -1,14 +1,19 @@
 use eframe::egui::{Id, Sense, Ui, vec2};
 use objc2::{MainThreadOnly, rc::Retained};
-use objc2_app_kit::{NSAccessibility, NSColor, NSFont, NSLineBreakMode, NSTextField, NSView};
+use objc2_app_kit::{
+    NSAccessibility, NSColor, NSFont, NSFontWeightRegular, NSLineBreakMode, NSTextField, NSView,
+};
 use objc2_foundation::{NSPoint, NSRect, NSSize, NSString};
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use std::collections::HashMap;
 
 #[derive(Clone, Copy, Hash, PartialEq, Eq)]
-pub enum AccountLabel {
-    Name,
-    Email,
+pub enum TextRole {
+    AccountName,
+    AccountEmail,
+    SourcePath,
+    DataPath,
+    ConnectionError,
 }
 
 struct Field {
@@ -23,41 +28,52 @@ impl Drop for Field {
     }
 }
 
-pub struct AccountLabels {
+pub struct SelectableText {
     parent: Retained<NSView>,
     fields: HashMap<Id, Field>,
 }
 
-impl AccountLabels {
+impl SelectableText {
     pub fn attach(cc: &eframe::CreationContext<'_>) -> Option<Self> {
         let RawWindowHandle::AppKit(handle) = cc.window_handle().ok()?.as_raw() else {
             return None;
         };
         // The creation context supplies a live, main-thread AppKit view.
         let parent = unsafe { Retained::retain(handle.ns_view.cast::<NSView>().as_ptr()) }?;
-        Some(Self {
-            parent,
-            fields: HashMap::new(),
-        })
+        Some(Self::new(parent))
     }
 
-    pub fn show(&mut self, ui: &mut Ui, kind: AccountLabel, text: &str) {
+    pub fn attached_sheet(&self) -> Option<Self> {
+        let parent = self.parent.window()?.attachedSheet()?.contentView()?;
+        Some(Self::new(parent))
+    }
+
+    fn new(parent: Retained<NSView>) -> Self {
+        Self {
+            parent,
+            fields: HashMap::new(),
+        }
+    }
+
+    pub fn show(&mut self, ui: &mut Ui, kind: TextRole, text: &str) {
         let id = ui.make_persistent_id(kind);
         let main = self.parent.mtm();
         let field = self.fields.entry(id).or_insert_with(|| {
-            let label = match kind {
-                AccountLabel::Name => {
-                    let label = NSTextField::labelWithString(&NSString::new(), main);
-                    label.setLineBreakMode(NSLineBreakMode::ByTruncatingTail);
-                    label.setMaximumNumberOfLines(1);
-                    label
-                }
-                AccountLabel::Email => {
-                    let label = NSTextField::wrappingLabelWithString(&NSString::new(), main);
-                    label.setTextColor(Some(&NSColor::secondaryLabelColor()));
-                    label
-                }
+            let label = if kind == TextRole::AccountName {
+                let label = NSTextField::labelWithString(&NSString::new(), main);
+                label.setLineBreakMode(NSLineBreakMode::ByTruncatingTail);
+                label.setMaximumNumberOfLines(1);
+                label
+            } else {
+                NSTextField::wrappingLabelWithString(&NSString::new(), main)
             };
+            match kind {
+                TextRole::AccountEmail | TextRole::SourcePath => {
+                    label.setTextColor(Some(&NSColor::secondaryLabelColor()))
+                }
+                TextRole::ConnectionError => label.setTextColor(Some(&NSColor::systemRedColor())),
+                _ => {}
+            }
             label.setSelectable(true);
             let clip = NSView::initWithFrame(NSView::alloc(main), NSRect::ZERO);
             clip.setClipsToBounds(true);
@@ -73,17 +89,24 @@ impl AccountLabels {
         let zoom = f64::from(ui.ctx().zoom_factor());
         let points = zoom
             * match kind {
-                AccountLabel::Name => 12.,
-                AccountLabel::Email => 10.,
+                TextRole::AccountName | TextRole::ConnectionError => 12.,
+                TextRole::AccountEmail => 10.,
+                TextRole::SourcePath | TextRole::DataPath => 11.,
             };
-        if field.label.font().is_none_or(|f| f.pointSize() != points) {
-            field.label.setFont(Some(&NSFont::systemFontOfSize(points)));
+        let font = match kind {
+            TextRole::SourcePath | TextRole::DataPath => unsafe {
+                NSFont::monospacedSystemFontOfSize_weight(points, NSFontWeightRegular)
+            },
+            _ => NSFont::systemFontOfSize(points),
+        };
+        if field.label.font().as_ref() != Some(&font) {
+            field.label.setFont(Some(&font));
         }
         let value = NSString::from_str(text);
         if field.label.stringValue() != value {
             field.label.setStringValue(&value);
             field.label.setAccessibilityLabel(Some(&value));
-            if kind == AccountLabel::Name {
+            if kind == TextRole::AccountName {
                 field.label.setToolTip(Some(&value));
                 field.label.setAccessibilityHelp(Some(&value));
             }

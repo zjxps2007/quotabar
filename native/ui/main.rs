@@ -150,7 +150,7 @@ struct Dashboard {
     #[cfg(target_os = "macos")]
     banner_label: Option<mac::BannerLabel>,
     #[cfg(target_os = "macos")]
-    account_labels: Option<mac::AccountLabels>,
+    selectable_text: Option<mac::SelectableText>,
     #[cfg(target_os = "macos")]
     local: mac::Local,
 }
@@ -320,7 +320,7 @@ impl eframe::App for Dashboard {
         let titlebar = 0;
         self.workspace(ctx, colors, titlebar);
         #[cfg(target_os = "macos")]
-        if let Some(labels) = &mut self.account_labels {
+        if let Some(labels) = &mut self.selectable_text {
             labels.finish_frame();
         }
         self.show_dialog(ctx, frame, colors);
@@ -341,7 +341,11 @@ impl eframe::App for Dashboard {
 impl Dashboard {
     fn save_capture(&mut self, image: std::sync::Arc<egui::ColorImage>) {
         if let Some(capture) = self.capture.take() {
-            let rgba: Vec<u8> = image.pixels.iter().flat_map(|p| p.to_array()).collect();
+            #[cfg(windows)]
+            let to_rgba = windows_viewport_capture::png_rgba;
+            #[cfg(target_os = "macos")]
+            let to_rgba = egui::Color32::to_srgba_unmultiplied;
+            let rgba: Vec<u8> = image.pixels.iter().flat_map(to_rgba).collect();
             if image::save_buffer_with_format(
                 &capture.path,
                 &rgba,
@@ -526,7 +530,7 @@ fn main() -> eframe::Result {
             #[cfg(target_os = "macos")]
             banner_label: mac::BannerLabel::attach(cc),
             #[cfg(target_os = "macos")]
-            account_labels: mac::AccountLabels::attach(cc),
+            selectable_text: mac::SelectableText::attach(cc),
         };
         // Queue the initial event ahead of subsequent messages.
         app.wire.initial = Some(first);
