@@ -193,7 +193,13 @@ impl Dashboard {
         } else {
             tint
         };
-        ui.horizontal(|ui| {
+        #[cfg(windows)]
+        let header_id = ui.id().with("account header height");
+        #[cfg(windows)]
+        let labels_height = ui.data(|d| d.get_temp::<f32>(header_id)).unwrap_or(36.);
+        #[cfg(target_os = "macos")]
+        let labels_height = 36.;
+        let header = |ui: &mut Ui| {
             ui.spacing_mut().item_spacing.x = 12.;
             self.assets.logo(ui, a.provider, 36.);
             #[cfg(target_os = "macos")]
@@ -212,7 +218,8 @@ impl Dashboard {
                 ui.spacing_mut().item_spacing.x = 0.;
                 (ui.available_width() - status_width).max(0.)
             };
-            ui.allocate_ui_with_layout(vec2(width, 36.), Layout::top_down(Align::Min), |ui| {
+            let size = vec2(width, labels_height);
+            let labels = ui.allocate_ui_with_layout(size, Layout::top_down(Align::Min), |ui| {
                 ui.set_max_width(width);
                 let email = a.snapshot["email"]
                     .as_str()
@@ -313,7 +320,24 @@ impl Dashboard {
                     label(ui, status_text, 11., false, color);
                 }
             });
-        });
+            labels.response.rect.height().max(36.)
+        };
+        #[cfg(target_os = "macos")]
+        ui.horizontal(header);
+        #[cfg(windows)]
+        {
+            // WPF's DockPanel measures the label stack before centering its
+            // 36-DIP logo. The stack can grow again when an email wraps.
+            let size = vec2(ui.available_width(), labels_height);
+            let measured = ui
+                .allocate_ui_with_layout(size, Layout::left_to_right(Align::Center), header)
+                .inner;
+            if measured != labels_height {
+                ui.data_mut(|d| d.insert_temp(header_id, measured));
+                ui.ctx()
+                    .request_discard("Center the provider logo in the measured account row");
+            }
+        }
         if let Some(message) = a.connection_message() {
             ui.add_space(16.);
             label(ui, message, 11., false, p.warning);
