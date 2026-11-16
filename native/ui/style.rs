@@ -1163,7 +1163,13 @@ pub fn mac_setting_toggle(
     tint: Color32,
     p: Palette,
 ) -> Response {
-    let height = if detail.is_some() { 33. } else { 22. };
+    use crate::mac_text::PreferredFont;
+    let caption_height = detail.map_or(0., |_| PreferredFont::Caption.line_height(ui));
+    let height = if detail.is_some() {
+        (PreferredFont::Body.line_height(ui) + 4. + caption_height).max(22.)
+    } else {
+        22.
+    };
     let (row, response) =
         ui.allocate_exact_size(vec2(ui.available_width(), height), Sense::click());
     response
@@ -1177,11 +1183,10 @@ pub fn mac_setting_toggle(
             FontId::proportional(13.),
             p.ink,
         );
-        painter.text(
-            row.left_bottom(),
-            Align2::LEFT_BOTTOM,
+        PreferredFont::Caption.paint_at(
+            ui,
+            row.left_bottom() - vec2(0., caption_height),
             detail,
-            FontId::proportional(10.),
             p.muted,
         );
     } else {

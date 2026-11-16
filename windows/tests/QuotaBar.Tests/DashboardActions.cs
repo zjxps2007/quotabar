@@ -43,6 +43,21 @@ internal static partial class DashboardActions
                     new PropertyCondition(AutomationElement.NameProperty, "업데이트 중…")), "갱신된 활동 화면");
                 Suite.Check(ActivityDisclosure(window).Pattern.Current.ExpandCollapseState == ExpandCollapseState.Collapsed,
                     "The refreshed dashboard should recreate the collapsed model list");
+                var activity = sample.Activity!;
+                var date = activity.ScannedAt.LocalDateTime.ToString("yyyy-MM-dd");
+                var tied = activity with { Days = [
+                    new(date, Provider.Claude, "z-first", new(7, 1, 3)),
+                    new(date, Provider.Claude, "a-second", new(9, 2, 1)),
+                ] };
+                child.Send(Message.Create("state", sample with { Activity = tied }));
+                child.Send(Message.Create("show", "activity"));
+                Expect(child, "route");
+                ActivityDisclosure(window).Pattern.Expand();
+                AutomationElement Model(string name) => Wait(() => window.FindFirst(TreeScope.Descendants,
+                    new PropertyCondition(AutomationElement.NameProperty, name)), name);
+                Suite.Check(Model("z-first").Current.BoundingRectangle.Top < Model("a-second").Current.BoundingRectangle.Top,
+                    "Models with equal totals must keep their first occurrence in the Windows report");
+                Console.WriteLine("PASS activity model ordering for tied token counts");
                 child.Send(Message.Create("state", sample));
                 child.Send(Message.Create("show", "dashboard"));
                 Expect(child, "route");

@@ -81,6 +81,30 @@ impl PreferredFont {
         Self::metrics(&self.base(), ui).height
     }
 
+    /// Paint inside a control that already owns its accessibility label.
+    pub fn paint_at(self, ui: &Ui, top_left: Pos2, text: &str, color: Color32) {
+        let font = self.base();
+        let size = font.pointSize() as f32;
+        if let Some(renderer) = ui.ctx().plugin_opt::<Renderer>()
+            && let Some(run) =
+                renderer
+                    .lock()
+                    .run(ui.ctx(), text, size, Face::Preferred(self), color)
+        {
+            let ascent = Self::metrics(&font, ui).ascent;
+            ui.painter()
+                .add(run.preferred_shape(top_left, ascent, ui.pixels_per_point(), color));
+        } else {
+            ui.painter().text(
+                top_left,
+                Align2::LEFT_TOP,
+                text,
+                FontId::proportional(size),
+                color,
+            );
+        }
+    }
+
     pub fn text_width(self, ui: &Ui, text: &str) -> f32 {
         let size = self.base().pointSize() as f32;
         let ink = ui.visuals().text_color();
@@ -392,6 +416,14 @@ impl Renderer {
 }
 
 impl Run {
+    fn preferred_shape(&self, origin: Pos2, ascent: f32, scale: f32, color: Color32) -> Shape {
+        self.shape(
+            origin + vec2(0., (ascent - self.metrics.ascent).max(0.)),
+            scale,
+            color,
+        )
+    }
+
     fn centered_shape(&self, left_center: Pos2, scale: f32, color: Color32) -> Shape {
         // Center the Core Text bitmap, including its separately rounded ascent
         // and descent. AppKit puts an odd leftover backing pixel below the run.
@@ -770,11 +802,7 @@ fn draw_label(
     let (rect, response) = ui.allocate_exact_size(vec2(run.size.x, height), Sense::hover());
     let scale = ui.ctx().pixels_per_point();
     let shape = match line_box {
-        LineBox::Preferred { ascent, .. } => run.shape(
-            rect.min + vec2(0., (ascent - run.metrics.ascent).max(0.)),
-            scale,
-            color,
-        ),
+        LineBox::Preferred { ascent, .. } => run.preferred_shape(rect.min, ascent, scale, color),
         // The tile's number keeps its intrinsic line height. Center the actual
         // rounded-digit bitmap, whose separately rounded descent can add a pixel.
         LineBox::Stack if face == Face::RoundedDigits => {

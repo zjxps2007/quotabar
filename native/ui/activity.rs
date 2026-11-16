@@ -35,6 +35,11 @@ impl Tokens {
         )
     }
 }
+// WPF's stable ranking preserves the first report entry when totals tie.
+// SwiftUI breaks the tie by model name.
+#[cfg(windows)]
+type Models = indexmap::IndexMap<String, Tokens>;
+#[cfg(not(windows))]
 type Models = BTreeMap<String, Tokens>;
 struct Calendar {
     start: NaiveDate,

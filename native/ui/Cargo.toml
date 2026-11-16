@@ -27,6 +27,7 @@ uuid = { version = "1", features = ["v4"] }
 zeroize = "1"
 
 [target.'cfg(windows)'.dependencies]
+indexmap = "2"
 eframe = { version = "0.33.3", default-features = false, features = ["wgpu"] }
 wgpu = { version = "27", default-features = false, features = ["dx12", "wgsl"] }
 rfd = { version = "0.15", default-features = false }
