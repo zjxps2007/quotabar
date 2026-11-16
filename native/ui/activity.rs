@@ -494,14 +494,14 @@ impl Dashboard {
                     let bounds = Rect::from_center_size(cell.center(), cell.size() * zoom);
                     let mut outline = border;
                     if highlighted {
-                        let shadow = epaint::Shadow {
-                            offset: [0, 0],
-                            blur: 6,
-                            spread: 0,
-                            color: tint.gamma_multiply(0.5),
-                        };
-                        ui.painter()
-                            .add(shadow.as_shape(bounds, radius.round() as u8));
+                        ui.painter().add(crate::mac::rounded_shadow(
+                            ui,
+                            bounds,
+                            radius,
+                            Vec2::ZERO,
+                            3. * zoom,
+                            tint.gamma_multiply(0.5),
+                        ));
                         outline = Stroke::new(1.5 * zoom, p.ink.gamma_multiply(0.92));
                     }
                     // SwiftUI composites the tint over the track before the final sRGB rounding.
@@ -744,17 +744,10 @@ fn mac_activity_tooltip(
         .interactable(false)
         .fixed_pos(pos2(x, y))
         .show(ui.ctx(), |ui| {
-            let shadow = epaint::Shadow {
-                offset: [0, 9],
-                blur: 44,
-                spread: 0,
-                color: Color32::from_black_alpha(if p.dark { 102 } else { 36 }),
-            };
-            let rect = Frame::new()
+            let shadow = ui.painter().add(Shape::Noop);
+            let rect = p
+                .frame(Margin::symmetric(13, 11))
                 .corner_radius(12)
-                .inner_margin(Margin::symmetric(13, 11))
-                .fill(p.card)
-                .shadow(shadow)
                 .show(ui, |ui| {
                     ui.set_width(width - 26.);
                     ui.spacing_mut().item_spacing = Vec2::ZERO;
@@ -763,11 +756,16 @@ fn mac_activity_tooltip(
                 })
                 .response
                 .rect;
-            ui.painter().rect_stroke(
-                rect,
-                12,
-                Stroke::new(1_f32, p.ink.gamma_multiply(0.07)),
-                StrokeKind::Middle,
+            ui.painter().set(
+                shadow,
+                crate::mac::rounded_shadow(
+                    ui,
+                    rect,
+                    12.,
+                    vec2(0., 9.),
+                    22.,
+                    Color32::from_black_alpha(if p.dark { 102 } else { 36 }),
+                ),
             );
             let bar = Rect::from_min_max(
                 rect.left_top() + vec2(1., 11.),
@@ -779,6 +777,7 @@ fn mac_activity_tooltip(
 
 #[cfg(target_os = "macos")]
 fn mac_tooltip(ui: &mut Ui, date: NaiveDate, calendar: &Calendar, tint: Color32, p: Palette) {
+    use crate::mac_text::{DigitWeight, tabular_label};
     ui.horizontal_top(|ui| {
         system_label(
             ui,
@@ -795,7 +794,13 @@ fn mac_tooltip(ui: &mut Ui, date: NaiveDate, calendar: &Calendar, tint: Color32,
                     ui.spacing_mut().item_spacing.y = 1.;
                     system_label(ui, "Tokens", 8.5, false, p.muted);
                     let total = calendar.totals.get(&date).copied().unwrap_or(0);
-                    system_label(ui, &crate::platform::grouped(total), 13.5, true, p.ink);
+                    tabular_label(
+                        ui,
+                        &crate::platform::grouped(total),
+                        13.5,
+                        DigitWeight::Semibold,
+                        p.ink,
+                    );
                 });
             }
         });
@@ -825,10 +830,10 @@ fn mac_tooltip(ui: &mut Ui, date: NaiveDate, calendar: &Calendar, tint: Color32,
                         number(counts.output),
                         number(counts.cached)
                     );
-                    label(ui, detail, 8.5, false, p.muted);
+                    tabular_label(ui, &detail, 8.5, DigitWeight::Regular, p.muted);
                 });
                 ui.with_layout(Layout::right_to_left(Align::Min), |ui| {
-                    label(ui, number(counts.total()), 10., true, p.ink)
+                    tabular_label(ui, &number(counts.total()), 10., DigitWeight::Medium, p.ink)
                 });
             });
         }

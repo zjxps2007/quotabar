@@ -34,7 +34,7 @@ pub use selectable_text::{SelectableText, TextRole};
 mod connection_fields;
 pub use connection_fields::{AccountSearch, ConnectionFields, Input, connection_input};
 mod rounded;
-pub use rounded::{Curve, rounded_rect};
+pub use rounded::{Curve, rounded_rect, rounded_shadow};
 mod document;
 pub use document::DocumentReader;
 mod scroller;

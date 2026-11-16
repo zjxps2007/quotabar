@@ -10,6 +10,61 @@ pub enum Curve {
     Circular,
 }
 
+pub fn rounded_shadow(
+    ui: &Ui,
+    rect: Rect,
+    radius: f32,
+    offset: Vec2,
+    sigma: f32,
+    tint: Color32,
+) -> Shape {
+    let scale = ui.pixels_per_point();
+    let rect = rect.translate(offset).round_to_pixels(scale);
+    let sigma = sigma * scale;
+    let radius = radius * scale;
+    // SwiftUI's shadow radius is the Gaussian standard deviation. Keep its
+    // tails outside the shape, including on the far side of the offset.
+    let pad = (3. * sigma).ceil();
+    let bounds = rect.expand(pad / scale);
+    let size = (bounds.size() * scale).round();
+    let pixels = [size.x as usize, size.y as usize];
+    let geometry = (pixels, radius.to_bits());
+    let id = Id::new(("Rounded shadow", sigma.to_bits()));
+    let cached = ui.data(|d| d.get_temp::<(([usize; 2], u32), TextureHandle)>(id));
+    let texture = match cached {
+        Some((old, texture)) if old == geometry => texture,
+        _ => {
+            let half = size * 0.5;
+            let inset = half - Vec2::splat(pad + radius);
+            let mask = image::GrayImage::from_fn(pixels[0] as u32, pixels[1] as u32, |x, y| {
+                let delta = (vec2(x as f32 + 0.5, y as f32 + 0.5) - half).abs() - inset;
+                let distance = delta.max(Vec2::ZERO).length() + delta.x.max(delta.y).min(0.);
+                let coverage = (radius + 0.5 - distance).clamp(0., 1.);
+                image::Luma([(255. * coverage).round() as u8])
+            });
+            let blurred = image::imageops::fast_blur(&mask, sigma);
+            let colors = blurred
+                .into_raw()
+                .into_iter()
+                .map(Color32::from_white_alpha)
+                .collect();
+            let texture = ui.ctx().load_texture(
+                "Rounded shadow",
+                ColorImage::new(pixels, colors),
+                TextureOptions::LINEAR,
+            );
+            ui.data_mut(|d| d.insert_temp(id, (geometry, texture.clone())));
+            texture
+        }
+    };
+    Shape::image(
+        texture.id(),
+        bounds,
+        Rect::from_min_max(Pos2::ZERO, pos2(1., 1.)),
+        tint,
+    )
+}
+
 fn mask(
     ui: &Ui,
     pixels: [usize; 2],

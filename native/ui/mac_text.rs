@@ -103,6 +103,13 @@ impl PreferredFont {
 }
 
 #[derive(Clone, Copy, Hash, Eq, PartialEq)]
+pub enum DigitWeight {
+    Regular,
+    Medium,
+    Semibold,
+}
+
+#[derive(Clone, Copy, Hash, Eq, PartialEq)]
 enum Face {
     Regular,
     Medium,
@@ -110,7 +117,7 @@ enum Face {
     Underlined,
     Emphasized,
     Bold,
-    TabularDigits,
+    TabularDigits(DigitWeight),
     RoundedDigits,
     Preferred(PreferredFont),
 }
@@ -140,13 +147,17 @@ fn attributed(value: &str, size: f64, face: Face, tracking: f32) -> CFMutableAtt
     // logical point size so Retina drawing preserves its optical size.
     let weight = unsafe {
         match face {
-            Face::Regular | Face::Monospace | Face::Underlined | Face::Preferred(_) => {
-                NSFontWeightRegular
-            }
-            Face::Medium => NSFontWeightMedium,
+            Face::Regular
+            | Face::Monospace
+            | Face::Underlined
+            | Face::Preferred(_)
+            | Face::TabularDigits(DigitWeight::Regular) => NSFontWeightRegular,
+            Face::Medium | Face::TabularDigits(DigitWeight::Medium) => NSFontWeightMedium,
             Face::Bold => NSFontWeightBold,
             Face::Emphasized if size >= 17. => NSFontWeightBold,
-            Face::Emphasized | Face::TabularDigits | Face::RoundedDigits => NSFontWeightSemibold,
+            Face::Emphasized | Face::TabularDigits(DigitWeight::Semibold) | Face::RoundedDigits => {
+                NSFontWeightSemibold
+            }
         }
     };
     let nsfont = if let Face::Preferred(style) = face {
@@ -160,7 +171,7 @@ fn attributed(value: &str, size: f64, face: Face, tracking: f32) -> CFMutableAtt
             .unwrap_or(digits)
     } else if face == Face::Monospace {
         NSFont::monospacedSystemFontOfSize_weight(size, weight)
-    } else if face == Face::TabularDigits {
+    } else if matches!(face, Face::TabularDigits(_)) {
         NSFont::monospacedDigitSystemFontOfSize_weight(size, weight)
     } else {
         NSFont::systemFontOfSize_weight(size, weight)
@@ -557,7 +568,32 @@ pub fn preferred_label(ui: &mut Ui, text: &str, style: PreferredFont, color: Col
 }
 
 pub fn quota_percent(ui: &mut Ui, text: &str, color: Color32) -> Option<Response> {
-    draw_label(ui, text, 11., Face::TabularDigits, color, LineBox::Stack)
+    draw_label(
+        ui,
+        text,
+        11.,
+        Face::TabularDigits(DigitWeight::Semibold),
+        color,
+        LineBox::Stack,
+    )
+}
+
+pub fn tabular_label(
+    ui: &mut Ui,
+    text: &str,
+    size: f32,
+    weight: DigitWeight,
+    color: Color32,
+) -> Response {
+    draw_label(
+        ui,
+        text,
+        size,
+        Face::TabularDigits(weight),
+        color,
+        LineBox::Glyphs,
+    )
+    .unwrap_or_else(|| crate::style::label(ui, text, size, weight == DigitWeight::Semibold, color))
 }
 
 pub fn symbol_label(ui: &mut Ui, name: &str, text: &str, style: PreferredFont, color: Color32) {
