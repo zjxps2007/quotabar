@@ -54,7 +54,9 @@ namespace QuotaBarSmoke
         public ForegroundLauncher()
         {
             if (!GetCursorPos(out previous)) throw new Win32Exception(Marshal.GetLastWin32Error());
-            Window = CreateWindowExW(0x80, "STATIC", "QuotaBar test launcher", 0x10cf0000, 35, 35, 340, 130,
+            // A static text control is transparent to WindowFromPoint. Use a
+            // real button so the click reaches the foreground launcher's client.
+            Window = CreateWindowExW(0x80, "BUTTON", "Launch QuotaBar", 0x10cf0000, 35, 35, 340, 130,
                 IntPtr.Zero, IntPtr.Zero, IntPtr.Zero, IntPtr.Zero);
             if (Window == IntPtr.Zero) throw new Win32Exception(Marshal.GetLastWin32Error());
         }
