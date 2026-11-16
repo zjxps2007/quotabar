@@ -347,6 +347,21 @@ fn menu_mark() -> Option<Retained<NSImage>> {
     Some(mark)
 }
 
+/// Draw the SVG in the square used for the popover and dashboard logos.
+pub fn draw_app_mark(mark: &NSImage, side: f64) {
+    let width = side * 266. / 456.;
+    let height = side * 282. / 456.;
+    if let Some(context) = NSGraphicsContext::currentContext() {
+        context.setImageInterpolation(NSImageInterpolation::High);
+    }
+    mark.drawInRect(rect(
+        (side - width) / 2.,
+        (side - height) / 2.,
+        width,
+        height,
+    ));
+}
+
 fn menu_font() -> Retained<NSFont> {
     NSFont::monospacedDigitSystemFontOfSize_weight(
         NSFont::menuBarFontOfSize(0.).pointSize(),
@@ -669,15 +684,21 @@ impl Status {
         } else {
             (NSColor::blackColor(), NSColor::whiteColor())
         };
-        let logo = NSImageView::imageViewWithImage(&self.mark, m);
-        let size = NSSize::new(24. * 266. / 456., 24. * 282. / 456.);
-        logo.setFrame(view.rect(
-            30. - size.width / 2.,
-            30. - size.height / 2.,
-            size.width,
-            size.height,
-        ));
+        // Give AppKit the complete tile so that the SVG keeps its fractional
+        // centered destination, independent of NSImageView's alignment rules.
+        let mark = self.mark.clone();
+        let draw = block2::RcBlock::new(move |_: NSRect| {
+            draw_app_mark(&mark, 24.);
+            objc2::runtime::Bool::YES
+        });
+        let artwork =
+            NSImage::imageWithSize_flipped_drawingHandler(NSSize::new(24., 24.), false, &draw);
+        artwork.setTemplate(true);
+        let logo = NSImageView::imageViewWithImage(&artwork, m);
+        logo.setFrame(view.rect(18., 18., 24., 24.));
         logo.setContentTintColor(Some(&ink));
+        logo.setAccessibilityElement(true);
+        logo.setAccessibilityLabel(Some(&s("QuotaBar 로고")));
         view.rounded(18., 18., 24., 24., 24. * 108. / 456., &tile);
         root.addSubview(&logo);
         let headline = unsafe {
@@ -893,7 +914,28 @@ impl View<'_> {
             b.setBordered(false);
             let font = NSFont::systemFontOfSize(10.);
             let ink = NSColor::labelColor();
-            b.setAttributedTitle(&attributed_title(title, &font, &ink));
+            // SwiftUI's caption button centers the text one point below the
+            // borderless NSButtonCell baseline, inside the same hit rectangle.
+            let baseline = NSNumber::new_f64(-1.);
+            let keys = unsafe {
+                [
+                    NSFontAttributeName,
+                    NSForegroundColorAttributeName,
+                    NSBaselineOffsetAttributeName,
+                ]
+            };
+            let attrs = NSDictionary::from_slices(
+                &keys,
+                &[font.as_ref() as &AnyObject, ink.as_ref(), baseline.as_ref()],
+            );
+            let caption = unsafe {
+                NSAttributedString::initWithString_attributes(
+                    NSAttributedString::alloc(),
+                    &s(title),
+                    Some(&attrs),
+                )
+            };
+            b.setAttributedTitle(&caption);
             b.setWantsLayer(true);
             if let Some(layer) = b.layer() {
                 layer.setCornerRadius(5.);
@@ -1002,13 +1044,14 @@ impl View<'_> {
             } else {
                 NSColor::colorWithSRGBRed_green_blue_alpha(rgb.0, rgb.1, rgb.2, 1.)
             };
-            let track = self.bar(
-                0.,
-                top + 19.,
-                width,
-                5.,
-                &NSColor::labelColor().colorWithAlphaComponent(0.06),
-            );
+            // QuotaRow's 14-point text line is followed by six points of spacing.
+            let track_top = top + 20.;
+            let primary = NSColor::labelColor();
+            let track_ink = primary
+                .colorUsingColorSpace(&NSColorSpace::sRGBColorSpace())
+                .map(|color| color.colorWithAlphaComponent(color.alphaComponent() * 0.06))
+                .unwrap_or_else(|| primary.colorWithAlphaComponent(0.06));
+            let track = self.bar(0., track_top, width, 5., &track_ink);
             track.setAccessibilityElement(true);
             track.setAccessibilityLabel(Some(&s(&format!(
                 "{} 잔여량 {} 퍼센트",
@@ -1024,7 +1067,7 @@ impl View<'_> {
             if n > 0. {
                 self.bar(
                     0.,
-                    top + 19.,
+                    track_top,
                     width * n / 100.,
                     5.,
                     &tint.colorWithAlphaComponent(if a["stale"] == true { 0.45 } else { 1. }),

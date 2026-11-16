@@ -119,8 +119,7 @@ pub fn app_mark(
     ink: eframe::egui::Color32,
 ) -> bool {
     use eframe::egui::{Color32, ColorImage, Id, Pos2, Rect, TextureHandle, TextureOptions, pos2};
-    use objc2_app_kit::{NSGraphicsContext, NSImageInterpolation};
-    use objc2_foundation::{NSPoint, NSRect, NSSize};
+    use objc2_app_kit::NSGraphicsContext;
 
     let pixels = (rect.height() * ui.ctx().pixels_per_point())
         .round()
@@ -129,18 +128,12 @@ pub fn app_mark(
     let cached = ui.data(|data| data.get_temp::<TextureHandle>(id));
     let texture = cached.or_else(|| {
         let side = pixels as f64;
-        let width = side * 266. / 456.;
-        let height = side * 282. / 456.;
         let source = quotabar::mac_menu::menu_preview("iconOnly", "")?;
         let rep = bitmap_rep(pixels, pixels)?;
         let context = NSGraphicsContext::graphicsContextWithBitmapImageRep(&rep)?;
         NSGraphicsContext::saveGraphicsState_class();
         NSGraphicsContext::setCurrentContext(Some(&context));
-        context.setImageInterpolation(NSImageInterpolation::High);
-        source.drawInRect(NSRect::new(
-            NSPoint::new((side - width) / 2., (side - height) / 2.),
-            NSSize::new(width, height),
-        ));
+        quotabar::mac_menu::draw_app_mark(&source, side);
         NSGraphicsContext::restoreGraphicsState_class();
         let image = bitmap_pixels(&rep)?;
         let mask = image
