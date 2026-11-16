@@ -28,7 +28,7 @@ fn sheet_picker_label(ui: &mut Ui, title: &str, p: Palette) {
             vec2(width, 22.),
             Layout::left_to_right(Align::Center),
             |ui| {
-                crate::mac_text::centered_label(ui, title, 13., false, p.ink)
+                crate::mac_text::picker_label(ui, title, p.ink)
                     .unwrap_or_else(|| label(ui, title, 13., false, p.ink));
             },
         );

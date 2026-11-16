@@ -263,21 +263,53 @@ fn draw_arrow(ui: &Ui, field: Rect, ink: Color32) {
         return;
     }
     let scale = ui.pixels_per_point();
-    let bounds = bounds * scale;
+    let cap = diagonal / 2.;
+    // WPF snaps the widened path vertices to sixteenths of a backing pixel
+    // before calculating coverage on eight scan lines per pixel.
+    let vertices = [
+        vec2(-cap, cap),
+        vec2(cap, -cap),
+        vec2(4., 4. - diagonal),
+        vec2(8. - cap, -cap),
+        vec2(8. + cap, cap),
+        vec2(4., 4. + diagonal),
+    ]
+    .map(|offset| {
+        let point = (origin + offset) * scale * 16.;
+        pos2(point.x.round(), point.y.round()) / 16.
+    });
+    let bounds = Rect::from_points(&vertices);
+    let left = bounds.left().floor() as i32;
+    let right = bounds.right().ceil() as i32;
+    let mut coverage = vec![0_u8; (right - left) as usize];
     let mut mesh = Mesh::default();
     for y in bounds.top().floor() as i32..bounds.bottom().ceil() as i32 {
-        for x in bounds.left().floor() as i32..bounds.right().ceil() as i32 {
-            let mut covered = 0;
-            for sy in 0..8 {
-                let py = (y as f32 + (sy as f32 + 0.5) / 8.) / scale - origin.y;
-                for sx in 0..8 {
-                    let px = (x as f32 + (sx as f32 + 0.5) / 8.) / scale - origin.x;
-                    let arm = px.min(8. - px);
-                    if (py - arm).abs() <= diagonal && py + arm >= 0. {
-                        covered += 1;
-                    }
+        coverage.fill(0);
+        for sample in 0..8 {
+            let scan_y = y as f32 + sample as f32 / 8.;
+            let mut crossings = [0.; 6];
+            let mut count = 0;
+            let mut start = vertices[5];
+            for end in vertices {
+                if (start.y <= scan_y) != (end.y <= scan_y) {
+                    let x = start.x + (end.x - start.x) * (scan_y - start.y) / (end.y - start.y);
+                    crossings[count] = x;
+                    count += 1;
+                }
+                start = end;
+            }
+            let crossings = &mut crossings[..count];
+            crossings.sort_unstable_by(f32::total_cmp);
+            for span in crossings.chunks_exact(2) {
+                let begin = (span[0] * 8.).ceil() as i32;
+                let end = (span[1] * 8.).ceil() as i32;
+                for x in begin.div_euclid(8)..=(end - 1).div_euclid(8) {
+                    coverage[(x - left) as usize] +=
+                        (end.min((x + 1) * 8) - begin.max(x * 8)) as u8;
                 }
             }
+        }
+        for (x, &covered) in (left..right).zip(&coverage) {
             if covered > 0 {
                 let pixel = Rect::from_min_size(pos2(x as f32, y as f32), Vec2::splat(1.));
                 mesh.add_colored_rect(pixel / scale, ink.gamma_multiply(covered as f32 / 64.));
@@ -404,10 +436,14 @@ fn choose_presented(
     let surface = widgets.inactive.weak_bg_fill;
     let interact_size = ui.spacing().interact_size;
     let button_padding = ui.spacing().button_padding;
+    let icon_width = ui.spacing().icon_width;
     // The selection presenter starts 10 DIPs inside the field. This margin
     // belongs to the ComboBox even when the surrounding page uses wider buttons.
     ui.spacing_mut().button_padding = vec2(10., 7.);
     let line_height = super::windows_text::line_height(size).unwrap_or(size);
+    // Both the label and arrow are painted below. Size their empty egui
+    // placeholder from the WPF text line so it does not impose a 16-DIP row.
+    ui.spacing_mut().icon_width = line_height;
     let document = documents.map(|docs| &docs[state.chosen]);
     let lines = document.map_or(1, |(_, body)| {
         body.bytes().filter(|&b| b == b'\n').count() + 1
@@ -421,11 +457,12 @@ fn choose_presented(
     }
     let response = ComboBox::from_id_salt(name)
         .width(width)
-        .selected_text("")
+        .selected_text(RichText::new("").size(1.))
         .icon(|_, _, _, _| {})
         .show_ui(ui, |ui| {
             ui.spacing_mut().interact_size = interact_size;
             ui.spacing_mut().button_padding = button_padding;
+            ui.spacing_mut().icon_width = icon_width;
             ui.visuals_mut().widgets = widgets.clone();
             for (index, label) in labels.iter().enumerate() {
                 let item = ui.selectable_label(state.highlighted == index, label.as_ref());
@@ -444,6 +481,7 @@ fn choose_presented(
         .response;
     ui.spacing_mut().interact_size = interact_size;
     ui.spacing_mut().button_padding = button_padding;
+    ui.spacing_mut().icon_width = icon_width;
     ui.visuals_mut().widgets = widgets;
     let bounds = response.rect;
     let start = bounds.min + vec2(10., 7.);
@@ -575,6 +613,8 @@ mod tests {
             });
         });
         assert_eq!(field.width(), 100.);
+        let line_height = crate::windows_text::line_height(12.).unwrap_or(12.);
+        assert!((field.height() - (line_height + 14.)).abs() <= 1. / 32.);
         let label = output
             .shapes
             .iter()

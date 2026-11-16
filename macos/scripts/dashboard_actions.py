@@ -629,15 +629,19 @@ def compare_window_placement(dashboard, work, original, library, fixture):
     results = {}
     for side, program in (("original", original), ("rust", dashboard.APP)):
         observed = results[side] = {}
-        for phase in ("fresh", "restored"):
+        profile = work / f"placement-profile-{side}"
+        profile.mkdir()
+        for phase in ("fresh", "restored", "seeded"):
             folder = work / f"placement-{side}-{phase}"
             folder.mkdir()
-            # AppKit reads the saved frame from the process's argument defaults domain.
-            # Reopen at the real frame stored after a move on the current display.
-            saved = "" if phase == "fresh" else observed["moved"]["savedFrame"]
-            env = {**os.environ, **dashboard.fixture_environment(), "HOME": str(folder), "CFFIXED_USER_HOME": str(folder),
+            # Reopen the same isolated preferences after the first helper exits.
+            # Also exercise the same saved frame from AppKit's argument domain.
+            home = folder if phase == "seeded" else profile
+            env = {**os.environ, **dashboard.fixture_environment(), "HOME": str(home), "CFFIXED_USER_HOME": str(home),
                    "DYLD_INSERT_LIBRARIES": str(library), "QUOTABAR_TEST_UI_DIRECTORY": str(folder)}
-            args = [program, "--dashboard-helper", "--demo", "-NSWindow Frame DashboardWindow", saved]
+            args = [program, "--dashboard-helper", "--demo"]
+            if phase == "seeded":
+                args.extend(("-NSWindow Frame DashboardWindow", observed["moved"]["savedFrame"]))
             with subprocess.Popen(args, stdin=subprocess.PIPE, stdout=subprocess.PIPE, bufsize=0, env=env) as app:
                 controls = Controls(folder, app)
                 try:
@@ -662,8 +666,8 @@ def compare_window_placement(dashboard, work, original, library, fixture):
     matched = results["original"] == results["rust"] and all(
         "error" not in observed
         and all(observed[phase]["identifier"] == "dashboard" and observed[phase]["autosave"] == "DashboardWindow"
-                for phase in ("fresh", "restored"))
-        and observed["fresh"]["frame"] != observed["moved"]["frame"] == observed["restored"]["frame"]
+                for phase in ("fresh", "restored", "seeded"))
+        and observed["fresh"]["frame"] != observed["moved"]["frame"] == observed["restored"]["frame"] == observed["seeded"]["frame"]
         for observed in results.values())
     results["identical"] = matched
     (dashboard.REPORT / "window-placement.json").write_text(json.dumps(results, indent=2))

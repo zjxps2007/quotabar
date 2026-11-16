@@ -305,9 +305,17 @@ pub fn symbol(
     let fit = (bounds.width() / size.x)
         .min(bounds.height() / size.y)
         .min(1.);
+    let size = size * fit;
+    let mut origin = bounds.center() - size * 0.5;
+    if fit == 1. {
+        // An intrinsic SF Symbol already contains one sample per backing pixel.
+        // Centering an odd bitmap between two pixels filters both diagonals.
+        let scale = painter.ctx().pixels_per_point();
+        origin = pos2((origin.x * scale).round(), (origin.y * scale).round()) / scale;
+    }
     painter.image(
         texture.id(),
-        Rect::from_center_size(bounds.center(), size * fit),
+        Rect::from_min_size(origin, size),
         Rect::from_min_max(Pos2::ZERO, pos2(1., 1.)),
         tint,
     );

@@ -111,7 +111,12 @@ fn attributed(value: &str, size: f64, face: Face, tracking: f32) -> CFMutableAtt
     text
 }
 
-fn raster(key: &Key, limit: usize) -> Option<(ColorImage, Vec2, f32)> {
+struct LineMetrics {
+    height: f32,
+    ascent: f32,
+}
+
+fn raster(key: &Key, limit: usize) -> Option<(ColorImage, Vec2, LineMetrics)> {
     let size = f64::from(f32::from_bits(key.size));
     let scale = f64::from(f32::from_bits(key.scale));
     let text = attributed(&key.text, size, key.face, f32::from_bits(key.tracking));
@@ -164,14 +169,17 @@ fn raster(key: &Key, limit: usize) -> Option<(ColorImage, Vec2, f32)> {
         // The texture needs room on both sides of the baseline, while AppKit
         // rounds the whole logical line box once when stacking controls.
         vec2(bounds.width as f32, (line_pixels.round() / scale) as f32),
-        (line_pixels.ceil() / scale) as f32,
+        LineMetrics {
+            height: (line_pixels.ceil() / scale) as f32,
+            ascent: (ascent / scale) as f32,
+        },
     ))
 }
 
 struct Run {
     texture: TextureHandle,
     size: Vec2,
-    paragraph_line_height: f32,
+    metrics: LineMetrics,
     last_pass: u64,
 }
 
@@ -215,12 +223,11 @@ impl Renderer {
         let cached = match self.runs.entry(key) {
             std::collections::hash_map::Entry::Occupied(slot) => slot.into_mut(),
             std::collections::hash_map::Entry::Vacant(slot) => {
-                let (image, size, paragraph_line_height) =
-                    raster(slot.key(), ctx.input(|i| i.max_texture_side))?;
+                let (image, size, metrics) = raster(slot.key(), ctx.input(|i| i.max_texture_side))?;
                 slot.insert(Run {
                     texture: ctx.load_texture("Core Text", image, TextureOptions::NEAREST),
                     size,
-                    paragraph_line_height,
+                    metrics,
                     last_pass: self.pass,
                 })
             }
@@ -397,6 +404,10 @@ pub fn centered_label(
     draw_label(ui, text, size, Face::label(heavy), color, LineBox::Centered)
 }
 
+pub fn picker_label(ui: &mut Ui, text: &str, color: Color32) -> Option<Response> {
+    draw_label(ui, text, 13., Face::Regular, color, LineBox::Control)
+}
+
 pub fn system_label(
     ui: &mut Ui,
     text: &str,
@@ -527,6 +538,7 @@ pub fn hyperlink(
 enum LineBox {
     Glyphs,
     Centered,
+    Control,
     System,
     CenteredSystem,
     Stack,
@@ -560,20 +572,34 @@ fn draw_label(
             let system = (font_line_height(f64::from(size)) * scale).round() / scale;
             run.size.y.max(system as f32)
         }
+        LineBox::Control => system_line_height(ui, f64::from(size)),
         LineBox::Stack => run
-            .paragraph_line_height
+            .metrics
+            .height
             .max(system_line_height(ui, f64::from(size))),
     };
     let (rect, response) = ui.allocate_exact_size(vec2(run.size.x, height), Sense::hover());
     let scale = ui.ctx().pixels_per_point();
-    let shape = if matches!(line_box, LineBox::Centered | LineBox::CenteredSystem) {
-        run.centered_shape(rect.left_center(), scale, color)
-    } else {
-        run.shape(
+    let shape = match line_box {
+        LineBox::Centered | LineBox::CenteredSystem => {
+            run.centered_shape(rect.left_center(), scale, color)
+        }
+        LineBox::Control => {
+            // The segmented picker's label uses the system font baseline even
+            // when Core Text adds leading or substitutes a shorter fallback.
+            let font = NSFont::systemFontOfSize(f64::from(size));
+            let ascent = (font.ascender() * f64::from(scale)).ceil() as f32 / scale;
+            run.shape(
+                rect.min + vec2(0., ascent - run.metrics.ascent),
+                scale,
+                color,
+            )
+        }
+        _ => run.shape(
             rect.min + vec2(0., (height - run.size.y) * 0.5),
             scale,
             color,
-        )
+        ),
     };
     ui.painter().add(shape);
     response.widget_info(|| WidgetInfo::labeled(WidgetType::Label, ui.is_enabled(), text));
@@ -665,7 +691,7 @@ pub fn paragraph(
         let run = renderer.run(ui.ctx(), line, size, Face::Regular, color)?;
         shapes.push(run.shape(origin + vec2(0., y), scale, color));
         ink_width = ink_width.max(run.size.x);
-        y += run.paragraph_line_height + spacing;
+        y += run.metrics.height + spacing;
     }
     let (_, response) = ui.allocate_exact_size(
         vec2(ink_width.ceil().min(width), (y - spacing).max(0.)),
@@ -720,6 +746,55 @@ impl egui::Plugin for Renderer {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn segmented_picker_labels_share_the_system_font_baseline() {
+        for scale in [1.0_f32, 2.] {
+            let ctx = Context::default();
+            ctx.add_plugin(Renderer::default());
+            for title in ["Provider", "연결 방법", "한글"] {
+                let mut input = RawInput::default();
+                input
+                    .viewports
+                    .get_mut(&ViewportId::ROOT)
+                    .unwrap()
+                    .native_pixels_per_point = Some(scale);
+                let mut expected = None;
+                let output = ctx.run(input, |ctx| {
+                    CentralPanel::default().show(ctx, |ui| {
+                        ui.allocate_ui_with_layout(
+                            vec2(100., 22.),
+                            Layout::left_to_right(Align::Center),
+                            |ui| {
+                                let response = picker_label(ui, title, Color32::BLACK).unwrap();
+                                assert_eq!(response.rect.height(), system_line_height(ui, 13.));
+                                let handle = ctx.plugin_opt::<Renderer>().unwrap();
+                                let mut renderer = handle.lock();
+                                let run = renderer
+                                    .run(ctx, title, 13., Face::Regular, Color32::BLACK)
+                                    .unwrap();
+                                let ascent = (NSFont::systemFontOfSize(13.).ascender()
+                                    * f64::from(scale))
+                                .ceil() as f32;
+                                let top = (response.rect.top() * scale + ascent
+                                    - run.metrics.ascent * scale)
+                                    .round();
+                                expected = Some((run.texture.id(), top));
+                            },
+                        );
+                    });
+                });
+                let (texture, top) = expected.unwrap();
+                let backing_top = output.shapes.iter().find_map(|shape| match &shape.shape {
+                    Shape::Mesh(mesh) if mesh.texture_id == texture => {
+                        Some(mesh.calc_bounds().top() * scale)
+                    }
+                    _ => None,
+                });
+                assert_eq!(backing_top, Some(top), "{title} at {scale}x");
+            }
+        }
+    }
 
     #[test]
     fn link_underline_preserves_the_native_glyph_advances() {

@@ -59,7 +59,7 @@ struct Tile {
 
 impl Tile {
     // Count the covered samples on the Windows software rasterizer's 8×8 grid.
-    fn coverage(rect: Rect, radius: f32, x: f32, y: f32) -> u32 {
+    fn coverage(rect: Rect, radius: f32, x: f32, y: f32, sample_offset: f32) -> u32 {
         let radius = radius.max(0.).min(rect.width().min(rect.height()) * 0.5);
         if (x >= rect.left() + radius
             && x + 1. <= rect.right() - radius
@@ -72,10 +72,11 @@ impl Tile {
         {
             return 64;
         }
-        let sample_index = |edge: f32| ((edge - x) * 8. - 0.5).ceil().clamp(0., 8.) as u32;
+        let sample_index =
+            |edge: f32| ((edge - x) * 8. - sample_offset).ceil().clamp(0., 8.) as u32;
         let mut covered = 0;
         for row in 0..8 {
-            let sample = y + (row as f32 + 0.5) / 8.;
+            let sample = y + (row as f32 + sample_offset) / 8.;
             if sample < rect.top() || sample >= rect.bottom() {
                 continue;
             }
@@ -103,11 +104,31 @@ impl Tile {
         let stroke = f32::from_bits(self.stroke);
         let inner = outer.shrink(stroke);
         let radius = f32::from_bits(self.radius);
+        // WPF's single-brush switch shapes align samples at the start of each
+        // subdivision. A Border with a pen and background composites both
+        // brushes using centered samples, including the primary action buttons.
+        let sample_offset = if stroke == 0. || self.fill.a() == 0 {
+            0.
+        } else {
+            0.5
+        };
         let mut pixels = Vec::with_capacity(width * height);
         for y in 0..height {
             for x in 0..width {
-                let outside = Self::coverage(outer, radius + 0.5 * stroke, x as f32, y as f32);
-                let fill = Self::coverage(inner, radius - 0.5 * stroke, x as f32, y as f32);
+                let outside = Self::coverage(
+                    outer,
+                    radius + 0.5 * stroke,
+                    x as f32,
+                    y as f32,
+                    sample_offset,
+                );
+                let fill = Self::coverage(
+                    inner,
+                    radius - 0.5 * stroke,
+                    x as f32,
+                    y as f32,
+                    sample_offset,
+                );
                 let fill_opacity = (fill * u32::from(self.fill.a()) + 127) / 255;
                 let pen = outside.saturating_sub(fill) * (64 - fill_opacity);
                 let background = fill * 64;
@@ -123,6 +144,23 @@ impl Tile {
             }
         }
         ColorImage::new(self.size, pixels)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn fractional_switch_focus_border_covers_both_adjacent_rows() {
+        let bounds = Rect::from_min_size(pos2(0., 1. / 16.), vec2(34., 22.));
+        // In WPF's switch focus visual the straight edge covers 7/8 of one
+        // physical pixel and 1/8 of the next on both sides of the track.
+        let samples = [0., 1., 21., 22.].map(|y| {
+            Tile::coverage(bounds, 10.5, 16., y, 0.)
+                - Tile::coverage(bounds.shrink(1.), 9.5, 16., y, 0.)
+        });
+        assert_eq!(samples, [56, 8, 56, 8]);
     }
 }
 
