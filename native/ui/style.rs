@@ -534,7 +534,7 @@ pub fn disclosure(
     {
         response.request_focus();
     }
-    control_pressed(ui, &mut response, false);
+    button_pressed(ui, &mut response);
     let mut open = was_open ^ response.clicked();
     if response.enabled() {
         ui.input_mut(|input| {

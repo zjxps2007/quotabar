@@ -866,7 +866,7 @@ fn settings_title(ui: &mut Ui, text: &str, _symbol: &str, p: Palette) {
     #[cfg(target_os = "macos")]
     ui.horizontal(|ui| {
         crate::mac::intrinsic_symbol(ui, _symbol, 13., true, p.ink);
-        system_label(ui, text, 13., true, p.ink);
+        crate::mac_text::preferred_label(ui, text, crate::mac_text::PreferredFont::Headline, p.ink);
     });
     #[cfg(windows)]
     label(ui, text, 14., true, p.ink);

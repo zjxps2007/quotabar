@@ -379,9 +379,35 @@ internal static partial class DashboardActions
                 Suite.Check(pattern.Current.ExpandCollapseState == ExpandCollapseState.Expanded, "Space collapsed the list before release");
             });
             Wait(() => pattern.Current.ExpandCollapseState == ExpandCollapseState.Collapsed ? header : null, "Space로 모델 목록 접기");
+            TypeKey(header, "{ENTER}");
+            Wait(() => pattern.Current.ExpandCollapseState == ExpandCollapseState.Expanded ? header : null, "Enter로 모델 목록 펼치기");
+            TypeKey(header, "{ENTER}");
+            Wait(() => pattern.Current.ExpandCollapseState == ExpandCollapseState.Collapsed ? header : null, "Enter로 모델 목록 접기");
+            var target = FocusedKeyboardTarget(header);
+            SendSpace(header, () =>
+            {
+                const int repeatSpace = 1 | (0x39 << 16) | (1 << 30);
+                if (!PostMessage(target, 0x100, 0x20, repeatSpace)) throw new IOException("Cannot repeat Space");
+                Thread.Sleep(120);
+                Suite.Check(pattern.Current.ExpandCollapseState == ExpandCollapseState.Collapsed, "Repeated Space toggled the list before release");
+            });
+            Wait(() => pattern.Current.ExpandCollapseState == ExpandCollapseState.Expanded ? header : null, "Space 반복 후 한 번만 펼치기");
+            SendSpace(header, () =>
+            {
+                var nav = Wait(() => window.FindFirst(TreeScope.Descendants, new AndCondition(
+                    new PropertyCondition(AutomationElement.NameProperty, "Dashboard"),
+                    new PropertyCondition(AutomationElement.IsInvokePatternAvailableProperty, true))), "Dashboard control");
+                nav.SetFocus();
+                Wait(() => nav.Current.HasKeyboardFocus ? nav : null, "Dashboard focus");
+            });
+            Thread.Sleep(120);
+            Suite.Check(pattern.Current.ExpandCollapseState == ExpandCollapseState.Expanded, "Space release after focus loss toggled the list");
+            pattern.Collapse();
+            Wait(() => pattern.Current.ExpandCollapseState == ExpandCollapseState.Collapsed ? header : null, "닫힌 모델 목록");
             return true;
         }, anchor: point);
         Console.WriteLine("PASS click the model disclosure and collapse it on Space release");
+        Console.WriteLine("PASS model disclosure toggles on Enter, toggles once on repeated Space, cancels when focus moves before release");
     }
 
     private static void CheckActivityDisclosure(AutomationElement window, Action? onExpanded = null)

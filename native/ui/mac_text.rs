@@ -29,6 +29,7 @@ use std::collections::HashMap;
 #[derive(Clone, Copy, Hash, Eq, PartialEq)]
 pub enum PreferredFont {
     Body,
+    Headline,
     Callout,
     Title3Bold,
     SubheadlineSemibold,
@@ -41,11 +42,13 @@ impl PreferredFont {
     fn base(self) -> Retained<NSFont> {
         use objc2_app_kit::{
             NSFontTextStyleBody, NSFontTextStyleCallout, NSFontTextStyleCaption1,
-            NSFontTextStyleCaption2, NSFontTextStyleSubheadline, NSFontTextStyleTitle3,
+            NSFontTextStyleCaption2, NSFontTextStyleHeadline, NSFontTextStyleSubheadline,
+            NSFontTextStyleTitle3,
         };
         unsafe {
             let style = match self {
                 Self::Body => NSFontTextStyleBody,
+                Self::Headline => NSFontTextStyleHeadline,
                 Self::Callout => NSFontTextStyleCallout,
                 Self::Title3Bold => NSFontTextStyleTitle3,
                 Self::SubheadlineSemibold => NSFontTextStyleSubheadline,
@@ -556,7 +559,18 @@ pub fn system_label(
 }
 
 pub fn dashboard_heading(ui: &mut Ui, text: &str, color: Color32) -> Option<Response> {
-    draw_label(ui, text, 25., Face::Bold, color, LineBox::CenteredSystem)
+    let covered = NSFont::boldSystemFontOfSize(25.).coveredCharacterSet();
+    // SwiftUI centers a system-face title on backing pixels. A substituted
+    // face sits in the logical system line box, which preserves its baseline.
+    let line = if text
+        .chars()
+        .all(|ch| covered.longCharacterIsMember(ch as u32))
+    {
+        LineBox::CenteredSystem
+    } else {
+        LineBox::System
+    };
+    draw_label(ui, text, 25., Face::Bold, color, line)
 }
 
 pub fn stat_value(ui: &mut Ui, text: &str, color: Color32) -> Option<Response> {
@@ -602,7 +616,8 @@ pub fn preferred_label(ui: &mut Ui, text: &str, style: PreferredFont, color: Col
     draw_label(ui, text, size, Face::Preferred(style), color, line).unwrap_or_else(|| {
         let heavy = matches!(
             style,
-            PreferredFont::Title3Bold
+            PreferredFont::Headline
+                | PreferredFont::Title3Bold
                 | PreferredFont::SubheadlineSemibold
                 | PreferredFont::CaptionSemibold
         );
