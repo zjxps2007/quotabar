@@ -628,6 +628,14 @@ def compare_windows(dashboard, work, original, library):
             subprocess.run([original, "--pixels", repeated, dest / side / repeated.name, result, "--reference-ui"],
                            check=True, timeout=20)
             results["repeatability"][side][repeated.stem] = json.loads(result.read_text())
+    frames = {
+        side: [event["frame"] for theme in dashboard.THEMES for provider in PROVIDERS
+               for op in ("clickSwitch", "pressSwitch")
+               for event in results[side][theme].get("providerSwitchEvents", {}).get(provider, {}).get(op, [])]
+        for side in ("original", "rust")
+    }
+    frames_match = len(frames["original"]) == len(dashboard.THEMES) * len(PROVIDERS) * 4 and frames["original"] == frames["rust"]
+    results["providerSwitchFramesIdentical"] = frames_match
     (dest / "comparison.json").write_text(json.dumps(results, ensure_ascii=False, indent=2))
     app_mark_matches = all(results[side][theme].get("appMark") == {"found": True, "help": None}
                            for side in ("original", "rust") for theme in dashboard.THEMES)
@@ -658,7 +666,7 @@ def compare_windows(dashboard, work, original, library):
     switch_matches = all(results[side][theme].get(kind) == {p: [False, True] for p in PROVIDERS}
                          for side in ("original", "rust") for theme in dashboard.THEMES
                          for kind in ("providerSwitches", "accessibleProviderSwitches"))
-    return app_mark_matches and message_matches and copied_accounts and documents_match and scroll_matches and activity_matches and switch_matches and all(row["identical"] for row in results["comparisons"].values())
+    return app_mark_matches and message_matches and copied_accounts and documents_match and scroll_matches and activity_matches and switch_matches and frames_match and all(row["identical"] for row in results["comparisons"].values())
 
 
 def compare(dashboard, work, original, fixture, library):

@@ -1206,7 +1206,20 @@ pub fn named_toggle(
     // SwiftUI aligns a mini switch to the caption baseline, one point below
     // the geometric center of the row.
     #[cfg(target_os = "macos")]
-    let t = t.translate(vec2(0., 1.));
+    let t = {
+        let track = t.translate(vec2(0., 1.));
+        // AppKit exposes the switch itself to accessibility, including the
+        // top of its alignment row. The caption remains part of the click area.
+        ui.ctx().accesskit_node_builder(response.id, |node| {
+            node.set_bounds(egui::accesskit::Rect {
+                x0: track.left().into(),
+                y0: r.top().into(),
+                x1: track.right().into(),
+                y1: track.bottom().into(),
+            });
+        });
+        track
+    };
     #[cfg(target_os = "macos")]
     let native = crate::mac::draw_switch(
         ui,

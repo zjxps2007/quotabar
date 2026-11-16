@@ -543,7 +543,7 @@ static NSDictionary *perform(NSDictionary *request) {
         } else {
             return @{@"error": @"switch has no accessibility press action"};
         }
-        return @{@"before": @([value boolValue]), @"frame": rectangle(frame), @"input": input};
+        return @{@"before": @([value boolValue]), @"frame": rectangle([window convertRectFromScreen:frame]), @"input": input};
     }
     if ([@[@"focusField", @"editField", @"fieldKey", @"fieldValue"] containsObject:op])
         return editTextField(window.attachedSheet ?: window, request);
