@@ -56,6 +56,7 @@ func channels(_ color: NSColor) -> [Double] {
             "subviews": view.subviews.map(appearanceDetails)]
 }
 
+try MainActor.assumeIsolated {
 let providers = [("codex", rgb(0.310, 0.361, 0.784), rgb(0.537, 0.584, 1.000)),
                  ("claude", rgb(0.659, 0.310, 0.149), rgb(0.902, 0.510, 0.290)),
                  ("gemini", rgb(0.102, 0.451, 0.910), rgb(0.541, 0.706, 0.973))]
@@ -120,4 +121,5 @@ for (theme, appearanceName) in [("light", NSAppearance.Name.aqua), ("dark", NSAp
     }
     try JSONSerialization.data(withJSONObject: info, options: [.sortedKeys, .prettyPrinted]).write(to: destination.appendingPathComponent(theme + ".json"))
     window.orderOut(nil)
+}
 }
