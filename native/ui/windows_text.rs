@@ -156,9 +156,10 @@ impl Factories {
                     .ok()?;
             }
             let utf16: Vec<_> = key.text.encode_utf16().collect();
+            let mut run_text = utf16.as_slice();
             let mut layout = self
                 .write
-                .CreateTextLayout(&utf16, &format, width, max_size as f32)
+                .CreateTextLayout(run_text, &format, width, max_size as f32)
                 .ok()?;
             let mut metrics = DWRITE_TEXT_METRICS::default();
             layout.GetMetrics(&mut metrics).ok()?;
@@ -184,9 +185,10 @@ impl Factories {
                     draw_x += space * indent as f32;
                     fraction = draw_x.fract();
                     draw_x = draw_x.floor();
+                    run_text = &utf16[indent..];
                     layout = self
                         .write
-                        .CreateTextLayout(&utf16[indent..], &format, width, max_size as f32)
+                        .CreateTextLayout(run_text, &format, width, max_size as f32)
                         .ok()?;
                 }
             }
@@ -206,6 +208,7 @@ impl Factories {
             };
             let scale = f32::from_bits(key.scale);
             let size = [width, height];
+            glyphs::mark_dash_runs(&self.write, &layout, run_text).ok()?;
             let bytes = glyphs::coverage(self, params, &layout, origin, scale, size)
                 .or_else(|| self.bitmap_coverage(&layout, params, origin, fraction, scale, size))?;
             let colors = key.colors.map(|(ink, backdrop)| {
@@ -299,7 +302,16 @@ impl Factories {
             target.SetTextAntialiasMode(D2D1_TEXT_ANTIALIAS_MODE_CLEARTYPE);
             if glyphs::draw(&target, &brush, layout, origin, scale).is_err() {
                 // An inline object or decoration can require the system renderer.
-                // Clear any runs already painted before replaying the whole layout.
+                // Restore its default brush before replaying the entire layout.
+                layout
+                    .SetDrawingEffect(
+                        None,
+                        DWRITE_TEXT_RANGE {
+                            startPosition: 0,
+                            length: u32::MAX,
+                        },
+                    )
+                    .ok()?;
                 target.Clear(Some(&black));
                 target.DrawTextLayout(origin, layout, &brush, D2D1_DRAW_TEXT_OPTIONS_NONE);
             }
@@ -780,18 +792,62 @@ mod tests {
         assert_eq!(glyph_gamma(3.), glyph_gamma(2.25));
     }
 
+    struct Apartment;
+    impl Apartment {
+        fn open() -> Self {
+            unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED) }
+                .ok()
+                .unwrap();
+            Self
+        }
+    }
+    impl Drop for Apartment {
+        fn drop(&mut self) {
+            unsafe { CoUninitialize() };
+        }
+    }
+
     #[test]
-    fn mixed_script_text_uses_the_system_rasterizer_at_both_scales() {
-        unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED) }
-            .ok()
-            .unwrap();
-        struct Apartment;
-        impl Drop for Apartment {
-            fn drop(&mut self) {
-                unsafe { CoUninitialize() };
+    fn hyphenated_labels_preserve_the_wpf_suffix_origin() {
+        let _apartment = Apartment::open();
+        let factories = Factories::new().unwrap();
+        // Baseline origins from WPF TextBlock at 13 DIP, in a Segoe UI run.
+        for (text, column, fraction) in [
+            ("C-beta", 13, 16),
+            ("ii-beta", 11, 32),
+            ("sss-beta", 21, 48),
+        ] {
+            let whole = RunKey {
+                text: text.into(),
+                pixels: 13_f32.to_bits(),
+                scale: 1_f32.to_bits(),
+                semibold: false,
+                line: LineWidth::Natural,
+                origin: [0; 2],
+                colors: None,
+            };
+            let (label, _) = factories.render(&whole, 4096).unwrap();
+            let suffix = RunKey {
+                text: "beta".into(),
+                origin: [fraction, 0],
+                ..whole
+            };
+            let (fragment, _) = factories.render(&suffix, 4096).unwrap();
+            for y in 0..label.height() {
+                for x in 1..fragment.width().min(label.width() - column) {
+                    assert_eq!(
+                        label[(column + x, y)],
+                        fragment[(x, y)],
+                        "{text} ({x}, {y})"
+                    );
+                }
             }
         }
-        let _apartment = Apartment;
+    }
+
+    #[test]
+    fn mixed_script_text_uses_the_system_rasterizer_at_both_scales() {
+        let _apartment = Apartment::open();
         let factories = Factories::new().unwrap();
         // The WPF run for "변경" starts at 212.0933 DIP in the mixed label.
         // A leading Segoe UI space (3.56 DIP) plus 34/64 DIP places that

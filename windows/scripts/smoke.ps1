@@ -67,22 +67,81 @@ try {
     $data | Add-Member -NotePropertyName manualCheckWhileAutomaticUpdatesDisabled -NotePropertyValue $true
     $data | Add-Member -NotePropertyName updateChecks -NotePropertyValue $update.updateChecks
 } finally { $updateMonitor.Dispose() }
-# Demo mode uses synthetic accounts. Inspect both processes before testing parent crash cleanup.
+# Exercise the normal single-instance entry point with empty, isolated settings.
+$residentRoot = Join-Path $RepoRoot ('artifacts\windows\smoke-resident-' + [Guid]::NewGuid().ToString('N'))
+[void][IO.Directory]::CreateDirectory($residentRoot)
+[IO.File]::WriteAllText((Join-Path $residentRoot 'settings.json'), '{"schemaVersion":1,"accounts":[],"autoRefresh":false,"automaticUpdates":false,"scanLocalLogs":false}')
 $start = [Diagnostics.ProcessStartInfo]::new($exe)
 $start.UseShellExecute = $false
 $start.CreateNoWindow = $true
-$start.ArgumentList.Add('--demo')
+$start.ArgumentList.Add('--data-dir')
+$start.ArgumentList.Add($residentRoot)
+$start.ArgumentList.Add('--background')
+$start.Environment['CLAUDE_CONFIG_DIR'] = Join-Path $residentRoot 'Claude'
+$start.Environment['CODEX_HOME'] = Join-Path $residentRoot 'Codex'
+$start.Environment['GEMINI_CLI_HOME'] = Join-Path $residentRoot 'Gemini'
 [void]$start.Environment.Remove('DOTNET_ROOT')
+function Invoke-SecondaryMonitor {
+    $secondary = [Diagnostics.Process]::Start($start)
+    try {
+        if (-not $secondary.WaitForExit(10000)) {
+            $secondary.Kill($true)
+            throw 'The second monitor did not exit.'
+        }
+        if ($secondary.ExitCode -ne 0) { throw "The second monitor exited with code $($secondary.ExitCode)." }
+    } finally { $secondary.Dispose() }
+}
+if (-not ('QuotaBarSmoke.Window' -as [type])) {
+    Add-Type -Namespace QuotaBarSmoke -Name Window -MemberDefinition @'
+        [DllImport("user32.dll")] public static extern bool ShowWindowAsync(IntPtr window, int command);
+        [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr window);
+'@
+}
 $monitor = [Diagnostics.Process]::Start($start)
 try {
     $deadline = [DateTime]::UtcNow.AddSeconds(10)
-    $child = $null
+    while (-not [IO.File]::Exists((Join-Path $residentRoot 'monitor.lock'))) {
+        if ($monitor.HasExited -or [DateTime]::UtcNow -ge $deadline) { throw 'The background monitor did not acquire its lock.' }
+        Start-Sleep -Milliseconds 50
+    }
+    $childFilter = "ParentProcessId=$($monitor.Id) AND Name='QuotaBar.Dashboard.exe'"
+    Invoke-SecondaryMonitor
+    if (Get-CimInstance Win32_Process -Filter $childFilter) { throw 'A background relaunch opened a dashboard.' }
+    [void]$start.ArgumentList.Remove('--background')
+    Invoke-SecondaryMonitor
+    $deadline = [DateTime]::UtcNow.AddSeconds(10)
     do {
-        Start-Sleep -Milliseconds 100
-        $child = Get-CimInstance Win32_Process -Filter "ParentProcessId=$($monitor.Id) AND Name='QuotaBar.Dashboard.exe'" | Select-Object -First 1
-    } while (-not $child -and [DateTime]::UtcNow -lt $deadline)
-    if (-not $child) { throw 'No Dashboard child found.' }
-    $childId = [int]$child.ProcessId
+        $children = @(Get-CimInstance Win32_Process -Filter $childFilter)
+        if ($children.Count -gt 1) { throw 'Relaunch created multiple dashboards.' }
+        if ($children.Count -eq 1) {
+            $dashboard = Get-Process -Id $children[0].ProcessId
+            if ($dashboard.MainWindowTitle -eq 'QuotaBar' -and $dashboard.MainWindowHandle -ne 0) { break }
+        }
+        if ($monitor.HasExited -or [DateTime]::UtcNow -ge $deadline) { throw 'Relaunch did not open the resident dashboard.' }
+        Start-Sleep -Milliseconds 50
+    } while ($true)
+    $childId = $dashboard.Id
+    $window = $dashboard.MainWindowHandle
+    [void][QuotaBarSmoke.Window]::ShowWindowAsync($window, 6) # SW_MINIMIZE
+    $deadline = [DateTime]::UtcNow.AddSeconds(5)
+    while (-not [QuotaBarSmoke.Window]::IsIconic($window)) {
+        if ([DateTime]::UtcNow -ge $deadline) { throw 'The dashboard did not minimize.' }
+        Start-Sleep -Milliseconds 50
+    }
+    Invoke-SecondaryMonitor
+    $deadline = [DateTime]::UtcNow.AddSeconds(10)
+    while ([QuotaBarSmoke.Window]::IsIconic($window)) {
+        if ([DateTime]::UtcNow -ge $deadline) { throw 'Relaunch did not restore the existing window.' }
+        Start-Sleep -Milliseconds 50
+    }
+    $dashboard.Refresh()
+    $children = @(Get-CimInstance Win32_Process -Filter $childFilter)
+    if ($children.Count -ne 1 -or $children[0].ProcessId -ne $childId -or $dashboard.MainWindowHandle -ne $window) {
+        throw 'Relaunch replaced the original dashboard process or window.'
+    }
+    $data | Add-Member -NotePropertyName backgroundRelaunchIgnored -NotePropertyValue $true
+    $data | Add-Member -NotePropertyName foregroundRelaunchOpenedDashboard -NotePropertyValue $true
+    $data | Add-Member -NotePropertyName foregroundRelaunchRestoredWindow -NotePropertyValue $true
     foreach ($idToCheck in @($monitor.Id,$childId)) {
         $modules = @((Get-Process -Id $idToCheck -Module -ErrorAction Stop).ModuleName)
         if ($modules -contains 'coreclr.dll' -or $modules -contains 'clr.dll' -or $modules -contains 'hostfxr.dll') { throw "CLR loaded in application PID $idToCheck" }
@@ -98,4 +157,4 @@ try {
     $data | Add-Member -NotePropertyName includedFrameworks -NotePropertyValue @()
     $data | ConvertTo-Json | Set-Content -LiteralPath $result -Encoding utf8
     $data | ConvertTo-Json
-} finally { if (-not $monitor.HasExited) { $monitor.Kill() }; $monitor.Dispose() }
+} finally { if (-not $monitor.HasExited) { $monitor.Kill($true) }; $monitor.Dispose() }

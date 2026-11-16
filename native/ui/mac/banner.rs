@@ -15,7 +15,6 @@ impl BannerLabel {
         let parent = unsafe { handle.ns_view.cast::<NSView>().as_ref() };
         let label = NSTextField::wrappingLabelWithString(&NSString::new(), main);
         label.setSelectable(true);
-        label.setTextColor(Some(&NSColor::systemOrangeColor()));
         label.setHidden(true);
         parent.addSubview(&label);
         Some(Self(label))
@@ -26,6 +25,7 @@ impl BannerLabel {
         let Some(parent) = (unsafe { label.superview() }) else {
             return;
         };
+        super::selectable_text::set_label_ink(label, &NSColor::systemOrangeColor());
         let zoom = f64::from(zoom);
         let size = 12. * zoom;
         if label.font().is_none_or(|font| font.pointSize() != size) {

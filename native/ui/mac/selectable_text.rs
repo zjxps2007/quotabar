@@ -1,7 +1,9 @@
+use block2::StackBlock;
 use eframe::egui::{Id, Sense, Ui, vec2};
 use objc2::{MainThreadOnly, rc::Retained};
 use objc2_app_kit::{
-    NSAccessibility, NSColor, NSFont, NSFontWeightRegular, NSLineBreakMode, NSTextField, NSView,
+    NSAccessibility, NSAppearanceCustomization, NSColor, NSColorSpace, NSFont, NSFontWeightRegular,
+    NSLineBreakMode, NSTextField, NSView,
 };
 use objc2_foundation::{NSPoint, NSRect, NSSize, NSString};
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
@@ -14,6 +16,20 @@ pub enum TextRole {
     SourcePath,
     DataPath,
     ConnectionError,
+}
+
+pub(super) fn set_label_ink(label: &NSTextField, semantic: &NSColor) {
+    // SwiftUI gives its field editor a component color. AppKit can substitute
+    // the selected-text color when a field instead holds a named system color.
+    label
+        .effectiveAppearance()
+        .performAsCurrentDrawingAppearance(&StackBlock::new(|| {
+            if let Some(ink) = semantic.colorUsingColorSpace(&NSColorSpace::sRGBColorSpace())
+                && label.textColor().as_ref() != Some(&ink)
+            {
+                label.setTextColor(Some(&ink));
+            }
+        }));
 }
 
 struct Field {
@@ -67,13 +83,6 @@ impl SelectableText {
             } else {
                 NSTextField::wrappingLabelWithString(&NSString::new(), main)
             };
-            match kind {
-                TextRole::AccountEmail | TextRole::SourcePath => {
-                    label.setTextColor(Some(&NSColor::secondaryLabelColor()))
-                }
-                TextRole::ConnectionError => label.setTextColor(Some(&NSColor::systemRedColor())),
-                _ => {}
-            }
             label.setSelectable(true);
             let clip = NSView::initWithFrame(NSView::alloc(main), NSRect::ZERO);
             clip.setClipsToBounds(true);
@@ -86,6 +95,12 @@ impl SelectableText {
             }
         });
         field.used = true;
+        let ink = match kind {
+            TextRole::AccountEmail | TextRole::SourcePath => NSColor::secondaryLabelColor(),
+            TextRole::ConnectionError => NSColor::systemRedColor(),
+            TextRole::AccountName | TextRole::DataPath => NSColor::labelColor(),
+        };
+        set_label_ink(&field.label, &ink);
         let zoom = f64::from(ui.ctx().zoom_factor());
         let points = zoom
             * match kind {

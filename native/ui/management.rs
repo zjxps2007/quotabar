@@ -644,7 +644,11 @@ impl Dashboard {
         ui.add_space(20.);
         self.app_settings(ui, p);
         ui.add_space(20.);
-        p.frame(20).show(ui, |ui| {
+        let data_padding = Margin {
+            bottom: if MAC { 19 } else { 20 },
+            ..Margin::same(20)
+        };
+        p.frame(data_padding).show(ui, |ui| {
             ui.set_width(ui.available_width());
             settings_title(ui, "데이터 저장", "lock.shield", p);
             #[cfg(windows)]

@@ -288,7 +288,7 @@ impl Palette {
         };
         Color32::from_rgb(rgb[0], rgb[1], rgb[2])
     }
-    pub fn frame(self, pad: i8) -> CardSurface {
+    pub fn frame(self, pad: impl Into<Margin>) -> CardSurface {
         let frame = Frame::new()
             .fill(self.card)
             .corner_radius(16)

@@ -6,6 +6,44 @@ use windows::Win32::{
 use windows_core::{BOOL, ComObject, IUnknown, IUnknownImpl, Ref, Result, implement};
 use windows_numerics::Vector2;
 
+pub(super) fn mark_dash_runs(
+    factory: &IDWriteFactory,
+    layout: &IDWriteTextLayout,
+    text: &[u16],
+) -> Result<()> {
+    // WPF starts a new glyph run around these dashes, and another for spaces
+    // immediately after them. A DirectWrite drawing effect splits painting
+    // while preserving the original shaping, kerning, wrapping and bidi order.
+    let mut next = 0;
+    while let Some(offset) = text[next..]
+        .iter()
+        .position(|ch| matches!(ch, 0x002d | 0x2011 | 0x2013 | 0x2014))
+    {
+        let start = next + offset;
+        let end = start
+            + text[start..]
+                .iter()
+                .take_while(|&&ch| ch == text[start])
+                .count();
+        next = end + text[end..].iter().take_while(|&&ch| ch == 0x20).count();
+        for range in [start..end, end..next] {
+            if !range.is_empty() {
+                unsafe {
+                    let marker = factory.CreateTypography()?;
+                    layout.SetDrawingEffect(
+                        &marker,
+                        DWRITE_TEXT_RANGE {
+                            startPosition: range.start as u32,
+                            length: range.len() as u32,
+                        },
+                    )?;
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
 // WPF's ideal-mode formatter measures in 1/300 DIP and stores run advances
 // and offsets in thousandths of an em for fonts up to 48 DIP. The layout
 // engine keeps its own line widths, character clusters and wrapping.
