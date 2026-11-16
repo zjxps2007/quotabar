@@ -159,8 +159,8 @@ impl Dashboard {
         }
         // WPF dispatches the activity anchor at Loaded priority, after the
         // window and its ScrollViewer have measured their final client area.
-        self.activity_scroll_frame = (page == "activity")
-            .then(|| ctx.cumulative_frame_nr() + u64::from(cfg!(windows)));
+        self.activity_scroll_frame =
+            (page == "activity").then(|| ctx.cumulative_frame_nr() + u64::from(cfg!(windows)));
         self.route = match page {
             "accounts" | "settings" => page,
             _ => "dashboard",
@@ -316,7 +316,14 @@ impl eframe::App for Dashboard {
         let titlebar = 0;
         self.workspace(ctx, colors, titlebar);
         self.show_dialog(ctx, frame, colors);
-        if !self.capture_dialog
+        if let Some(frame_due) = self.activity_scroll_frame {
+            // ScrollArea commits a programmatic scroll after laying out its body.
+            // The next pass paints the content at the same offset as the thumb.
+            if ctx.cumulative_frame_nr() >= frame_due {
+                self.activity_scroll_frame = None;
+            }
+            ctx.request_repaint();
+        } else if !self.capture_dialog
             && let Some(image) = self.capture.as_mut().and_then(|c| c.image(ctx, frame))
         {
             self.save_capture(image);

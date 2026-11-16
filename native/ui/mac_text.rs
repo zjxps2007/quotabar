@@ -21,12 +21,15 @@ use core_text::{
 };
 use eframe::egui::{self, epaint::TextShape, *};
 use objc2::rc::Retained;
-use objc2_app_kit::{NSFont, NSFontWeightBold, NSFontWeightRegular, NSFontWeightSemibold};
+use objc2_app_kit::{
+    NSFont, NSFontWeightBold, NSFontWeightMedium, NSFontWeightRegular, NSFontWeightSemibold,
+};
 use std::collections::HashMap;
 
 #[derive(Clone, Copy, Hash, Eq, PartialEq)]
 enum Face {
     Regular,
+    Medium,
     Monospace,
     Underlined,
     Emphasized,
@@ -60,6 +63,7 @@ fn attributed(value: &str, size: f64, face: Face) -> CFMutableAttributedString {
     let weight = unsafe {
         match face {
             Face::Regular | Face::Monospace | Face::Underlined => NSFontWeightRegular,
+            Face::Medium => NSFontWeightMedium,
             Face::Bold => NSFontWeightBold,
             Face::Emphasized if size >= 17. => NSFontWeightBold,
             Face::Emphasized | Face::TabularDigits | Face::RoundedDigits => NSFontWeightSemibold,
@@ -275,6 +279,21 @@ pub fn natural_size(ui: &Ui, text: &str, size: f32, heavy: bool) -> Option<Vec2>
             )?
             .size,
     )
+}
+
+pub fn calendar_label(ui: &Ui, at: Pos2, align: Align2, text: &str, size: f32, color: Color32) {
+    if let Some(renderer) = ui.ctx().plugin_opt::<Renderer>()
+        && let Some(run) = renderer
+            .lock()
+            .run(ui.ctx(), text, size, Face::Medium, color)
+    {
+        let rect = align.anchor_size(at, run.size);
+        ui.painter()
+            .add(run.shape(rect.min, ui.ctx().pixels_per_point(), color));
+    } else {
+        ui.painter()
+            .text(at, align, text, FontId::proportional(size), color);
+    }
 }
 
 pub fn system_line_height(ui: &Ui, size: f64) -> f32 {

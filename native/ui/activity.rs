@@ -128,13 +128,14 @@ impl Dashboard {
                 }
             })
             .response;
-        if let Some(frame) = self.activity_scroll_frame {
-            if ui.ctx().cumulative_frame_nr() >= frame {
-                anchor.scroll_to_me(Some(Align::Min));
-                self.activity_scroll_frame = None;
-            } else {
-                ui.ctx().request_repaint();
-            }
+        if self
+            .activity_scroll_frame
+            .is_some_and(|frame| ui.ctx().cumulative_frame_nr() >= frame)
+        {
+            anchor.scroll_to_me(Some(Align::Min));
+            #[cfg(windows)]
+            ui.ctx()
+                .request_discard("Paint the activity section at its new scroll offset");
         }
         ui.add_space(if MAC { 24. } else { 16. });
         let status = if !self.state.flag("scanLocalLogs", "scanLocalLogs") {
@@ -290,15 +291,16 @@ impl Dashboard {
             let x = rect.min.x + 28. + col_pitch * col as f32;
             if monday.month() != prev {
                 if !MAC || x - last_label >= 24. {
-                    ui.painter().text(
+                    calendar_label(
+                        ui,
                         pos2(x, rect.min.y + if MAC { 0. } else { 9. }),
                         if MAC {
                             Align2::LEFT_TOP
                         } else {
                             Align2::LEFT_CENTER
                         },
-                        format!("{}월", monday.month()),
-                        FontId::proportional(9.),
+                        &format!("{}월", monday.month()),
+                        9.,
                         p.muted,
                     );
                     last_label = x;
@@ -318,20 +320,25 @@ impl Dashboard {
                         _ => None,
                     }
                 {
-                    ui.painter().text(
+                    calendar_label(
+                        ui,
                         pos2(rect.min.x, y + side / 2.),
                         Align2::LEFT_CENTER,
                         s,
-                        FontId::proportional(if MAC && side < 9. { 8. } else { 9. }),
+                        if MAC && side < 9. { 8. } else { 9. },
                         p.muted,
                     );
                 }
                 let cell = Rect::from_min_size(pos2(x + inset, y), vec2(cell_width, side));
-                let radius = if MAC {
-                    (side * 0.24).clamp(2., 4.).round() as u8
+                let accessible = !MAC || n > 0 || date == cal.today;
+                let input = if !accessible || date > cal.today {
+                    // SwiftUI hides empty/future dates from AX. Both native grids
+                    // still accept pointer input on future days without a tab stop.
+                    Sense::click().difference(Sense::focusable_noninteractive())
                 } else {
-                    2
+                    Sense::click()
                 };
+                let response = ui.interact(cell, ui.id().with((provider, date)), input);
                 let level = if n == 0 {
                     0
                 } else {
@@ -358,33 +365,50 @@ impl Dashboard {
                 };
                 #[cfg(windows)]
                 {
-                    // WPF quantizes brush opacity before premultiplying each channel.
-                    let fill =
-                        (level > 0).then(|| tint.gamma_multiply_u8((alpha * 255.).round() as u8));
+                    // WPF's window renderer applies the brush's floating-point opacity.
+                    // RenderTargetBitmap first quantizes it to an 8-bit alpha.
+                    let fill = (level > 0).then(|| {
+                        if self.capture.is_some() {
+                            tint.gamma_multiply_u8((alpha * 255.).round() as u8)
+                        } else {
+                            tint.gamma_multiply(alpha)
+                        }
+                    });
                     crate::windows_border::activity_cell(ui, cell, track, fill, border);
                 }
-                #[cfg(not(windows))]
+                #[cfg(target_os = "macos")]
                 {
-                    ui.painter().rect_filled(cell, radius, track);
-                    if level > 0 {
+                    let highlighted = response.hovered() || response.has_focus();
+                    let zoom = if highlighted
+                        && !objc2_app_kit::NSWorkspace::sharedWorkspace()
+                            .accessibilityDisplayShouldReduceMotion()
+                    {
+                        1.16
+                    } else {
+                        1.
+                    };
+                    let radius = (side * 0.24).clamp(2., 4.) * zoom;
+                    let bounds = Rect::from_center_size(cell.center(), cell.size() * zoom);
+                    let mut outline = border;
+                    if highlighted {
+                        let shadow = epaint::Shadow {
+                            offset: [0, 0],
+                            blur: 6,
+                            spread: 0,
+                            color: tint.gamma_multiply(0.5),
+                        };
                         ui.painter()
-                            .rect_filled(cell, radius, tint.gamma_multiply(alpha));
+                            .add(shadow.as_shape(bounds, radius.round() as u8));
+                        outline = Stroke::new(1.5 * zoom, p.ink.gamma_multiply(0.92));
                     }
-                    if border != Stroke::NONE {
-                        ui.painter()
-                            .rect_stroke(cell, radius, border, StrokeKind::Middle);
-                    }
+                    // SwiftUI composites the tint over the track before the final sRGB rounding.
+                    let fill = if level > 0 {
+                        surface_fill(track, tint, alpha)
+                    } else {
+                        track
+                    };
+                    crate::mac::paint_cell(ui, bounds, radius, fill, outline);
                 }
-                let accessible = !MAC || n > 0 || date == cal.today;
-                let input = if !MAC && date > cal.today {
-                    // Future WPF cells still handle a mouse click but are outside tab order.
-                    Sense::click().difference(Sense::focusable_noninteractive())
-                } else if accessible && date <= cal.today {
-                    Sense::click()
-                } else {
-                    Sense::hover()
-                };
-                let response = ui.interact(cell, ui.id().with((provider, date)), input);
                 if accessible {
                     response.widget_info(|| {
                         WidgetInfo::labeled(
@@ -398,6 +422,14 @@ impl Dashboard {
                         )
                     });
                 }
+                #[cfg(target_os = "macos")]
+                ui.ctx().accesskit_node_builder(response.id, |node| {
+                    if accessible {
+                        node.set_description("날짜별 모델 사용량 보기");
+                    } else {
+                        node.set_hidden();
+                    }
+                });
                 let show = |ui: &mut Ui| {
                     #[cfg(target_os = "macos")]
                     {
@@ -445,22 +477,15 @@ impl Dashboard {
                         }
                     }
                 };
-                if MAC && (response.hovered() || response.has_focus()) {
-                    ui.painter().rect_stroke(
-                        cell.expand(0.6),
-                        radius,
-                        Stroke::new(1.5_f32, p.ink),
-                        StrokeKind::Outside,
-                    );
+                #[cfg(target_os = "macos")]
+                if response.hovered() || response.has_focus() || response.clicked() {
                     Tooltip::for_widget(&response)
                         .width(304.)
                         .gap(10.)
                         .show(show);
-                } else if response.clicked() || response.has_focus() {
-                    Tooltip::for_widget(&response).show(show);
-                } else {
-                    response.on_hover_ui(show);
                 }
+                #[cfg(windows)]
+                windows_activity_tooltip(&response, p, show);
             }
         }
         ui.add_space(10.);
@@ -503,6 +528,62 @@ impl Dashboard {
                 }
             },
         );
+    }
+}
+
+#[cfg(target_os = "macos")]
+use crate::mac_text::calendar_label;
+#[cfg(windows)]
+fn calendar_label(ui: &Ui, at: Pos2, align: Align2, text: &str, size: f32, color: Color32) {
+    ui.painter()
+        .text(at, align, text, FontId::proportional(size), color);
+}
+
+#[cfg(windows)]
+fn windows_activity_tooltip(response: &Response, p: Palette, content: impl FnOnce(&mut Ui)) {
+    let ctx = &response.ctx;
+    let id = response.id.with("activity tooltip");
+    if !(response.hovered() || response.has_focus() || response.clicked()) {
+        ctx.data_mut(|data| data.remove::<f64>(id));
+        return;
+    }
+    let now = ctx.input(|i| i.time);
+    let entered = ctx.data_mut(|data| {
+        let start = data.get_temp_mut_or_insert_with(id, || now);
+        if response.clicked() {
+            *start = now;
+        }
+        *start
+    });
+    // The calendar overrides WPF's ordinary one-second tooltip delay. A tooltip
+    // opens immediately on a click or while moving between visible tooltips.
+    let delay = if response.clicked()
+        || response.has_focus()
+        || Tooltip::seconds_since_last_tooltip(ctx) < ctx.style().interaction.tooltip_grace_time
+    {
+        0.
+    } else {
+        0.080
+    };
+    let elapsed = now - entered;
+    if elapsed < delay {
+        ctx.request_repaint_after_secs((delay - elapsed) as f32);
+    } else if elapsed < delay + 60. {
+        ctx.request_repaint_after_secs((delay + 60. - elapsed) as f32);
+        let mut tip = Tooltip::for_widget(response);
+        if response.hovered() {
+            tip = tip.at_pointer().gap(16.);
+        }
+        tip.popup = tip.popup.frame(
+            Frame::new()
+                .inner_margin(12)
+                .fill(p.card)
+                .stroke(Stroke::new(1_f32, p.line)),
+        );
+        tip.show(|ui| {
+            ui.set_max_width(314.);
+            content(ui);
+        });
     }
 }
 #[cfg(target_os = "macos")]

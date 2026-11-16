@@ -400,6 +400,11 @@ def capture_windows(dashboard, program, folder, library, fixture, output, theme,
                     observed[scene + "Scroll"] = controls.request("scrollerPosition")["position"]
                 if scene == "activity" and "error" not in observed[scene]:
                     observed["activityTotals"] = controls.request("activityTotals")
+                    today = datetime.fromtimestamp(state["demoReport"]["scannedAt"] + 978307200).date()
+                    observed["activityCells"] = {
+                        "used": controls.request("help", f"Claude {today - timedelta(days=1)}, 240 tokens"),
+                        "unused": controls.request("help", f"Claude {today - timedelta(days=2)}, 0 tokens"),
+                    }
         except (OSError, ValueError, KeyError, RuntimeError, EOFError, subprocess.SubprocessError) as error:
             observed["error"] = str(error)
         finally:
@@ -453,6 +458,10 @@ def compare_windows(dashboard, work, original, library):
     activity_matches = all(results[side][theme].get("activityScroll") == "bottom"
                            and results[side][theme].get("activity-emptyScroll") == "bottom"
                            and results[side][theme].get("activityTotals") == {"claude": True, "codex": True}
+                           and results[side][theme].get("activityCells") == {
+                               "used": {"found": True, "help": "날짜별 모델 사용량 보기"},
+                               "unused": {"found": False, "help": None},
+                           }
                            for side in ("original", "rust") for theme in dashboard.THEMES)
     return documents_match and scroll_matches and activity_matches and all(row["identical"] for row in results["comparisons"].values())
 

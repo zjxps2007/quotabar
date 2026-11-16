@@ -96,7 +96,7 @@ internal static class DashboardLifecycle
             Errors = new() { [dark.Accounts[0].Id] = "서비스에 연결하지 못했습니다. 마지막으로 확인한 사용량을 표시합니다." } },
             "dashboard", "states-dark", 900, 660));
         var results = new Dictionary<string, PixelComparison>();
-        bool clientSizesMatch = true;
+        bool capturesValid = true;
         directory = Path.GetFullPath(directory);
         foreach (var (exe, folder) in new[] { (original, "original"), (candidate, "candidate") })
         {
@@ -124,7 +124,15 @@ internal static class DashboardLifecycle
                         var client = DashboardActions.DashboardClientSize(child.Pid!.Value);
                         using var image = new Bitmap(path);
                         Console.WriteLine($"{folder}/{s.Name}: client {client.Width}×{client.Height}, capture {image.Width}×{image.Height}");
-                        clientSizesMatch &= image.Size == client;
+                        capturesValid &= image.Size == client;
+                        if (s.Route == "activity")
+                        {
+                            int cells = MostColoredCellsInRow(image);
+                            Console.WriteLine($"{folder}/{s.Name}: activity grid, {cells} colored runs in one row");
+                            // Each seeded 26-week calendar has a majority of active
+                            // weeks in at least one row, even in the single-column layout.
+                            capturesValid &= cells >= 13;
+                        }
                     }
                     if (folder == "original" && !HasPaintedContent(path))
                         throw new InvalidDataException($"The original dashboard produced an empty render target for {s.Name}.");
@@ -136,7 +144,32 @@ internal static class DashboardLifecycle
         }
         File.WriteAllBytes(Path.Combine(directory, "result.json"), Json.Bytes(results));
         foreach (var (name, result) in results) Console.WriteLine($"{name}: {result.ChangedPixels:N0} different pixels, {result.Width}×{result.Height}");
-        return clientSizesMatch && results.Count == scenarios.Count && results.Values.All(result => result.Identical);
+        return capturesValid && results.Count == scenarios.Count && results.Values.All(result => result.Identical);
+    }
+    private static int MostColoredCellsInRow(Bitmap image)
+    {
+        var data = image.LockBits(new Rectangle(Point.Empty, image.Size), ImageLockMode.ReadOnly, PixelFormat.Format32bppArgb);
+        try
+        {
+            var row = new int[image.Width];
+            int most = 0;
+            for (int y = 0; y < image.Height; y++)
+            {
+                Marshal.Copy(data.Scan0 + y * data.Stride, row, 0, row.Length);
+                int length = 0, cells = 0;
+                foreach (int pixel in row)
+                {
+                    int red = (pixel >> 16) & 255, blue = pixel & 255;
+                    // Claude and Codex use orange and blue cells on a neutral track.
+                    // Four contiguous colored pixels exclude antialiased text strokes.
+                    length = Math.Abs(red - blue) > 34 ? length + 1 : 0;
+                    if (length == 4) cells++;
+                }
+                most = Math.Max(most, cells);
+            }
+            return most;
+        }
+        finally { image.UnlockBits(data); }
     }
     internal sealed record PixelComparison(int OriginalWidth, int OriginalHeight, int Width, int Height, int ChangedPixels, double MeanChannelError) {
         public bool Identical => OriginalWidth == Width && OriginalHeight == Height && ChangedPixels == 0;
