@@ -94,7 +94,7 @@ impl Calendar {
     }
 }
 impl Dashboard {
-    pub fn activity(&mut self, ui: &mut Ui, p: Palette) {
+    pub fn activity(&mut self, ui: &mut Ui, p: Palette, viewport_top: f32) {
         let providers: Vec<_> = ["Claude", "Codex"]
             .into_iter()
             .filter(|pr| self.state.accounts.iter().any(|a| a.provider == *pr))
@@ -132,10 +132,15 @@ impl Dashboard {
             .activity_scroll_frame
             .is_some_and(|frame| ui.ctx().cumulative_frame_nr() >= frame)
         {
-            anchor.scroll_to_me(Some(Align::Min));
-            #[cfg(windows)]
-            ui.ctx()
-                .request_discard("Paint the activity section at its new scroll offset");
+            if MAC {
+                anchor.scroll_to_me(Some(Align::Min));
+            } else {
+                // WPF scrolls to the section in the StackPanel's logical coordinates.
+                // ScrollArea's widget alignment would use a pixel-rounded content origin.
+                ui.scroll_with_delta(vec2(0., viewport_top - anchor.rect.top()));
+                ui.ctx()
+                    .request_discard("Paint the activity section at its new scroll offset");
+            }
         }
         ui.add_space(if MAC { 24. } else { 16. });
         let status = if !self.state.flag("scanLocalLogs", "scanLocalLogs") {

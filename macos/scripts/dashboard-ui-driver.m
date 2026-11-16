@@ -424,10 +424,10 @@ static NSDictionary *selectionStyle(NSWindow *window) {
     return result;
 }
 
-static NSArray *connectionFieldViews(NSWindow *window) {
+static NSArray<NSTextField *> *connectionFields(NSWindow *window) {
     if (!window) return @[];
-    NSView *content = window.contentView;
-    NSMutableArray *queue = [NSMutableArray arrayWithObject:content], *fields = [NSMutableArray array];
+    NSMutableArray *queue = [NSMutableArray arrayWithObject:window.contentView];
+    NSMutableArray<NSTextField *> *fields = [NSMutableArray array];
     while (queue.count) {
         NSView *view = queue.lastObject;
         [queue removeLastObject];
@@ -435,15 +435,61 @@ static NSArray *connectionFieldViews(NSWindow *window) {
         [queue addObjectsFromArray:view.subviews];
         if (![view isKindOfClass:NSTextField.class]) continue;
         NSTextField *field = (NSTextField *)view;
-        if (!field.editable) continue;
+        if (field.editable) [fields addObject:field];
+    }
+    return fields;
+}
+
+static NSArray *connectionFieldViews(NSWindow *window) {
+    NSView *content = window.contentView;
+    NSMutableArray *fields = [NSMutableArray array];
+    for (NSTextField *field in connectionFields(window)) {
         NSRect rect = [content convertRect:field.bounds fromView:field];
         if (!content.isFlipped) rect.origin.y = NSHeight(content.bounds) - NSMaxY(rect);
         [fields addObject:@{@"placeholder": field.placeholderString ?: @"", @"frame": rectangle(rect),
                            @"bezel": @(field.bezelStyle), @"bezeled": @(field.bezeled),
                            @"bordered": @(field.bordered), @"fontSize": @(field.font.pointSize),
-                           @"controlSize": @(field.controlSize), @"editing": @(field.currentEditor != nil)}];
+                           @"controlSize": @(field.controlSize), @"enabled": @(field.enabled),
+                           @"editing": @(field.currentEditor != nil)}];
     }
     return fields;
+}
+
+static NSDictionary *editConnectionField(NSWindow *sheet, NSDictionary *request) {
+    NSString *op = request[@"op"], *label = request[@"label"];
+    for (NSTextField *field in connectionFields(sheet)) {
+        if (![field.placeholderString isEqualToString:label]) continue;
+        if ([op isEqual:@"focusField"]) {
+            NSPoint point = [field convertPoint:NSMakePoint(NSMidX(field.bounds), NSMidY(field.bounds)) toView:nil];
+            for (NSNumber *kind in @[@(NSEventTypeLeftMouseDown), @(NSEventTypeLeftMouseUp)]) {
+                NSEvent *event = [NSEvent mouseEventWithType:kind.unsignedIntegerValue location:point modifierFlags:0
+                    timestamp:NSProcessInfo.processInfo.systemUptime windowNumber:sheet.windowNumber context:nil
+                    eventNumber:0 clickCount:1 pressure:kind.unsignedIntegerValue == NSEventTypeLeftMouseDown ? 1 : 0];
+                [NSApp postEvent:event atStart:NO];
+            }
+            return @{@"clicked": label};
+        }
+        NSTextView *editor = (NSTextView *)field.currentEditor;
+        if (![editor isKindOfClass:NSTextView.class] || sheet.firstResponder != editor)
+            return @{@"pending": @"clicked field has no first responder", @"field": label};
+        if ([op isEqual:@"editField"]) {
+            NSString *value = request[@"value"];
+            [editor selectAll:nil];
+            NSRange selection = editor.selectedRange;
+            [editor setMarkedText:value selectedRange:NSMakeRange(value.length, 0) replacementRange:selection];
+            if (!editor.hasMarkedText) return @{@"error": @"the field editor did not start composition"};
+            [editor insertText:value replacementRange:editor.markedRange];
+            return @{@"value": editor.string, @"marked": @(editor.hasMarkedText)};
+        }
+        BOOL escape = [request[@"value"] isEqual:@"Escape"];
+        NSString *characters = escape ? @"\x1b" : @"\r";
+        NSEvent *event = [NSEvent keyEventWithType:NSEventTypeKeyDown location:NSZeroPoint modifierFlags:0
+            timestamp:NSProcessInfo.processInfo.systemUptime windowNumber:sheet.windowNumber context:nil
+            characters:characters charactersIgnoringModifiers:characters isARepeat:NO keyCode:(escape ? 53 : 36)];
+        [NSApp postEvent:event atStart:NO];
+        return @{@"key": request[@"value"]};
+    }
+    return @{@"pending": @"editable field", @"field": label, @"visible": connectionFieldViews(sheet)};
 }
 
 static NSDictionary *perform(NSDictionary *request) {
@@ -451,6 +497,8 @@ static NSDictionary *perform(NSDictionary *request) {
     if (!window) return @{@"pending": @"dashboard window"};
     NSString *op = request[@"op"], *label = request[@"label"];
     if ([op isEqual:@"connectionFields"]) return @{@"fields": connectionFieldViews(window.attachedSheet)};
+    if ([@[@"focusField", @"editField", @"fieldKey"] containsObject:op])
+        return editConnectionField(window.attachedSheet, request);
     if ([op isEqual:@"selectText"] || [op isEqual:@"copySelection"] || [op isEqual:@"selectionStyle"])
         window = window.attachedSheet ?: window;
     if ([op isEqual:@"selectionStyle"]) return selectionStyle(window);

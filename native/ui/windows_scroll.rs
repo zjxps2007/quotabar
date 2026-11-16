@@ -2,8 +2,11 @@
 use crate::style::Palette;
 use eframe::egui::{scroll_area::ScrollSource, *};
 use std::time::Duration;
-use windows_sys::Win32::UI::WindowsAndMessaging::{
-    SPI_GETKEYBOARDDELAY, SPI_GETKEYBOARDSPEED, SystemParametersInfoW,
+use windows_sys::Win32::UI::{
+    HiDpi::GetSystemMetricsForDpi,
+    WindowsAndMessaging::{
+        SM_CXVSCROLL, SPI_GETKEYBOARDDELAY, SPI_GETKEYBOARDSPEED, SystemParametersInfoW,
+    },
 };
 
 #[derive(Clone, Copy)]
@@ -31,6 +34,17 @@ fn repeat_timing() -> (f64, f64) {
 
 pub fn show(ui: &mut Ui, scroll: ScrollArea, palette: Palette, body: impl FnOnce(&mut Ui)) {
     let original = ui.visuals().clone();
+    // The ScrollViewer template reserves the system metric in physical pixels,
+    // including on monitors where a logical 17-DIP scrollbar spans half a pixel.
+    let factor = ui.ctx().native_pixels_per_point().unwrap_or(1.);
+    let dpi = (96. * factor).round().max(1.) as u32;
+    let width = unsafe { GetSystemMetricsForDpi(SM_CXVSCROLL, dpi) };
+    let style = &mut ui.spacing_mut().scroll;
+    let original_width = style.bar_width;
+    if width > 0 {
+        style.bar_width =
+            (width as f32 / factor - style.bar_inner_margin - style.bar_outer_margin).max(0.);
+    }
     // Keep egui's content measurement, scroll-to-widget, touch and mouse wheel.
     // The track retains its allocated width even while we draw its inset thumb.
     let visuals = ui.visuals_mut();
@@ -55,6 +69,7 @@ pub fn show(ui: &mut Ui, scroll: ScrollArea, palette: Palette, body: impl FnOnce
             ui.set_min_size(content.min_size());
         });
     *ui.visuals_mut() = original;
+    ui.spacing_mut().scroll.bar_width = original_width;
     let view = area.inner_rect;
     let track = Rect::from_min_max(
         view.right_top(),

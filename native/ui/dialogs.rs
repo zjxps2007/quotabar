@@ -171,6 +171,8 @@ pub struct Connect {
     #[cfg(target_os = "macos")]
     error_text: Option<crate::mac::SelectableText>,
     #[cfg(target_os = "macos")]
+    inputs: Option<crate::mac::ConnectionFields>,
+    #[cfg(target_os = "macos")]
     pub login: Option<quotabar::mac_login::Attempt>,
     #[cfg(target_os = "macos")]
     pub login_url: Option<String>,
@@ -271,6 +273,8 @@ impl Dashboard {
             error: None,
             #[cfg(target_os = "macos")]
             error_text: None,
+            #[cfg(target_os = "macos")]
+            inputs: None,
             #[cfg(target_os = "macos")]
             login: None,
             #[cfg(target_os = "macos")]
@@ -687,6 +691,23 @@ impl Dashboard {
         }
         #[cfg(target_os = "macos")]
         c.poll(&self.wire, ui.ctx());
+        #[cfg(target_os = "macos")]
+        let field_command = {
+            if self.capture_dialog {
+                c.inputs = None;
+            } else if c.inputs.is_none()
+                && let Some(parent) = self.selectable_text.as_ref().and_then(|v| v.sheet_view())
+            {
+                c.inputs = Some(crate::mac::ConnectionFields::new(parent, ui.ctx()));
+                c.focus_alias = true;
+            }
+            c.inputs.as_ref().and_then(|fields| fields.command())
+        };
+        #[cfg(not(target_os = "macos"))]
+        let field_command: Option<Key> = None;
+        if field_command == Some(Key::Escape) {
+            return true;
+        }
         let locked = c.pending.is_some() || c.logging();
         let title = if c.replacing.is_some() {
             "Codex 다시 로그인"
@@ -805,25 +826,19 @@ impl Dashboard {
         #[cfg(target_os = "macos")]
         {
             sheet_field_caption(ui, "계정 이름", p);
-            let field = ui
-                .add_enabled_ui(!locked, |ui| {
-                    mac_field(
-                        ui,
-                        &mut c.alias,
-                        "예: 개인 계정, 연구실",
-                        "connect-alias",
-                        ui.available_width(),
-                        p,
-                    )
-                })
-                .inner;
-            if std::mem::take(&mut c.focus_alias) {
-                field.request_focus();
-            }
-            crate::accessibility::text_value(ui, field, &mut c.alias, "계정 이름");
+            ui.add_enabled_ui(!locked, |ui| {
+                crate::mac::connection_input(
+                    c.inputs.as_mut(), ui, crate::mac::Input::Alias, &mut c.alias,
+                    ui.available_width(), std::mem::take(&mut c.focus_alias), p,
+                );
+            });
             ui.add_space(20.);
         }
         let browser = MAC && c.provider == "Codex" && c.browser;
+        #[cfg(target_os = "macos")]
+        if browser && let Some(fields) = &c.inputs {
+            fields.hide_path();
+        }
         let full = |ui: &mut Ui, s: &str, primary: bool| full_button(ui, s, primary, p);
         #[cfg(windows)]
         if c.provider == "Codex" {
@@ -871,7 +886,7 @@ impl Dashboard {
                 ui.add_space(7.);
             }
             let browse = ui
-                .add_enabled_ui(!locked, |ui| {
+                .add_enabled_ui(MAC || !locked, |ui| {
                     #[cfg(target_os = "macos")]
                     {
                         ui.horizontal(|ui| {
@@ -881,9 +896,10 @@ impl Dashboard {
                             let width =
                                 (ui.available_width() - button_width - ui.spacing().item_spacing.x)
                                     .max(40.);
-                            let field =
-                                mac_field(ui, &mut c.path, "경로", "connect-path", width, p);
-                            crate::accessibility::text_value(ui, field, &mut c.path, "경로");
+                            crate::mac::connection_input(
+                                c.inputs.as_mut(), ui, crate::mac::Input::Path,
+                                &mut c.path, width, false, p,
+                            );
                             sheet_button(ui, title, p).clicked()
                         })
                         .inner
@@ -1005,7 +1021,8 @@ impl Dashboard {
                 },
             )
             .inner
-                || enabled && ui.input_mut(|i| i.consume_key(Modifiers::NONE, Key::Enter))
+                || enabled && (field_command == Some(Key::Enter)
+                    || ui.input_mut(|i| i.consume_key(Modifiers::NONE, Key::Enter)))
         } else {
             ui.add_enabled_ui(enabled, |ui| full(ui, "연결", true))
                 .inner

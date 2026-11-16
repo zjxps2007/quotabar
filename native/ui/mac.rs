@@ -31,6 +31,8 @@ mod banner;
 pub use banner::BannerLabel;
 mod selectable_text;
 pub use selectable_text::{SelectableText, TextRole};
+mod connection_fields;
+pub use connection_fields::{ConnectionFields, Input, connection_input};
 mod rounded;
 pub use rounded::{Curve, rounded_rect};
 mod document;

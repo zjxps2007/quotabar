@@ -27,12 +27,14 @@ class Controls:
         self.child = child
         self.sequence = 0
 
-    def request(self, op, label="", expected=None, timeout=8):
+    def request(self, op, label="", expected=None, timeout=8, value=None):
         deadline = time.monotonic() + timeout
         result = None
         while time.monotonic() < deadline:
             self.sequence += 1
             request = {"id": self.sequence, "op": op, "label": label}
+            if value is not None:
+                request["value"] = value
             tmp = self.folder / "request.tmp"
             tmp.write_text(json.dumps(request, ensure_ascii=False))
             tmp.replace(self.folder / "request.json")
@@ -247,6 +249,35 @@ def exercise(dashboard, executable, folder, library, fixture, observed, help_tex
             send({"reply": {"id": retry_id}})
             controls.request("sheet", expected={"sheet": False})
             observed.append({"successfulConnectionDismissesSheet": True})
+            controls.request("press", "계정 연결")
+            controls.request("sheet", expected={"sheet": True})
+            controls.request("press", "Gemini")
+            alias_hint = "예: 개인 계정, 연구실"
+            alias, path = "검증 계정 🧪", "/tmp/QuotaBar 검증/인증.json"
+            for hint, value in ((alias_hint, alias), ("경로", path)):
+                controls.request("focusField", hint)
+                controls.request("editField", hint, {"value": value, "marked": False}, value=value)
+            controls.request("fieldKey", "경로", value="Return")
+            edited = command("connect")
+            edit_id = edited.pop("id")
+            UUID(edit_id)
+            if edited != {"provider": "gemini", "path": path, "alias": alias}:
+                raise ValueError(f"Unexpected connection after editing both native fields: {edited}")
+            observed.append({"composedTextAndReturn": edited})
+            fields = controls.request("connectionFields")["fields"]
+            enabled = {field["placeholder"]: field["enabled"] for field in fields}
+            if enabled != {alias_hint: False, "경로": True}:
+                raise ValueError(f"Unexpected editors during a pending connection: {fields}")
+            observed.append({"pendingConnectionFields": enabled})
+            send({"reply": {"id": edit_id}})
+            controls.request("sheet", expected={"sheet": False})
+            controls.request("press", "계정 연결")
+            controls.request("sheet", expected={"sheet": True})
+            controls.request("focusField", alias_hint)
+            controls.request("fieldKey", alias_hint, value="Escape")
+            controls.request("sheet", expected={"sheet": False})
+            expect_no_command("connect")
+            observed.append({"escapeFromFieldDismissesSheet": True})
             controls.request("accountRefresh", f"{account['name']} 계정 메뉴", {"selected": "새로고침"})
             if UUID(command("refresh")["_0"]) != UUID(account["id"]):
                 raise ValueError("The account menu refreshed a different account")

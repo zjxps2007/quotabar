@@ -1,5 +1,5 @@
 use block2::StackBlock;
-use eframe::egui::{Id, Sense, Ui, vec2};
+use eframe::egui::{Id, Rect, Sense, Ui, vec2};
 use objc2::{MainThreadOnly, rc::Retained};
 use objc2_app_kit::{
     NSAccessibility, NSAppearanceCustomization, NSColor, NSColorSpace, NSFont, NSFontWeightRegular,
@@ -70,8 +70,11 @@ impl SelectableText {
     }
 
     pub fn attached_sheet(&self) -> Option<Self> {
-        let parent = self.parent.window()?.attachedSheet()?.contentView()?;
-        Some(Self::new(parent))
+        Some(Self::new(self.sheet_view()?))
+    }
+
+    pub fn sheet_view(&self) -> Option<Retained<NSView>> {
+        self.parent.window()?.attachedSheet()?.contentView()
     }
 
     fn new(parent: Retained<NSView>) -> Self {
@@ -148,48 +151,59 @@ impl SelectableText {
         );
         let full = text_rect.expand2(vec2((2. / zoom) as f32, 0.));
         let visible = full.intersect(ui.clip_rect());
-        field.clip.setHidden(!visible.is_positive());
-        if !visible.is_positive() {
-            return;
-        }
-        let bounds = self.parent.bounds();
-        let y = if self.parent.isFlipped() {
-            f64::from(visible.top()) * zoom
-        } else {
-            bounds.size.height - f64::from(visible.bottom()) * zoom
-        };
-        let clip_frame = NSRect::new(
-            NSPoint::new(
-                bounds.origin.x + f64::from(visible.left()) * zoom,
-                bounds.origin.y + y,
-            ),
-            NSSize::new(
-                f64::from(visible.width()) * zoom,
-                f64::from(visible.height()) * zoom,
-            ),
-        );
-        if field.clip.frame() != clip_frame {
-            field.clip.setFrame(clip_frame);
-        }
-        // The clip view uses standard AppKit coordinates, even for a flipped host.
-        let text_frame = NSRect::new(
-            NSPoint::new(
-                f64::from(full.left() - visible.left()) * zoom,
-                f64::from(visible.bottom() - full.bottom()) * zoom,
-            ),
-            NSSize::new(
-                f64::from(full.width()) * zoom,
-                f64::from(full.height()) * zoom,
-            ),
-        );
-        if field.label.frame() != text_frame {
-            field.label.setFrame(text_frame);
-        }
+        place_clipped_view(&self.parent, &field.clip, &field.label, full, visible, zoom);
     }
 
     pub fn finish_frame(&mut self) {
         // Filtering, navigation and GPU captures can all remove a field.
         self.fields
             .retain(|_, field| std::mem::take(&mut field.used));
+    }
+}
+
+pub(super) fn place_clipped_view(
+    parent: &NSView,
+    clip: &NSView,
+    view: &NSView,
+    full: Rect,
+    visible: Rect,
+    zoom: f64,
+) {
+    clip.setHidden(!visible.is_positive());
+    if !visible.is_positive() {
+        return;
+    }
+    let bounds = parent.bounds();
+    let y = if parent.isFlipped() {
+        f64::from(visible.top()) * zoom
+    } else {
+        bounds.size.height - f64::from(visible.bottom()) * zoom
+    };
+    let clip_frame = NSRect::new(
+        NSPoint::new(
+            bounds.origin.x + f64::from(visible.left()) * zoom,
+            bounds.origin.y + y,
+        ),
+        NSSize::new(
+            f64::from(visible.width()) * zoom,
+            f64::from(visible.height()) * zoom,
+        ),
+    );
+    if clip.frame() != clip_frame {
+        clip.setFrame(clip_frame);
+    }
+    // The clip view uses standard AppKit coordinates, even for a flipped host.
+    let text_frame = NSRect::new(
+        NSPoint::new(
+            f64::from(full.left() - visible.left()) * zoom,
+            f64::from(visible.bottom() - full.bottom()) * zoom,
+        ),
+        NSSize::new(
+            f64::from(full.width()) * zoom,
+            f64::from(full.height()) * zoom,
+        ),
+    );
+    if view.frame() != text_frame {
+        view.setFrame(text_frame);
     }
 }

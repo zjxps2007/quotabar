@@ -364,13 +364,14 @@ impl Dashboard {
             let rail = self.scroller.clone();
             #[cfg(target_os = "macos")]
             let capturing = self.capture.is_some();
+            let viewport_top = ui.available_rect_before_wrap().top();
             let body = |ui: &mut Ui| {
                 Frame::new().inner_margin(Margin { left: 28, right: 28, top: 0, bottom: 28 }).show(ui, |ui| {
                     ui.set_width(ui.available_width());
                     match self.route.as_str() {
                         "accounts" => self.accounts(ui, p),
                         "settings" => self.settings(ui, p),
-                        _ => self.overview(ui, p),
+                        _ => self.overview(ui, p, viewport_top),
                     }
                 });
             };
@@ -380,7 +381,7 @@ impl Dashboard {
             mac_scroll(ui, scroll, p, rail.as_deref(), capturing, body);
         });
     }
-    fn overview(&mut self, ui: &mut Ui, p: Palette) {
+    fn overview(&mut self, ui: &mut Ui, p: Palette, viewport_top: f32) {
         let enabled: Vec<_> = self.state.accounts.iter().filter(|a| a.enabled).collect();
         let providers = enabled.iter().map(|a| a.provider).collect::<HashSet<_>>();
         let attention = enabled
@@ -595,7 +596,7 @@ impl Dashboard {
             });
             ui.add_space(14.);
         }
-        self.activity(ui, p);
+        self.activity(ui, p, viewport_top);
     }
     fn quota_card(&mut self, ui: &mut Ui, p: Palette, a: &Account) {
         ui.spacing_mut().interact_size.y = 0.;
