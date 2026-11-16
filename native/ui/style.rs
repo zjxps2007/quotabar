@@ -4,6 +4,9 @@ use font_kit::{family_name::FamilyName, handle::Handle, properties::Properties};
 use font_kit::{properties::Weight, source::SystemSource};
 use std::sync::Arc;
 
+#[cfg(windows)]
+mod windows_bitmaps;
+
 fn bold() -> FontFamily {
     FontFamily::Name("system-semibold".into())
 }
@@ -1268,31 +1271,37 @@ pub fn named_toggle(
     response.on_hover_cursor(CursorIcon::PointingHand)
 }
 
-pub struct Assets([(TextureHandle, f32); 3]);
+const PROVIDER_MARKS: [(&str, &[u8], f32); 3] = [
+    (
+        "Codex",
+        include_bytes!("../../shared/assets/CodexLogo.png"),
+        1.,
+    ),
+    (
+        "Claude",
+        include_bytes!("../../windows/assets/ClaudeLogo.png"),
+        0.75,
+    ),
+    (
+        "Gemini",
+        include_bytes!("../../shared/assets/GeminiLogo.png"),
+        0.82,
+    ),
+];
+
+pub struct Assets {
+    textures: [TextureHandle; 3],
+    #[cfg(windows)]
+    bitmaps: windows_bitmaps::Cache,
+}
+
 impl Assets {
     pub fn new(ctx: &Context) -> Self {
-        let entries: [(&str, &[u8], f32); 3] = [
-            (
-                "Codex",
-                include_bytes!("../../shared/assets/CodexLogo.png"),
-                1.,
-            ),
-            (
-                "Claude",
-                include_bytes!("../../windows/assets/ClaudeLogo.png"),
-                0.75,
-            ),
-            (
-                "Gemini",
-                include_bytes!("../../shared/assets/GeminiLogo.png"),
-                0.82,
-            ),
-        ];
-        Self(entries.map(|(label, bytes, scale)| {
-            let image = image::load_from_memory(bytes)
-                .expect("provider mark")
-                .to_rgba8();
-            (
+        Self {
+            textures: PROVIDER_MARKS.map(|(label, bytes, _)| {
+                let image = image::load_from_memory(bytes)
+                    .expect("provider mark")
+                    .to_rgba8();
                 ctx.load_texture(
                     label,
                     ColorImage::from_rgba_unmultiplied(
@@ -1300,20 +1309,25 @@ impl Assets {
                         &image,
                     ),
                     TextureOptions::LINEAR.with_mipmap_mode(Some(TextureFilter::Linear)),
-                ),
-                scale,
-            )
-        }))
+                )
+            }),
+            #[cfg(windows)]
+            bitmaps: windows_bitmaps::Cache::default(),
+        }
     }
     pub fn logo(&self, ui: &mut Ui, p: &str, size: f32) {
-        let (texture, scale) = &self.0[match p {
+        let index = match p {
             "Claude" => 1,
             "Gemini" => 2,
             _ => 0,
-        }];
+        };
+        let texture = &self.textures[index];
         let (r, response) = ui.allocate_exact_size(Vec2::splat(size), Sense::hover());
         response.widget_info(|| WidgetInfo::labeled(WidgetType::Image, ui.is_enabled(), p));
-        let artwork = Rect::from_center_size(r.center(), Vec2::splat(size * scale));
+        let artwork =
+            Rect::from_center_size(r.center(), Vec2::splat(size * PROVIDER_MARKS[index].2));
+        #[cfg(windows)]
+        let texture = self.bitmaps.texture(ui, index, texture, artwork.width());
         #[cfg(target_os = "macos")]
         let native = crate::mac::provider_logo(ui.ctx(), p, artwork.width());
         #[cfg(target_os = "macos")]
