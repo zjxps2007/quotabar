@@ -57,12 +57,13 @@ impl Dashboard {
                 [w, 46.],
                 TextEdit::singleline(&mut AccountField(&mut self.query))
                     .hint_text(rich("계정 이름 또는 이메일 검색", 11., false, p.muted))
+                    .vertical_align(Align::Center)
                     .margin(Margin::symmetric(11, 15)),
             );
             #[cfg(windows)]
             crate::accessibility::text_value(
                 ui,
-                field,
+                tooltip_text(field, "계정 이름 또는 이메일 검색"),
                 &mut self.query,
                 "계정 이름 또는 이메일 검색",
             );

@@ -65,6 +65,19 @@ impl PreferredFont {
         };
         NSFont::systemFontOfSize_weight(font.pointSize(), weight)
     }
+
+    fn metrics(font: &NSFont, ui: &Ui) -> LineMetrics {
+        let scale = f64::from(ui.pixels_per_point());
+        let height = font.ascender() - font.descender() + font.leading();
+        LineMetrics {
+            height: ((height * scale).round() / scale) as f32,
+            ascent: ((font.ascender() * scale).ceil() / scale) as f32,
+        }
+    }
+
+    pub fn line_height(self, ui: &Ui) -> f32 {
+        Self::metrics(&self.base(), ui).height
+    }
 }
 
 #[derive(Clone, Copy, Hash, Eq, PartialEq)]
@@ -494,16 +507,17 @@ pub fn plan_label(ui: &mut Ui, text: &str, color: Color32) -> Option<Response> {
 
 pub fn preferred_label(ui: &mut Ui, text: &str, style: PreferredFont, color: Color32) -> Response {
     let font = style.base();
-    let scale = f64::from(ui.pixels_per_point());
     let size = font.pointSize() as f32;
     // The preferred font supplies line spacing even when its glyphs come
     // from a fallback face. In particular caption and caption2 both reserve
     // 13 points on macOS, but caption2 uses the system's medium face.
-    let height = ((font.ascender() - font.descender() + font.leading()) * scale).round() / scale;
-    let ascent = (font.ascender() * scale).ceil() / scale;
-    let line = LineBox::Preferred {
-        height: height as f32,
-        ascent: ascent as f32,
+    let line = if style == PreferredFont::Title3Bold {
+        // SwiftUI lays the weighted title out with the resolved bold face.
+        // Its Korean title occupies 19 pt, including fallback glyphs.
+        LineBox::Stack
+    } else {
+        let LineMetrics { height, ascent } = PreferredFont::metrics(&font, ui);
+        LineBox::Preferred { height, ascent }
     };
     draw_label(ui, text, size, Face::Preferred(style), color, line).unwrap_or_else(|| {
         let heavy = matches!(

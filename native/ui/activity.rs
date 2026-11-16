@@ -196,19 +196,27 @@ impl Dashboard {
                 }
             });
         }
-        ui.add_space(if MAC { 24. } else { 16. });
         for w in list(&self.state.report["warnings"]) {
             if let Some(msg) = w.as_str() {
+                ui.add_space(if MAC { 24. } else { 12. });
+                #[cfg(target_os = "macos")]
+                preferred_label(ui, msg, PreferredFont::Caption, p.warning);
+                #[cfg(windows)]
                 label(ui, msg, 11., false, p.warning);
             }
         }
+        ui.add_space(if MAC { 24. } else { 16. });
         const NOTE: &str = "토큰은 계정별 할당이 아닌 기기 전체 기록입니다. 구독 요금이나 API 청구 금액으로 환산하지 않습니다.";
         #[cfg(target_os = "macos")]
-        ui.horizontal(|ui| {
-            ui.spacing_mut().item_spacing.x = 5.;
-            crate::mac::intrinsic_symbol(ui, "info.circle", 10., false, p.muted);
-            preferred_label(ui, NOTE, PreferredFont::Caption, p.muted);
-        });
+        ui.allocate_ui_with_layout(
+            vec2(ui.available_width(), PreferredFont::Caption.line_height(ui)),
+            Layout::left_to_right(Align::Center),
+            |ui| {
+                ui.spacing_mut().item_spacing.x = 5.;
+                crate::mac::intrinsic_symbol(ui, "info.circle", 10., false, p.muted);
+                preferred_label(ui, NOTE, PreferredFont::Caption, p.muted);
+            },
+        );
         #[cfg(windows)]
         {
             caption(ui, NOTE, p);

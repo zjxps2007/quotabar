@@ -635,6 +635,14 @@ impl Dashboard {
             ui.spacing_mut().item_spacing.x = 10.;
             self.assets.logo(ui, a.provider, 36.);
             ui.vertical(|ui| {
+                #[cfg(windows)]
+                if a.snapshot["plan"].is_string()
+                    && let Some(plan_line) = crate::windows_text::line_height(9.)
+                {
+                    // WPF measures the padded plan badge before centering the
+                    // provider TextBlock in the shared row.
+                    ui.spacing_mut().interact_size.y = plan_line + 6.;
+                }
                 ui.horizontal(|ui| {
                     #[cfg(target_os = "macos")]
                     {
@@ -866,16 +874,21 @@ impl Dashboard {
     }
 }
 pub fn section_title(ui: &mut Ui, title: &str, subtitle: &str, p: Palette) {
-    let line = |ui: &mut Ui, text: &str, size, heavy, color| {
-        #[cfg(target_os = "macos")]
-        if crate::mac_text::stacked_label(ui, text, size, heavy, color).is_some() {
-            return;
+    #[cfg(target_os = "macos")]
+    {
+        use crate::mac_text::{PreferredFont, preferred_label, stacked_label};
+        if stacked_label(ui, title, 15., true, p.ink).is_none() {
+            system_label(ui, title, 15., true, p.ink);
         }
-        system_label(ui, text, size, heavy, color);
-    };
-    line(ui, title, 15., true, p.ink);
-    ui.add_space(4.);
-    line(ui, subtitle, if MAC { 10. } else { 11. }, false, p.muted);
+        ui.add_space(4.);
+        preferred_label(ui, subtitle, PreferredFont::Caption, p.muted);
+    }
+    #[cfg(windows)]
+    {
+        label(ui, title, 15., true, p.ink);
+        ui.add_space(4.);
+        caption(ui, subtitle, p);
+    }
 }
 pub fn columns(width: f32, min: f32, gap: f32) -> usize {
     ((width + gap) / (min + gap)).floor().max(1.) as usize
