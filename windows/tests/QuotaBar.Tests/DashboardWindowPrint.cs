@@ -9,8 +9,22 @@ internal static partial class DashboardActions
     private struct ClientBounds { public int Left, Top, Right, Bottom; }
 
     [DllImport("user32.dll")] private static extern bool GetClientRect(nint window, out ClientBounds bounds);
+    [DllImport("user32.dll")] private static extern nint SetThreadDpiAwarenessContext(nint context);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int GetClassName(nint window, StringBuilder name, int capacity);
     [DllImport("user32.dll")] private static extern bool PrintWindow(nint window, nint dc, uint flags);
+
+    internal static Size DashboardClientSize(int pid)
+    {
+        nint window = WindowHwnd(pid, "QuotaBar");
+        nint previous = SetThreadDpiAwarenessContext(-4); // per-monitor v2, in physical pixels
+        try
+        {
+            if (window == 0 || !GetClientRect(window, out var bounds))
+                throw new IOException("Cannot measure the dashboard client for process " + pid);
+            return new Size(bounds.Right - bounds.Left, bounds.Bottom - bounds.Top);
+        }
+        finally { if (previous != 0) SetThreadDpiAwarenessContext(previous); }
+    }
 
     private static bool PrintOwnedClient(nint window, int pid, bool confirmation, string destination)
     {

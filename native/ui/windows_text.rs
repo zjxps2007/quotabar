@@ -131,23 +131,33 @@ impl Factories {
                     .SetLineSpacing(DWRITE_LINE_SPACING_METHOD_UNIFORM, height, baseline)
                     .ok()?;
             }
-            let wrap_width = key.wrap_width.map(f32::from_bits);
+            let width = match key.line {
+                LineWidth::Natural => max_size as f32,
+                LineWidth::Wrap(bits) | LineWidth::Ellipsis(bits) => f32::from_bits(bits),
+            };
             format
-                .SetWordWrapping(if wrap_width.is_some() {
+                .SetWordWrapping(if matches!(key.line, LineWidth::Wrap(_)) {
                     DWRITE_WORD_WRAPPING_WRAP
                 } else {
                     DWRITE_WORD_WRAPPING_NO_WRAP
                 })
                 .ok()?;
+            if matches!(key.line, LineWidth::Ellipsis(_)) {
+                let sign = self.write.CreateEllipsisTrimmingSign(&format).ok()?;
+                format
+                    .SetTrimming(
+                        &DWRITE_TRIMMING {
+                            granularity: DWRITE_TRIMMING_GRANULARITY_CHARACTER,
+                            ..Default::default()
+                        },
+                        &sign,
+                    )
+                    .ok()?;
+            }
             let utf16: Vec<_> = key.text.encode_utf16().collect();
             let layout = self
                 .write
-                .CreateTextLayout(
-                    &utf16,
-                    &format,
-                    wrap_width.unwrap_or(max_size as f32),
-                    max_size as f32,
-                )
+                .CreateTextLayout(&utf16, &format, width, max_size as f32)
                 .ok()?;
             let mut metrics = DWRITE_TEXT_METRICS::default();
             layout.GetMetrics(&mut metrics).ok()?;
@@ -297,9 +307,23 @@ struct RunKey {
     text: String,
     pixels: u32,
     semibold: bool,
-    wrap_width: Option<u32>,
+    line: LineWidth,
     origin: [u8; 2],
     colors: Option<(Color32, Color32)>,
+}
+
+#[derive(Clone, Copy, Eq, PartialEq, Hash)]
+enum LineWidth {
+    Natural,
+    Wrap(u32),
+    Ellipsis(u32),
+}
+
+#[derive(Clone, Copy, PartialEq)]
+pub enum LabelLayout {
+    Inline,
+    Block,
+    SingleLine,
 }
 
 /// DirectWrite snaps each baseline in device space. Preserve the fraction of
@@ -387,7 +411,7 @@ impl TextRenderer {
                 text: row.glyphs.iter().map(|glyph| glyph.chr).collect(),
                 pixels: (format.font_id.size * scale).to_bits(),
                 semibold,
-                wrap_width: None,
+                line: LineWidth::Natural,
                 origin,
                 colors,
             };
@@ -410,7 +434,7 @@ impl TextRenderer {
 
 /// Use the same system font metrics for wrapping, drawing and sizing a Windows TextBlock.
 pub fn text_block(ui: &mut Ui, text: &str, size: f32, semibold: bool, color: Color32) -> Response {
-    draw_label(ui, text, size, semibold, color, true)
+    draw_label(ui, text, size, semibold, color, LabelLayout::Block)
         .unwrap_or_else(|| ui.label(crate::style::rich(text, size, semibold, color)))
 }
 
@@ -420,7 +444,7 @@ pub fn natural_size(ui: &Ui, text: &str, size: f32, semibold: bool) -> Option<Ve
         text: text.into(),
         pixels: (size * scale).to_bits(),
         semibold,
-        wrap_width: None,
+        line: LineWidth::Natural,
         origin: [0; 2],
         colors: None,
     };
@@ -440,7 +464,7 @@ pub fn draw_label(
     size: f32,
     semibold: bool,
     color: Color32,
-    fill_width: bool,
+    layout: LabelLayout,
 ) -> Option<Response> {
     let width = ui.available_width();
     let scale = ui.ctx().pixels_per_point();
@@ -448,12 +472,17 @@ pub fn draw_label(
     if !width.is_finite() || width <= 0. || ui.layout().main_wrap() {
         return None;
     }
-    let wrapped = natural_size(ui, text, size, semibold).is_none_or(|v| v.x > width);
+    let constrained = natural_size(ui, text, size, semibold).is_none_or(|v| v.x > width);
+    let line = match (constrained, layout) {
+        (false, _) => LineWidth::Natural,
+        (true, LabelLayout::SingleLine) => LineWidth::Ellipsis((width * scale).to_bits()),
+        (true, _) => LineWidth::Wrap((width * scale).to_bits()),
+    };
     let mut key = RunKey {
         text: text.into(),
         pixels: (size * scale).to_bits(),
         semibold,
-        wrap_width: wrapped.then(|| (width * scale).to_bits()),
+        line,
         origin: [0; 2],
         colors: None,
     };
@@ -463,16 +492,22 @@ pub fn draw_label(
     // WPF measures TextBlocks before arranging their parent. Retain the
     // fractional natural size across stacked rows, independently of the bitmap.
     let mut desired = measured / scale;
-    desired.x = if fill_width {
-        width
-    } else {
+    desired.x = if layout == LabelLayout::Inline {
         desired.x.min(width)
+    } else {
+        width
     };
     let (rect, response) = ui.allocate_exact_size(desired, Sense::hover());
     let (start, origin) = raster_origin(rect.min, scale);
     key.origin = origin;
     let run = renderer.run(ui.ctx(), key, max_size)?;
-    ui.painter().image(
+    let mut painter = ui.painter().clone();
+    if layout == LabelLayout::SingleLine && constrained {
+        let mut clip = painter.clip_rect();
+        clip.max.x = clip.max.x.min(rect.right());
+        painter.set_clip_rect(clip);
+    }
+    painter.image(
         run.texture.id(),
         Rect::from_min_size(start, run.texture.size_vec2() / scale),
         Rect::from_min_max(Pos2::ZERO, pos2(1., 1.)),
@@ -672,7 +707,7 @@ mod tests {
                 text: "Codex · 계정 연결".into(),
                 pixels: pixels.to_bits(),
                 semibold: false,
-                wrap_width: None,
+                line: LineWidth::Natural,
                 origin: [0; 2],
                 colors: None,
             };
@@ -686,8 +721,22 @@ mod tests {
             assert!(mask.width() > previous_width);
             assert!(mask.pixels.iter().any(|p| p.a() == 0));
             assert!(mask.pixels.iter().any(|p| (1..255).contains(&p.a())));
+            // Leave room for three Latin letters and the sign. The remaining
+            // Latin/Korean text must collapse onto the same single line.
+            let sign = RunKey {
+                text: "Cod…".into(),
+                ..run.clone()
+            };
+            let (sign_mask, sign_size) = factories.render(&sign, 4096).unwrap();
+            let ellipsis = RunKey {
+                line: LineWidth::Ellipsis((sign_size.x + 0.1).to_bits()),
+                ..run.clone()
+            };
+            let (trimmed, trimmed_size) = factories.render(&ellipsis, 4096).unwrap();
+            assert_eq!(trimmed_size, sign_size);
+            assert_eq!(trimmed.pixels, sign_mask.pixels);
             let narrow = RunKey {
-                wrap_width: Some((3. * pixels).to_bits()),
+                line: LineWidth::Wrap((3. * pixels).to_bits()),
                 ..run
             };
             let (wrapped, wrapped_size) = factories.render(&narrow, 4096).unwrap();

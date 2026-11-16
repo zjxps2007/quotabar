@@ -1,5 +1,5 @@
-//! Read an immediate child viewport on the DirectX backend, including in a
-//! Windows session that has a WARP device but no capturable desktop.
+//! Read the actual client frame on DirectX, including when a WARP swap chain
+//! returns a desktop-sized texture or an immediate child has no screenshot event.
 use eframe::{
     egui,
     egui_wgpu::{RenderState, ScreenDescriptor},
@@ -11,14 +11,14 @@ use std::{
 };
 
 #[derive(Default)]
-pub struct DialogFrame {
+pub struct ViewportFrame {
     requested: Option<[u32; 2]>,
     frame: Option<(ScreenDescriptor, Vec<egui::epaint::ClippedShape>)>,
 }
 
-impl egui::Plugin for DialogFrame {
+impl egui::Plugin for ViewportFrame {
     fn debug_name(&self) -> &'static str {
-        "DirectX dialog capture"
+        "DirectX viewport capture"
     }
 
     fn output_hook(&mut self, output: &mut egui::FullOutput) {
@@ -34,13 +34,13 @@ impl egui::Plugin for DialogFrame {
     }
 }
 
-impl DialogFrame {
+impl ViewportFrame {
     pub fn request(ctx: &egui::Context) {
         let size = (ctx.viewport_rect().size() * ctx.pixels_per_point()).round();
         ctx.plugin_or_default::<Self>().lock().requested = Some([size.x as u32, size.y as u32]);
     }
 
-    /// Called just after the child was drawn, before eframe reuses its renderer for the parent.
+    /// Read after eframe has uploaded this viewport's textures and finished its pass.
     pub fn read(
         ctx: &egui::Context,
         state: &RenderState,
@@ -55,7 +55,7 @@ impl DialogFrame {
         let bgra = match state.target_format {
             wgpu::TextureFormat::Bgra8Unorm | wgpu::TextureFormat::Bgra8UnormSrgb => true,
             wgpu::TextureFormat::Rgba8Unorm | wgpu::TextureFormat::Rgba8UnormSrgb => false,
-            format => return Err(format!("Unsupported dialog pixel format {format:?}").into()),
+            format => return Err(format!("Unsupported capture pixel format {format:?}").into()),
         };
         let device = &state.device;
         let extent = wgpu::Extent3d {
@@ -64,7 +64,7 @@ impl DialogFrame {
             depth_or_array_layers: 1,
         };
         let target = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("QuotaBar dialog capture"),
+            label: Some("QuotaBar viewport capture"),
             size: extent,
             mip_level_count: 1,
             sample_count: 1,
@@ -77,16 +77,23 @@ impl DialogFrame {
         let row_bytes = width * 4;
         let stride = wgpu::util::align_to(row_bytes, wgpu::COPY_BYTES_PER_ROW_ALIGNMENT);
         let buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("QuotaBar dialog pixels"),
+            label: Some("QuotaBar viewport pixels"),
             size: u64::from(stride) * u64::from(height),
             usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
         let mut encoder = device.create_command_encoder(&Default::default());
         let jobs = ctx.tessellate(shapes, screen.pixels_per_point);
+        let callbacks = state.renderer.write().update_buffers(
+            device,
+            &state.queue,
+            &mut encoder,
+            &jobs,
+            &screen,
+        );
         {
-            // Reuse the actual child's uploaded vertices, textures, uniforms and paint order.
-            // eframe processes screenshot requests for root/deferred viewports only.
+            // Keep the original draw order and textures. Set the projection and
+            // scissor to the client even if the swap chain has a different size.
             let mut pass = encoder
                 .begin_render_pass(&wgpu::RenderPassDescriptor {
                     color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -114,7 +121,9 @@ impl DialogFrame {
             },
             extent,
         );
-        let submit = state.queue.submit([encoder.finish()]);
+        let submit = state
+            .queue
+            .submit(callbacks.into_iter().chain([encoder.finish()]));
         let (send, receive) = mpsc::channel();
         buffer
             .slice(..)

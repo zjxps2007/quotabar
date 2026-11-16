@@ -20,11 +20,11 @@ mod windows_border;
 #[cfg(windows)]
 mod windows_choice;
 #[cfg(windows)]
-mod windows_dialog_capture;
-#[cfg(windows)]
 mod windows_scroll;
 #[cfg(windows)]
 mod windows_text;
+#[cfg(windows)]
+mod windows_viewport_capture;
 mod wire;
 
 use eframe::egui;
@@ -52,7 +52,7 @@ impl Capture {
         if _frame.gl().is_none() {
             if !self.requested && Instant::now() >= self.after {
                 self.requested = true;
-                windows_dialog_capture::DialogFrame::request(ctx);
+                windows_viewport_capture::ViewportFrame::request(ctx);
             }
             ctx.request_repaint_after_for(Duration::from_millis(25), egui::ViewportId::ROOT);
             return None;
@@ -81,7 +81,11 @@ impl Capture {
         ctx.request_repaint_after_for(Duration::from_millis(25), egui::ViewportId::ROOT);
         None
     }
-    fn image(&mut self, ctx: &egui::Context) -> Option<std::sync::Arc<egui::ColorImage>> {
+    fn image(
+        &mut self,
+        ctx: &egui::Context,
+        _frame: &eframe::Frame,
+    ) -> Option<std::sync::Arc<egui::ColorImage>> {
         let pixels = ctx.input(|i| {
             i.events.iter().find_map(|e| match e {
                 egui::Event::Screenshot { image, .. } => Some(image.clone()),
@@ -89,11 +93,31 @@ impl Capture {
             })
         });
         if pixels.is_none() {
+            ctx.request_repaint_after(Duration::from_millis(25));
+            #[cfg(windows)]
+            if let Some(state) = _frame.wgpu_render_state() {
+                if self.requested {
+                    return match windows_viewport_capture::ViewportFrame::read(ctx, state) {
+                        Ok(image) => image,
+                        Err(error) => {
+                            record_probe_error(&error.to_string());
+                            ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot(
+                                Default::default(),
+                            ));
+                            None
+                        }
+                    };
+                }
+                if Instant::now() >= self.after {
+                    self.requested = true;
+                    windows_viewport_capture::ViewportFrame::request(ctx);
+                }
+                return None;
+            }
             if !self.requested && Instant::now() >= self.after {
                 self.requested = true;
                 ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot(Default::default()));
             }
-            ctx.request_repaint_after(Duration::from_millis(25));
         }
         pixels
     }
@@ -293,7 +317,7 @@ impl eframe::App for Dashboard {
         self.workspace(ctx, colors, titlebar);
         self.show_dialog(ctx, frame, colors);
         if !self.capture_dialog
-            && let Some(image) = self.capture.as_mut().and_then(|c| c.image(ctx))
+            && let Some(image) = self.capture.as_mut().and_then(|c| c.image(ctx, frame))
         {
             self.save_capture(image);
         }

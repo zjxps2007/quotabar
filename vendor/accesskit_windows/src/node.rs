@@ -276,8 +276,8 @@ impl NodeWrapper<'_> {
         self.0.description()
     }
 
-    fn placeholder(&self) -> Option<&str> {
-        self.0.placeholder()
+    fn help_text(&self) -> Option<&str> {
+        self.0.data().tooltip().or_else(|| self.0.placeholder())
     }
 
     fn is_content_element(&self) -> bool {
@@ -1004,7 +1004,7 @@ properties! {
     (UIA_LocalizedControlTypePropertyId, localized_control_type),
     (UIA_NamePropertyId, name),
     (UIA_FullDescriptionPropertyId, description),
-    (UIA_HelpTextPropertyId, placeholder),
+    (UIA_HelpTextPropertyId, help_text),
     (UIA_IsContentElementPropertyId, is_content_element),
     (UIA_IsControlElementPropertyId, is_content_element),
     (UIA_IsEnabledPropertyId, is_enabled),

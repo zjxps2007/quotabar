@@ -515,7 +515,7 @@ impl Dashboard {
             #[cfg(windows)]
             let pixels = pixels.or_else(|| {
                 let state = frame.wgpu_render_state().filter(|_| self.capture_dialog)?;
-                crate::windows_dialog_capture::DialogFrame::read(ctx, state).unwrap_or_else(
+                crate::windows_viewport_capture::ViewportFrame::read(ctx, state).unwrap_or_else(
                     |error| {
                         super::record_probe_error(&error.to_string());
                         None

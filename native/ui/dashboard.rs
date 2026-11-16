@@ -167,12 +167,16 @@ impl Dashboard {
                     });
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| match self.route.as_str() {
                         "accounts" => {
-                            if action_on(ui, "+  계정 연결", true, p, p.bg).clicked() { self.open_connect("Codex", None); }
+                            let button = action_on(ui, "+  계정 연결", true, p, p.bg);
+                            #[cfg(windows)]
+                            let button = tooltip_text(button, "계정 연결");
+                            if button.clicked() { self.open_connect("Codex", None); }
                         }
                         "settings" => {}
                         _ => {
                             let shortcut = if MAC { "새로고침 (⌘R)" } else { "새로고침 (Ctrl+R)" };
-                            if action_on(ui, "↻  새로고침", false, p, p.bg).on_hover_text(shortcut).clicked() { self.refresh(); }
+                            let button = action_on(ui, "↻  새로고침", false, p, p.bg);
+                            if tooltip_text(button, shortcut).clicked() { self.refresh(); }
                             if MAC && self.state.accounts.iter().any(|a| a.loading) { ui.spinner(); }
                         }
                     });
@@ -368,7 +372,7 @@ impl Dashboard {
                             }
                         }
                         #[cfg(windows)]
-                        ui.add(Label::new(rich(sub, 10., false, p.tertiary)).truncate());
+                        ellipsis_label(ui, &sub, 10., p.muted);
                     })
                 });
             }
@@ -491,8 +495,7 @@ impl Dashboard {
                     }
                 });
                 ui.add_space(3.);
-                ui.add(Label::new(rich(&a.name, 11., false, p.muted)).truncate())
-                    .on_hover_text(&a.name);
+                ellipsis_label(ui, &a.name, 11., p.muted);
             });
             if MAC && a.loading {
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {

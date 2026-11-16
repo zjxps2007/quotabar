@@ -96,6 +96,7 @@ internal static class DashboardLifecycle
             Errors = new() { [dark.Accounts[0].Id] = "서비스에 연결하지 못했습니다. 마지막으로 확인한 사용량을 표시합니다." } },
             "dashboard", "states-dark", 900, 660));
         var results = new Dictionary<string, PixelComparison>();
+        bool clientSizesMatch = true;
         directory = Path.GetFullPath(directory);
         foreach (var (exe, folder) in new[] { (original, "original"), (candidate, "candidate") })
         {
@@ -118,6 +119,13 @@ internal static class DashboardLifecycle
                         message = child.ReadNext() ?? throw new InvalidDataException($"{folder} exited before confirming {s.Name}.");
                     } while (message.Type != "captured" || message.Body<string>() != path);
                     if (!File.Exists(path)) throw new InvalidDataException($"{folder} did not write {s.Name}.");
+                    if (!s.Route.StartsWith("connect", StringComparison.Ordinal))
+                    {
+                        var client = DashboardActions.DashboardClientSize(child.Pid!.Value);
+                        using var image = new Bitmap(path);
+                        Console.WriteLine($"{folder}/{s.Name}: client {client.Width}×{client.Height}, capture {image.Width}×{image.Height}");
+                        clientSizesMatch &= image.Size == client;
+                    }
                     if (folder == "original" && !HasPaintedContent(path))
                         throw new InvalidDataException($"The original dashboard produced an empty render target for {s.Name}.");
                     if (folder == "candidate")
@@ -128,7 +136,7 @@ internal static class DashboardLifecycle
         }
         File.WriteAllBytes(Path.Combine(directory, "result.json"), Json.Bytes(results));
         foreach (var (name, result) in results) Console.WriteLine($"{name}: {result.ChangedPixels:N0} different pixels, {result.Width}×{result.Height}");
-        return results.Count == scenarios.Count && results.Values.All(result => result.Identical);
+        return clientSizesMatch && results.Count == scenarios.Count && results.Values.All(result => result.Identical);
     }
     internal sealed record PixelComparison(int OriginalWidth, int OriginalHeight, int Width, int Height, int ChangedPixels, double MeanChannelError) {
         public bool Identical => OriginalWidth == Width && OriginalHeight == Height && ChangedPixels == 0;

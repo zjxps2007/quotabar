@@ -190,13 +190,33 @@ impl Dashboard {
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 12.;
             self.assets.logo(ui, a.provider, 36.);
+            #[cfg(target_os = "macos")]
             let width = (ui.available_width() - 112.).max(48.);
+            #[cfg(windows)]
+            let status_text = format!("●  {status}");
+            #[cfg(windows)]
+            let width = {
+                let status_width = crate::windows_text::natural_size(ui, &status_text, 11., false)
+                    .unwrap_or_else(|| {
+                        ui.painter()
+                            .layout_no_wrap(status_text.clone(), FontId::proportional(11.), color)
+                            .size()
+                    })
+                    .x;
+                ui.spacing_mut().item_spacing.x = 0.;
+                (ui.available_width() - status_width).max(0.)
+            };
             ui.allocate_ui_with_layout(vec2(width, 36.), Layout::top_down(Align::Min), |ui| {
                 ui.set_max_width(width);
                 label(ui, a.provider, 13., true, p.ink);
                 ui.add_space(4.);
-                ui.add(Label::new(rich(&a.name, 12., false, p.ink)).truncate())
-                    .on_hover_text(&a.name);
+                #[cfg(windows)]
+                ui.scope(|ui| {
+                    ui.set_max_width((width - 16.).max(0.));
+                    ellipsis_label(ui, &a.name, 12., p.ink);
+                });
+                #[cfg(target_os = "macos")]
+                ellipsis_label(ui, &a.name, 12., p.ink);
                 if let Some(email) = a.snapshot["email"]
                     .as_str()
                     .filter(|s| !email_matches_alias(s, &a.name))
@@ -259,7 +279,7 @@ impl Dashboard {
                 }
                 #[cfg(windows)]
                 {
-                    label(ui, format!("●  {status}"), 11., false, color);
+                    label(ui, status_text, 11., false, color);
                 }
             });
         });

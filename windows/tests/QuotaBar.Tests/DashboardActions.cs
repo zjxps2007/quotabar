@@ -13,6 +13,7 @@ internal static partial class DashboardActions
         var sample = Demo.State() with { Activity = Demo.Activity() };
         var first = sample.Settings.Accounts[0] with { Name = "테스트 ς K 𐐀" };
         sample.Settings.Accounts[0] = first;
+        sample.Errors[first.Id] = "최근 새로고침 실패";
         var periods = sample.Snapshots[first.Id].Windows;
         periods[0] = periods[0] with { Remaining = 16.5 };
         foreach (var (side, path) in new[] { ("original", original), ("candidate", candidate) })
@@ -33,6 +34,16 @@ internal static partial class DashboardActions
                 var window = Window(pid, "QuotaBar");
                 Wait(() => window.FindFirst(TreeScope.Descendants, new PropertyCondition(
                     AutomationElement.NameProperty, "17% 남음")), "16.5% quota rounded to 17%");
+                var alias = CheckToolTip(window, first.Name, first.Name);
+                CheckToolTip(window, "잔여량 20% 이하 · 연결 상태", "잔여량 20% 이하 · 연결 상태");
+                CheckToolTip(window, "3개 Provider", "3개 Provider");
+                CheckToolTip(window, "↻  새로고침", "새로고침 (Ctrl+R)");
+                const string errorLink = "계정 관리에서 확인 →";
+                var link = Wait(() => window.FindFirst(TreeScope.Descendants, new PropertyCondition(
+                    AutomationElement.NameProperty, errorLink)), errorLink).Current.BoundingRectangle;
+                var label = alias.Current.BoundingRectangle;
+                Suite.Check(link.Left < label.Left && Math.Abs(link.Right - label.Right) <= 2 && link.Height > label.Height,
+                    "Error link must stretch across the quota card");
                 var scroll = Wait(() => window.FindFirst(TreeScope.Descendants, new AndCondition(
                     new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.ScrollBar),
                     new PropertyCondition(AutomationElement.IsRangeValuePatternAvailableProperty, true))), "Dashboard scrollbar");
@@ -51,6 +62,13 @@ internal static partial class DashboardActions
                     var tray = Expect(child, "edit").Payload;
                     Suite.Check(tray.GetProperty("id").GetGuid() == first.Id && tray.GetProperty("tray").GetBoolean() != first.ShowInTray);
                 }
+                Press(window, errorLink);
+                Suite.Check(Expect(child, "route").Body<string>() == "accounts");
+                CheckToolTip(window, first.Name, first.Name);
+                CheckToolTip(window, "+  계정 연결", "계정 연결");
+                Console.WriteLine("PASS dashboard and account tooltips, full-width error link and navigation");
+                Press(window, "Dashboard");
+                Suite.Check(Expect(child, "route").Body<string>() == "dashboard");
                 Press(window, "Providers & Accounts");
                 Suite.Check(Expect(child, "route").Body<string>() == "accounts");
                 ValuePattern SearchBox() => (ValuePattern)Wait(() => window.FindFirst(TreeScope.Descendants, new AndCondition(
@@ -282,6 +300,13 @@ internal static partial class DashboardActions
         var button = Wait(() => dialog.FindFirst(TreeScope.Descendants,
             new PropertyCondition(AutomationElement.AutomationIdProperty, id.ToString())), $"message box button {id}");
         ((InvokePattern)button.GetCurrentPattern(InvokePattern.Pattern)).Invoke();
+    }
+
+    private static AutomationElement CheckToolTip(AutomationElement parent, string name, string help)
+    {
+        return Wait(() => parent.FindFirst(TreeScope.Descendants, new AndCondition(
+            new PropertyCondition(AutomationElement.NameProperty, name),
+            new PropertyCondition(AutomationElement.HelpTextProperty, help))), name + " 도움말");
     }
 
     private static void Press(AutomationElement parent, string label)

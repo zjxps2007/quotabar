@@ -385,10 +385,49 @@ pub fn label(ui: &mut Ui, s: impl Into<String>, size: f32, heavy: bool, c: Color
         return response;
     }
     #[cfg(windows)]
-    if let Some(response) = crate::windows_text::draw_label(ui, &s, size, heavy, c, false) {
+    if let Some(response) = crate::windows_text::draw_label(
+        ui,
+        &s,
+        size,
+        heavy,
+        c,
+        crate::windows_text::LabelLayout::Inline,
+    ) {
         return response;
     }
     ui.label(rich(s, size, heavy, c))
+}
+
+pub fn ellipsis_label(ui: &mut Ui, text: &str, size: f32, color: Color32) -> Response {
+    #[cfg(windows)]
+    if let Some(response) = crate::windows_text::draw_label(
+        ui,
+        text,
+        size,
+        false,
+        color,
+        crate::windows_text::LabelLayout::SingleLine,
+    ) {
+        return tooltip_text(response, text);
+    }
+    let response = ui.add(
+        Label::new(rich(text, size, false, color))
+            .truncate()
+            .show_tooltip_when_elided(false),
+    );
+    tooltip_text(response, text)
+}
+
+pub fn tooltip_text(response: Response, text: &str) -> Response {
+    #[cfg(windows)]
+    {
+        response
+            .ctx
+            .accesskit_node_builder(response.id, |node| node.set_tooltip(text));
+        response.on_hover_text_at_pointer(text)
+    }
+    #[cfg(target_os = "macos")]
+    response.on_hover_text(text)
 }
 pub fn caption(ui: &mut Ui, s: impl Into<String>, p: Palette) -> Response {
     label(ui, s, 11., false, p.muted)
@@ -825,7 +864,24 @@ mod button_tests {
 }
 pub fn link(ui: &mut Ui, s: &str, p: Palette, backdrop: Color32) -> Response {
     button_feedback(ui, backdrop, p.ink, vec2(-3., 1.), |ui| {
-        ui.add(Button::new(rich(s, 12., false, p.ink)).frame(false))
+        let button = Button::new(rich(s, 12., false, p.ink)).frame(false);
+        #[cfg(windows)]
+        let button = {
+            let text = crate::windows_text::natural_size(ui, s, 12., false).unwrap_or_else(|| {
+                ui.painter()
+                    .layout_no_wrap(s.to_owned(), FontId::proportional(12.), p.ink)
+                    .size()
+            });
+            // A WPF link stretches across a vertical StackPanel. In a horizontal
+            // section header it docks to the right at its natural width.
+            let width = if ui.layout().is_vertical() {
+                ui.available_width()
+            } else {
+                text.x
+            };
+            button.min_size(vec2(width, text.y + 8.))
+        };
+        ui.add(button)
     })
     .on_hover_cursor(CursorIcon::PointingHand)
 }
