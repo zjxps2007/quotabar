@@ -13,6 +13,7 @@ import subprocess
 import tempfile
 import time
 import uuid
+import dashboard_actions
 
 ROOT = Path(__file__).resolve().parents[2]
 APP = ROOT / "artifacts/QuotaBar.app/Contents/Helpers/QuotaBar Dashboard.app/Contents/MacOS/QuotaBar"
@@ -153,6 +154,33 @@ def write_fixtures():
         (REPORT / f"fixture-{theme}.json").write_text(json.dumps(state, ensure_ascii=False))
 
 
+def capture(child, route, path, width=1120, height=810):
+    send(child.stdin, {"capture": {"route": route, "path": str(path), "width": width, "height": height}})
+    assert wait_for(child.stdout, "captured")["_0"] == str(path)
+    png = path.read_bytes()
+    assert png[:8] == b"\x89PNG\r\n\x1a\n"
+    size = list(struct.unpack(">II", png[16:24]))
+    assert size[0] >= 500 and size[1] >= 300
+    return size
+
+
+def check_resize(child, controls, first):
+    observations = {}
+    for name, width, height in (("cold", 1120, 810), ("repeat", 1120, 810),
+                                ("smaller", 920, 666), ("restored", 1120, 810)):
+        size = first if name == "cold" else capture(child, "dashboard", controls.folder / "resize.png", width, height)
+        geometry = controls.request("captureGeometry")
+        observations[name] = {"requested": [width, height], "png": size, **geometry}
+    (REPORT / "capture-geometry.json").write_text(json.dumps(observations, indent=2))
+    for sample in observations.values():
+        assert sample["png"] == [round(sample["backing"][k]) for k in ("width", "height")], sample
+    for name in ("repeat", "restored"):
+        sample = observations[name]
+        if sample["visibleFrame"] == observations["cold"]["visibleFrame"]:
+            assert sample["png"] == first, observations
+    assert observations["smaller"]["view"]["width"] < observations["restored"]["view"]["width"], observations
+
+
 def main():
     REPORT.mkdir(parents=True, exist_ok=True)
     dependencies = {}
@@ -165,12 +193,16 @@ def main():
         assert not any("libswift" in path or "/Combine.framework/" in path or "/SwiftUI.framework/" in path
                        for path in libraries), (name, libraries)
     write_fixtures()
-    check_monitor()
     sizes = {}
-    with tempfile.TemporaryDirectory() as home, subprocess.Popen(
-        [APP, "--dashboard-helper", "--demo"], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-        env={**os.environ, **fixture_environment(), "HOME": home}, bufsize=0,
-    ) as child:
+    with tempfile.TemporaryDirectory() as home, ExitStack() as stack:
+        library = dashboard_actions.build_driver(Path(home))
+        check_monitor()
+        child = stack.enter_context(subprocess.Popen(
+            [APP, "--dashboard-helper", "--demo"], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+            env={**os.environ, **fixture_environment(), "HOME": home, "CFFIXED_USER_HOME": home,
+                 "DYLD_INSERT_LIBRARIES": str(library), "QUOTABAR_TEST_UI_DIRECTORY": home}, bufsize=0,
+        ))
+        controls = dashboard_actions.Controls(Path(home), child)
         try:
             wait_for(child.stdout, "ready")
             for theme in THEMES:
@@ -181,13 +213,9 @@ def main():
                     assert wait_for(child.stdout, "route") == {"_0": page}
                 for route in ROUTES:
                     path = REPORT / f"{route}-{theme}.png"
-                    send(child.stdin, {"capture": {"route": route, "path": str(path), "width": 1120, "height": 810}})
-                    assert wait_for(child.stdout, "captured")["_0"] == str(path)
-                    png = path.read_bytes()
-                    assert png[:8] == b"\x89PNG\r\n\x1a\n"
-                    width, height = struct.unpack(">II", png[16:24])
-                    assert width >= 500 and height >= 300
-                    sizes[path.name] = [width, height]
+                    sizes[path.name] = capture(child, route, path)
+                    if route == "dashboard" and theme == THEMES[0]:
+                        check_resize(child, controls, sizes[path.name])
             send(child.stdin, {"close": {}})
             assert child.wait(timeout=7) == 0
         finally:

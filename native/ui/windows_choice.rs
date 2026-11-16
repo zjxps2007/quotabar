@@ -223,6 +223,12 @@ impl Selection {
     }
 }
 
+enum Presentation<'a> {
+    Label,
+    Stacked(&'a super::windows_text::TextStack),
+    Document(&'a [(String, String)]),
+}
+
 pub fn choose(
     ui: &mut Ui,
     name: &str,
@@ -231,7 +237,26 @@ pub fn choose(
     selected: usize,
     size: f32,
 ) -> Option<usize> {
-    choose_presented(ui, name, width, labels, selected, size, None)
+    choose_presented(ui, name, width, labels, selected, size, Presentation::Label)
+}
+
+pub fn choose_in_stack(
+    ui: &mut Ui,
+    stack: &super::windows_text::TextStack,
+    name: &str,
+    labels: &[impl AsRef<str>],
+    selected: usize,
+    size: f32,
+) -> Option<usize> {
+    choose_presented(
+        ui,
+        name,
+        ui.available_width(),
+        labels,
+        selected,
+        size,
+        Presentation::Stacked(stack),
+    )
 }
 
 pub fn choose_document(
@@ -247,7 +272,7 @@ pub fn choose_document(
         &titles,
         selected,
         13.,
-        Some(documents),
+        Presentation::Document(documents),
     )
 }
 
@@ -326,7 +351,7 @@ fn choose_presented(
     labels: &[impl AsRef<str>],
     selected: usize,
     size: f32,
-    documents: Option<&[(String, String)]>,
+    presentation: Presentation<'_>,
 ) -> Option<usize> {
     let id = ui.make_persistent_id(Id::new(name));
     let popup = id.with("popup");
@@ -444,16 +469,25 @@ fn choose_presented(
     // Both the label and arrow are painted below. Size their empty egui
     // placeholder from the WPF text line so it does not impose a 16-DIP row.
     ui.spacing_mut().icon_width = line_height;
-    let document = documents.map(|docs| &docs[state.chosen]);
+    let document = match presentation {
+        Presentation::Document(docs) => Some(&docs[state.chosen]),
+        _ => None,
+    };
     let lines = document.map_or(1, |(_, body)| {
         body.bytes().filter(|&b| b == b'\n').count() + 1
     });
     ui.spacing_mut().interact_size.y = line_height * lines as f32 + 14.;
     {
         let field = &mut ui.visuals_mut().widgets;
-        field.active.weak_bg_fill = surface;
-        field.hovered.weak_bg_fill = surface;
-        field.open.weak_bg_fill = surface;
+        for state in [
+            &mut field.inactive,
+            &mut field.hovered,
+            &mut field.active,
+            &mut field.open,
+        ] {
+            state.weak_bg_fill = Color32::TRANSPARENT;
+            state.bg_stroke = Stroke::NONE;
+        }
     }
     let response = ComboBox::from_id_salt(name)
         .width(width)
@@ -482,8 +516,28 @@ fn choose_presented(
     ui.spacing_mut().interact_size = interact_size;
     ui.spacing_mut().button_padding = button_padding;
     ui.spacing_mut().icon_width = icon_width;
+    let mut border = widgets.inactive.bg_stroke;
     ui.visuals_mut().widgets = widgets;
-    let bounds = response.rect;
+    let mut bounds = response.rect;
+    if let Presentation::Stacked(stack) = presentation {
+        // The StackPanel places its selector after the preceding natural text
+        // heights. egui rounds its input allocation to a coarser logical grid.
+        let scale = ui.pixels_per_point();
+        let right = (ui.ctx().content_rect().right() * scale).round() / scale;
+        bounds.min.y = stack.top(bounds.top());
+        bounds.max.y = bounds.min.y + line_height + 14.;
+        bounds.max.x = right - (right - bounds.right()).round();
+    }
+    if response.hovered() {
+        let theme = if ui.visuals().dark_mode {
+            "dark"
+        } else {
+            "light"
+        };
+        border.color = super::style::Palette::new(ui.ctx(), theme).muted;
+    }
+    ui.painter()
+        .rect(bounds, 7, surface, border, StrokeKind::Inside);
     let start = bounds.min + vec2(10., 7.);
     let content = Rect::from_min_max(start, bounds.right_bottom() - vec2(28., 7.));
     let clip = ui.clip_rect().intersect(content);
@@ -535,7 +589,7 @@ fn choose_presented(
             );
         }
     }
-    draw_arrow(ui, response.rect, ink);
+    draw_arrow(ui, bounds, ink);
     let open = ComboBox::is_open(ui.ctx(), id);
     if open {
         ui.data_mut(|d| d.insert_temp(highlight, state.highlighted));
@@ -557,28 +611,16 @@ fn choose_presented(
                 },
             )
         });
-        ui.painter().rect_stroke(
-            response.rect,
-            7,
+        super::windows_border::rounded_rectangle(
+            ui,
+            bounds,
+            7.,
+            Color32::TRANSPARENT,
             Stroke::new(1.0_f32, ink),
-            StrokeKind::Inside,
         );
         if show_focus {
-            draw_keyboard_cues(ui, response.rect, ink);
+            draw_keyboard_cues(ui, bounds, ink);
         }
-    } else if response.hovered() {
-        let theme = if ui.visuals().dark_mode {
-            "dark"
-        } else {
-            "light"
-        };
-        let muted = super::style::Palette::new(ui.ctx(), theme).muted;
-        ui.painter().rect_stroke(
-            response.rect,
-            7,
-            Stroke::new(1.0_f32, muted),
-            StrokeKind::Inside,
-        );
     }
     ui.ctx().accesskit_node_builder(id, |node| {
         node.set_label(name);

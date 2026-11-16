@@ -547,6 +547,12 @@ static NSDictionary *perform(NSDictionary *request) {
     NSWindow *window = dashboardWindow();
     if (!window) return @{@"pending": @"dashboard window"};
     NSString *op = request[@"op"], *label = request[@"label"];
+    if ([op isEqual:@"captureGeometry"]) {
+        NSView *view = window.contentView;
+        return @{@"frame": rectangle(window.frame), @"view": rectangle(view.bounds),
+                 @"backing": rectangle([view convertRectToBacking:view.bounds]),
+                 @"visibleFrame": rectangle(window.screen.visibleFrame), @"scale": @(window.backingScaleFactor)};
+    }
     if ([op isEqual:@"windowPlacement"]) {
         return @{@"frame": rectangle(window.frame), @"identifier": window.identifier ?: @"",
                  @"autosave": window.frameAutosaveName ?: @"", @"savedFrame": window.stringWithSavedFrame};

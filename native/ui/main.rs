@@ -35,6 +35,8 @@ use std::time::{Duration, Instant};
 
 struct Capture {
     path: String,
+    #[cfg(target_os = "macos")]
+    requested_height: f32,
     after: Instant,
     requested: bool,
     painted: std::sync::Arc<std::sync::Mutex<Option<std::sync::Arc<egui::ColorImage>>>>,
@@ -92,6 +94,18 @@ impl Capture {
                 _ => None,
             })
         });
+        #[cfg(target_os = "macos")]
+        let pixels = {
+            let expected = platform::capture_backing_size(_frame, self.requested_height);
+            pixels.filter(|image| {
+                let matches = expected.is_none_or(|size| image.size == size);
+                if !matches {
+                    // WindowServer resized the view while its OpenGL frame was in flight.
+                    self.requested = false;
+                }
+                matches
+            })
+        };
         if pixels.is_none() {
             ctx.request_repaint_after(Duration::from_millis(25));
             #[cfg(windows)]
@@ -288,6 +302,8 @@ impl Dashboard {
                 ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
                 self.capture = Some(Capture {
                     path,
+                    #[cfg(target_os = "macos")]
+                    requested_height: height,
                     after: Instant::now() + Duration::from_millis(200),
                     requested: false,
                     painted: Default::default(),

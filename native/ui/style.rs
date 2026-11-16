@@ -813,7 +813,14 @@ pub fn button_feedback(
             backdrop.b(),
             ((1.0_f32 - opacity) * 255.).round() as u8,
         );
-        ui.painter().rect_filled(bounds, 0, overlay);
+        // Opacity applies to the completed button, including the already
+        // antialiased edge pixels. Cover each touched device pixel in full.
+        let scale = ui.pixels_per_point();
+        let pixels = Rect::from_min_max(
+            (bounds.min * scale).floor() / scale,
+            (bounds.max * scale).ceil() / scale,
+        );
+        ui.painter().rect_filled(pixels, 0, overlay);
     }
     ui.set_opacity(saved);
     response.on_hover_cursor(CursorIcon::PointingHand)

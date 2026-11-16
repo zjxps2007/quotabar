@@ -800,7 +800,8 @@ impl Dashboard {
         ui.add_space(20.);
         let prev = c.provider;
         let _picker = ui.add_enabled_ui(!locked && c.replacing.is_none(), |ui| {
-            if MAC {
+            #[cfg(target_os = "macos")]
+            {
                 if let Some(s) = ui
                     .horizontal(|ui| {
                         sheet_picker_label(ui, "Provider", p);
@@ -820,14 +821,16 @@ impl Dashboard {
                 {
                     c.provider = provider(s);
                 }
-            } else {
+            }
+            #[cfg(windows)]
+            {
                 ui.spacing_mut().button_padding = vec2(10., 7.);
                 let providers = ["Codex", "Claude", "Gemini"];
                 let selected = providers.iter().position(|s| *s == c.provider).unwrap_or(0);
-                if let Some(index) = choose(
+                if let Some(index) = crate::windows_choice::choose_in_stack(
                     ui,
+                    stack,
                     "연결 서비스",
-                    ui.available_width(),
                     &providers,
                     selected,
                     13.,

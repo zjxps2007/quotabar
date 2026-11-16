@@ -49,6 +49,15 @@ extension AppDelegate {
         let target = connect ? window.attachedSheet : window
         guard let view = target?.contentView else { throw CocoaError(.fileReadUnknown) }
         try saveReferenceView(view, to: output)
+        if route == "dashboard", let screen = window.screen {
+            func rectangle(_ r: NSRect) -> [String: CGFloat] {
+                ["x": r.minX, "y": r.minY, "width": r.width, "height": r.height]
+            }
+            let geometry: [String: Any] = ["frame": rectangle(window.frame), "view": rectangle(view.bounds),
+                "backing": rectangle(view.convertToBacking(view.bounds)), "visibleFrame": rectangle(screen.visibleFrame),
+                "scale": window.backingScaleFactor]
+            try JSONSerialization.data(withJSONObject: geometry).write(to: output.deletingPathExtension().appendingPathExtension("geometry.json"))
+        }
     }
 }
 
