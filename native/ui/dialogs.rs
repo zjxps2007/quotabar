@@ -1095,6 +1095,11 @@ impl Dashboard {
             #[cfg(target_os = "macos")]
             c.start_login();
         } else if MAC {
+            // The monitor may acknowledge the request before the next AppKit frame.
+            #[cfg(target_os = "macos")]
+            if let Some(fields) = &c.inputs {
+                fields.lock_alias();
+            }
             let id = self.wire.action(
                 "connect",
                 json!({"provider":c.provider.to_ascii_lowercase(),"path":c.path,"alias":c.alias}),

@@ -558,17 +558,28 @@ static NSDictionary *perform(NSDictionary *request) {
     }
     if ([@[@"focusField", @"editField", @"fieldKey", @"fieldValue"] containsObject:op])
         return editTextField(window.attachedSheet ?: window, request);
-    if ([op isEqual:@"selectText"] || [op isEqual:@"copySelection"] || [op isEqual:@"selectionStyle"])
+    if ([op isEqual:@"selectText"] || [op isEqual:@"copySelection"] || [op isEqual:@"selectionStyle"] || [op isEqual:@"selectedText"])
         window = window.attachedSheet ?: window;
     if ([op isEqual:@"selectionStyle"]) return selectionStyle(window);
+    if ([op isEqual:@"selectedText"]) {
+        NSTextView *editor = (NSTextView *)window.firstResponder;
+        if (![editor isKindOfClass:NSTextView.class]) return @{@"pending": @"text view focus"};
+        NSRange range = editor.selectedRange;
+        NSString *text = editor.string;
+        if (!range.length || NSMaxRange(range) > text.length) return @{@"pending": @"text selection"};
+        return @{@"text": [text substringWithRange:range]};
+    }
     if ([op isEqual:@"selectText"] || [op isEqual:@"dismissBanner"]) {
+        if ([op isEqual:@"selectText"] && !window.isKeyWindow) {
+            [NSApp activateIgnoringOtherApps:YES];
+            [window makeKeyAndOrderFront:nil];
+            return @{@"pending": @"key text window"};
+        }
         id message = control(window, label, [NSMutableArray array], YES);
         if (![message respondsToSelector:@selector(accessibilityFrame)]) return @{@"pending": @"message text"};
         NSRect textFrame = [message accessibilityFrame];
         if (NSIsEmptyRect(textFrame)) return @{@"pending": @"message frame"};
         if ([op isEqual:@"selectText"]) {
-            [NSApp activateIgnoringOtherApps:YES];
-            [window makeKeyAndOrderFront:nil];
             [fixturePasteboard(nil, NULL) clearContents];
             CGFloat left = NSMinX(textFrame) + 0.5, right = NSMaxX(textFrame) + 2;
             CGFloat middle = NSMidY(textFrame);

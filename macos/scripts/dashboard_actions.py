@@ -250,7 +250,7 @@ def exercise(dashboard, executable, folder, library, fixture, observed, help_tex
             controls.request("sheet", expected={"sheet": True})
             try:
                 controls.request("selectText", FILE_ERROR_TEXT)
-                time.sleep(0.7)
+                controls.request("selectedText", expected={"text": FILE_ERROR_TEXT})
                 controls.request("copySelection")
                 help_text["connectionErrorClipboard"] = controls.request("selectionClipboard")
             except (TimeoutError, ValueError) as error:

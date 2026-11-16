@@ -144,6 +144,19 @@ impl Editor {
         }
     }
 
+    fn set_enabled(&self, enabled: bool) {
+        if self.field.isEnabled() == enabled {
+            return;
+        }
+        if !enabled
+            && self.field.currentEditor().is_some()
+            && let Some(window) = self.field.window()
+        {
+            window.makeFirstResponder(None);
+        }
+        self.field.setEnabled(enabled);
+    }
+
     fn sync(&mut self, value: &mut String) {
         let editor = self.field.currentEditor();
         if self.last_value.as_ref() != Some(value) {
@@ -195,6 +208,10 @@ impl ConnectionFields {
 
     pub fn alias_was_editing(&self) -> bool {
         self.alias.was_editing
+    }
+
+    pub fn lock_alias(&self) {
+        self.alias.set_enabled(false);
     }
 
     pub fn hide_path(&self) {
@@ -280,15 +297,7 @@ fn text_input(
     if editor.field.font().as_ref() != Some(&font) {
         editor.field.setFont(Some(&font));
     }
-    if editor.field.isEnabled() != ui.is_enabled() {
-        if !ui.is_enabled()
-            && editor.field.currentEditor().is_some()
-            && let Some(window) = parent.window()
-        {
-            window.makeFirstResponder(None);
-        }
-        editor.field.setEnabled(ui.is_enabled());
-    }
+    editor.set_enabled(ui.is_enabled());
     editor.sync(value);
     response
         .widget_info(|| WidgetInfo::text_edit(ui.is_enabled(), &*value, &*value, spec.placeholder));
