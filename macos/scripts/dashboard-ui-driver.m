@@ -393,6 +393,22 @@ static NSDictionary *perform(NSDictionary *request) {
     NSWindow *window = dashboardWindow();
     if (!window) return @{@"pending": @"dashboard window"};
     NSString *op = request[@"op"], *label = request[@"label"];
+    if ([op isEqual:@"dismissBanner"]) {
+        id message = control(window, label, [NSMutableArray array], YES);
+        if (![message respondsToSelector:@selector(accessibilityFrame)]) return @{@"pending": @"message text"};
+        NSRect textFrame = [message accessibilityFrame];
+        if (NSIsEmptyRect(textFrame)) return @{@"pending": @"message frame"};
+        NSRect content = [window convertRectToScreen:[window.contentView convertRect:window.contentView.bounds toView:nil]];
+        // Both dashboards place the trailing close symbol inside 14 points of padding.
+        NSPoint point = [window convertPointFromScreen:NSMakePoint(NSMaxX(content) - 20, NSMidY(textFrame))];
+        for (NSNumber *kind in @[@(NSEventTypeLeftMouseDown), @(NSEventTypeLeftMouseUp)]) {
+            NSEvent *event = [NSEvent mouseEventWithType:kind.unsignedIntegerValue location:point modifierFlags:0
+                timestamp:NSProcessInfo.processInfo.systemUptime windowNumber:window.windowNumber context:nil
+                eventNumber:0 clickCount:1 pressure:kind.unsignedIntegerValue == NSEventTypeLeftMouseDown ? 1 : 0];
+            [NSApp postEvent:event atStart:NO];
+        }
+        return @{@"clicked": @"dismiss"};
+    }
     if ([op isEqual:@"scrollContent"]) return scrollContent(window);
     if ([op isEqual:@"scrollerPosition"] || [op isEqual:@"pageSettings"])
         return settingsScroller(window, [op isEqual:@"pageSettings"]);

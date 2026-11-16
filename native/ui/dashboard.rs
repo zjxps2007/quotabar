@@ -6,6 +6,46 @@ use eframe::egui::*;
 use serde_json::{Value, json};
 use std::collections::HashSet;
 
+#[cfg(target_os = "macos")]
+fn mac_message_banner(ui: &mut Ui, message: &str, palette: Palette) -> bool {
+    Frame::new()
+        .inner_margin(14)
+        .fill(surface_fill(palette.bg, palette.warning, 0.08))
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.spacing_mut().interact_size.y = 0.;
+            ui.spacing_mut().item_spacing.x = 8.;
+            ui.horizontal(|ui| {
+                crate::mac::intrinsic_symbol(
+                    ui,
+                    "exclamationmark.triangle",
+                    12.,
+                    false,
+                    palette.warning,
+                );
+                let close_size = vec2(12., crate::mac_text::system_line_height(ui, 12.));
+                let width =
+                    (ui.available_width() - close_size.x - ui.spacing().item_spacing.x).max(1.);
+                ui.allocate_ui_with_layout(vec2(width, 0.), Layout::top_down(Align::Min), |ui| {
+                    ui.set_width(width);
+                    ui.add(
+                        Label::new(rich(message, 12., false, palette.warning))
+                            .wrap()
+                            .selectable(true),
+                    );
+                });
+                let (rect, close) = ui.allocate_exact_size(close_size, Sense::click());
+                crate::mac::symbol(ui.painter(), rect, "xmark", 12., false, palette.warning);
+                close.widget_info(|| {
+                    WidgetInfo::labeled(WidgetType::Button, ui.is_enabled(), "닫기")
+                });
+                close.clicked()
+            })
+            .inner
+        })
+        .inner
+}
+
 impl Dashboard {
     pub fn workspace(&mut self, ctx: &Context, p: Palette, titlebar: i8) {
         if !MAC {
@@ -251,23 +291,29 @@ impl Dashboard {
                 });
                 if !MAC { ui.add_space(18.); }
             }
-            let logging = self.state.raw["loggingIn"] == true;
-            let message = self.state.raw["message"].as_str()
-                .or_else(|| logging.then_some("브라우저에서 로그인을 완료하세요.")).map(str::to_owned);
-            if let Some(msg) = message {
-                Frame::new().outer_margin(Margin::symmetric(28, 0)).inner_margin(14)
-                    .fill(p.warning.gamma_multiply(0.08)).show(ui, |ui| {
-                    ui.set_width(ui.available_width());
-                    ui.horizontal_wrapped(|ui| {
-                        label(ui, msg, 12., false, p.warning);
-                        if logging && action_on(ui, "로그인 취소", false, p, p.bg.lerp_to_gamma(p.warning, 0.08)).clicked() { self.wire.action("cancel-login", Value::Null); }
-                        if MAC && link(ui, "닫기", p, p.bg).clicked() {
-                            self.wire.action("message", Value::Null);
-                            self.state.raw["message"] = Value::Null;
-                        }
+            #[cfg(target_os = "macos")]
+            if let Some(message) = self.state.raw["message"].as_str()
+                && mac_message_banner(ui, message, p)
+            {
+                self.wire.action("message", Value::Null);
+                self.state.raw["message"] = Value::Null;
+            }
+            #[cfg(windows)]
+            {
+                let logging = self.state.raw["loggingIn"] == true;
+                let message = self.state.raw["message"].as_str()
+                    .or_else(|| logging.then_some("브라우저에서 로그인을 완료하세요."));
+                if let Some(msg) = message {
+                    Frame::new().outer_margin(Margin::symmetric(28, 0)).inner_margin(14)
+                        .fill(p.warning.gamma_multiply(0.08)).show(ui, |ui| {
+                        ui.set_width(ui.available_width());
+                        ui.horizontal_wrapped(|ui| {
+                            label(ui, msg, 12., false, p.warning);
+                            if logging && action_on(ui, "로그인 취소", false, p, p.bg.lerp_to_gamma(p.warning, 0.08)).clicked() { self.wire.action("cancel-login", Value::Null); }
+                        });
                     });
-                });
-                ui.add_space(18.);
+                    ui.add_space(18.);
+                }
             }
             #[cfg(target_os = "macos")]
             if self.route == "accounts" {

@@ -221,6 +221,9 @@ impl Dashboard {
                     .as_str()
                     .filter(|s| !email_matches_alias(s, &a.name))
                 {
+                    #[cfg(target_os = "macos")]
+                    ui.add(Label::new(rich(email, 10., false, p.muted)).selectable(true));
+                    #[cfg(windows)]
                     caption(ui, email, p);
                 }
             });
@@ -366,6 +369,12 @@ impl Dashboard {
                 "연결한 로그인 파일"
             };
             disclosure(ui, (&a.id, "source"), title, 11., p, |ui| {
+                #[cfg(target_os = "macos")]
+                ui.add(
+                    Label::new(RichText::new(&a.path).monospace().size(11.).color(p.muted))
+                        .selectable(true),
+                );
+                #[cfg(windows)]
                 caption(ui, &a.path, p);
                 let detail = match (MAC, a.provider) {
                     (true, "Claude") => {

@@ -316,7 +316,21 @@ def capture_windows(dashboard, program, folder, library, fixture, output, theme,
                     controls.request("size")
                 capture(route)
                 if route == "dashboard":
-                    observed["appMark"] = controls.request("help", "QuotaBar 로고")
+                    # AccessKit publishes its first tree on the next UI frame.
+                    try:
+                        observed["appMark"] = controls.request("help", "QuotaBar 로고", {"found": True, "help": None})
+                    except TimeoutError as error:
+                        observed["appMark"] = {"error": str(error)}
+                    message = "샘플 계정의 연결을 다시 확인하세요."
+                    dashboard.send(app.stdin, {"state": {"_0": {**fixture, "message": message}}})
+                    capture("message")
+                    try:
+                        controls.request("dismissBanner", message)
+                        observed["messageDismissal"] = dashboard.wait_for(app.stdout, "message")
+                        observed["messageAfterDismissal"] = controls.request("help", message, {"found": False, "help": None})
+                    except (ValueError, TimeoutError) as error:
+                        observed["messageError"] = str(error)
+                    dashboard.send(app.stdin, {"state": {"_0": fixture}})
             show("accounts")
             time.sleep(0.35)
             controls.request("press", "계정 연결")
@@ -430,7 +444,7 @@ def compare_windows(dashboard, work, original, library):
             results[side][theme] = capture_windows(dashboard, program, work / f"windows-{side}-{theme}",
                                                   library, fixture, output, theme, original)
     for theme in dashboard.THEMES:
-        for route in (*dashboard.ROUTES, "remove", "popover-sample", "popover-empty", "popover-overflow",
+        for route in (*dashboard.ROUTES, "remove", "message", "popover-sample", "popover-empty", "popover-overflow",
                       "settings-bottom", "licenses-notice", "licenses-apache", "empty", "activity-empty", "activity"):
             name = f"{route}-{theme}"
             lhs, rhs = (dest / side / f"{name}.png" for side in ("original", "rust"))
@@ -451,8 +465,11 @@ def compare_windows(dashboard, work, original, library):
                            check=True, timeout=20)
             results["repeatability"][side][repeated.stem] = json.loads(result.read_text())
     (dest / "comparison.json").write_text(json.dumps(results, ensure_ascii=False, indent=2))
-    app_mark_matches = all(results[side][theme].get("appMark", {}).get("found") is True
+    app_mark_matches = all(results[side][theme].get("appMark") == {"found": True, "help": None}
                            for side in ("original", "rust") for theme in dashboard.THEMES)
+    message_matches = all(results[side][theme].get("messageDismissal") == {}
+                          and results[side][theme].get("messageAfterDismissal") == {"found": False, "help": None}
+                          for side in ("original", "rust") for theme in dashboard.THEMES)
     documents_match = all(results[side][theme].get("licenseDocuments") == ["NOTICE", "LICENSE", "NOTICE", "closed"]
                           and results[side][theme].get("licenseEscapeClosed") is True
                           for side in ("original", "rust") for theme in dashboard.THEMES)
@@ -467,7 +484,7 @@ def compare_windows(dashboard, work, original, library):
                                "unused": {"found": False, "help": None},
                            }
                            for side in ("original", "rust") for theme in dashboard.THEMES)
-    return app_mark_matches and documents_match and scroll_matches and activity_matches and all(row["identical"] for row in results["comparisons"].values())
+    return app_mark_matches and message_matches and documents_match and scroll_matches and activity_matches and all(row["identical"] for row in results["comparisons"].values())
 
 
 def compare(dashboard, work, original, fixture, library):

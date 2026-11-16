@@ -146,7 +146,7 @@ impl Palette {
         };
         let gray = |d, l| Color32::from_gray(if dark { d } else { l });
         #[cfg(target_os = "macos")]
-        let (ink, muted, tertiary, placeholder, focus_ring) = {
+        let (ink, muted, tertiary, placeholder, focus_ring, warning) = {
             use block2::StackBlock;
             use objc2::MainThreadMarker;
             use objc2_app_kit::{NSApplication, NSColor};
@@ -161,7 +161,12 @@ impl Palette {
                 let primary = gray(220, 39);
                 let secondary = gray(151, 128);
                 let tertiary = gray(84, 189);
-                let colors = Cell::new((primary, secondary, tertiary, tertiary, primary));
+                let orange = if dark {
+                    Color32::from_rgb(255, 159, 10)
+                } else {
+                    Color32::from_rgb(255, 149, 0)
+                };
+                let colors = Cell::new((primary, secondary, tertiary, tertiary, primary, orange));
                 appearance.performAsCurrentDrawingAppearance(&StackBlock::new(|| {
                     colors.set((
                         mac_color(&NSColor::labelColor(), primary),
@@ -169,6 +174,7 @@ impl Palette {
                         mac_color(&NSColor::tertiaryLabelColor(), tertiary),
                         mac_color(&NSColor::placeholderTextColor(), tertiary),
                         mac_color(&NSColor::keyboardFocusIndicatorColor(), primary),
+                        mac_color(&NSColor::systemOrangeColor(), orange),
                     ));
                 }));
                 let colors = colors.get();
@@ -202,6 +208,9 @@ impl Palette {
             },
             accent: gray(255, 0),
             on: gray(0, 255),
+            #[cfg(target_os = "macos")]
+            warning,
+            #[cfg(windows)]
             warning: if dark {
                 Color32::from_rgb(245, 163, 79)
             } else {
