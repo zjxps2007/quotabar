@@ -69,7 +69,14 @@ try {
 } finally { $updateMonitor.Dispose() }
 # Exercise the normal single-instance entry point with empty, isolated settings.
 $residentRoot = Join-Path $RepoRoot ('artifacts\windows\smoke-resident-' + [Guid]::NewGuid().ToString('N'))
-[void][IO.Directory]::CreateDirectory($residentRoot)
+# The monitor checks the data directory's owner. An elevated runner's default
+# owner can be Administrators, even when this process creates the directory.
+$owner = [Security.Principal.WindowsIdentity]::GetCurrent().User
+$acl = [Security.AccessControl.DirectorySecurity]::new()
+$acl.SetOwner($owner)
+$acl.SetAccessRuleProtection($true, $false)
+$acl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new($owner, 'FullControl', 'ContainerInherit,ObjectInherit', 'None', 'Allow'))
+[IO.FileSystemAclExtensions]::Create([IO.DirectoryInfo]::new($residentRoot), $acl)
 [IO.File]::WriteAllText((Join-Path $residentRoot 'settings.json'), '{"schemaVersion":1,"accounts":[],"autoRefresh":false,"automaticUpdates":false,"scanLocalLogs":false}')
 $start = [Diagnostics.ProcessStartInfo]::new($exe)
 $start.UseShellExecute = $false

@@ -24,9 +24,19 @@ pub(super) fn set_label_ink(label: &NSTextField, semantic: &NSColor) {
     label
         .effectiveAppearance()
         .performAsCurrentDrawingAppearance(&StackBlock::new(|| {
-            if let Some(ink) = semantic.colorUsingColorSpace(&NSColorSpace::sRGBColorSpace())
-                && label.textColor().as_ref() != Some(&ink)
-            {
+            let Some(rgb) = semantic.colorUsingColorSpace(&NSColorSpace::sRGBColorSpace()) else {
+                return;
+            };
+            // SwiftUI's resolved RGBA components have single precision, including
+            // the label alpha used when blending text over the selection.
+            let component = |value: f64| f64::from(value as f32);
+            let ink = NSColor::colorWithSRGBRed_green_blue_alpha(
+                component(rgb.redComponent()),
+                component(rgb.greenComponent()),
+                component(rgb.blueComponent()),
+                component(rgb.alphaComponent()),
+            );
+            if label.textColor().as_ref() != Some(&ink) {
                 label.setTextColor(Some(&ink));
             }
         }));

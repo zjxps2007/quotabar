@@ -644,11 +644,11 @@ impl Dashboard {
         ui.add_space(20.);
         self.app_settings(ui, p);
         ui.add_space(20.);
-        let data_padding = Margin {
+        let button_card_padding = Margin {
             bottom: if MAC { 19 } else { 20 },
             ..Margin::same(20)
         };
-        p.frame(data_padding).show(ui, |ui| {
+        p.frame(button_card_padding).show(ui, |ui| {
             ui.set_width(ui.available_width());
             settings_title(ui, "데이터 저장", "lock.shield", p);
             #[cfg(windows)]
@@ -688,7 +688,7 @@ impl Dashboard {
             }
         });
         ui.add_space(20.);
-        p.frame(20).show(ui, |ui| {
+        p.frame(button_card_padding).show(ui, |ui| {
             ui.set_width(ui.available_width());
             settings_title(ui, "오픈소스 라이선스", "doc.text", p);
             ui.add_space(if MAC { 12. } else { 14. });
@@ -700,7 +700,7 @@ impl Dashboard {
             label(ui, credit, 12., true, p.ink);
             ui.add_space(if MAC { 12. } else { 6. });
             system_label(ui, "Apache License 2.0", if MAC { 10. } else { 11. }, false, p.muted);
-            ui.add_space(12.);
+            ui.add_space(if MAC { 13. } else { 12. });
             label(ui, "QuotaBar는 AIUsage의 사용량 조회 코드와 Claude 연결 기능 등을 재사용·수정한 독립 프로젝트입니다.", 12., false, p.ink);
             ui.add_space(if MAC { 12. } else { 14. });
             ui.horizontal(|ui| {
