@@ -12,35 +12,52 @@ struct TypeSearch {
     last_input: f64,
 }
 
-#[derive(Clone, Copy, Default)]
-struct KeyboardCues {
-    last_input_keyboard: bool,
-    visible: bool,
+const LAST_INPUT: &str = "most recent Windows input device was keyboard";
+
+pub fn track_input(ctx: &Context) {
+    // WPF has one InputManager for the dispatcher, including its owned windows.
+    ctx.on_end_pass(
+        "Windows keyboard cues",
+        std::sync::Arc::new(|ctx| {
+            let keyboard = ctx.input(|input| {
+                input.raw.events.iter().rev().find_map(|e| match e {
+                    Event::Key { .. } => Some(true),
+                    Event::PointerButton { .. }
+                    | Event::MouseWheel { .. }
+                    | Event::Touch { .. } => Some(false),
+                    _ => None,
+                })
+            });
+            if let Some(keyboard) = keyboard {
+                ctx.data_mut(|d| d.insert_temp(Id::new(LAST_INPUT), keyboard));
+            }
+        }),
+    );
 }
 
 fn keyboard_cues(ui: &Ui, response: &Response) -> bool {
     use windows_sys::Win32::UI::WindowsAndMessaging::{SPI_GETKEYBOARDCUES, SystemParametersInfoW};
 
     let id = response.id.with("keyboard focus visual");
-    let mut cues = ui
-        .data(|d| d.get_temp::<KeyboardCues>(id))
-        .unwrap_or_default();
     // WPF creates the focus visual on a real focus change. UI Automation may
     // request focus again on the selected field while delivering a handled key.
-    if response.gained_focus() {
-        cues.visible = cues.last_input_keyboard;
-    }
+    let previous = if response.gained_focus() {
+        Id::new(LAST_INPUT)
+    } else {
+        id
+    };
+    let mut visible = ui
+        .data(|d| d.get_temp::<bool>(previous))
+        .unwrap_or_default();
     ui.input(|input| {
         for event in &input.raw.events {
             match event {
                 Event::PointerButton { pressed: true, .. } => {
-                    cues.last_input_keyboard = false;
-                    cues.visible = false;
+                    visible = false;
                 }
                 Event::Key {
                     key, pressed: true, ..
                 } => {
-                    cues.last_input_keyboard = true;
                     // WPF processes navigation after the ComboBox handles its own keys.
                     // Changing the selection in place does not create a focus adorner.
                     if *key == Key::Tab
@@ -49,20 +66,40 @@ fn keyboard_cues(ui: &Ui, response: &Response) -> bool {
                             Key::ArrowLeft | Key::ArrowRight | Key::ArrowUp | Key::ArrowDown
                         ) && input.events.contains(event))
                     {
-                        cues.visible = true;
+                        visible = true;
                     }
                 }
                 _ => {}
             }
         }
     });
-    ui.data_mut(|d| d.insert_temp(id, cues));
+    ui.data_mut(|d| d.insert_temp(id, visible));
     response.has_focus()
-        && (cues.visible || {
+        && (visible || {
             let mut always = 0_i32;
             unsafe { SystemParametersInfoW(SPI_GETKEYBOARDCUES, 0, (&raw mut always).cast(), 0) };
             always != 0
         })
+}
+
+fn paint_focus_dash(mesh: &mut Mesh, start: Pos2, end: Pos2, scale: f32, ink: Color32) {
+    let mut bounds = Rect::from_two_pos(start * scale, end * scale);
+    // Snap across the pen as WPF does, but keep the fractional position along
+    // its length. A one-DIP flat cap can cover half of each adjacent pixel.
+    if start.y == end.y {
+        bounds.min.y = (bounds.min.y - scale * 0.5).round();
+        bounds.max.y = bounds.min.y + scale;
+    } else {
+        bounds.min.x = (bounds.min.x - scale * 0.5).round();
+        bounds.max.x = bounds.min.x + scale;
+    }
+    for y in bounds.top().floor() as i32..bounds.bottom().ceil() as i32 {
+        for x in bounds.left().floor() as i32..bounds.right().ceil() as i32 {
+            let pixel = Rect::from_min_size(pos2(x as f32, y as f32), Vec2::splat(1.));
+            let coverage = bounds.intersect(pixel).area();
+            mesh.add_colored_rect(pixel / scale, ink.gamma_multiply(coverage));
+        }
+    }
 }
 
 fn draw_keyboard_cues(ui: &Ui, rect: Rect, ink: Color32) {
@@ -76,6 +113,8 @@ fn draw_keyboard_cues(ui: &Ui, rect: Rect, ink: Color32) {
         r.left_top(),
     ];
     let clip = ui.clip_rect().expand(1.);
+    let scale = ui.ctx().pixels_per_point();
+    let mut mesh = Mesh::default();
     let mut perimeter = 0.;
     for pair in corners.windows(2) {
         let (from, to) = (pair[0], pair[1]);
@@ -91,9 +130,12 @@ fn draw_keyboard_cues(ui: &Ui, rect: Rect, ink: Color32) {
                 let a = dash.max(0.);
                 let b = (dash + 1.).min(length);
                 if a < b {
-                    ui.painter().line_segment(
-                        [from + direction * a, from + direction * b],
-                        Stroke::new(1.0_f32, ink),
+                    paint_focus_dash(
+                        &mut mesh,
+                        from + direction * a,
+                        from + direction * b,
+                        scale,
+                        ink,
                     );
                 }
                 dash += 3.;
@@ -101,6 +143,7 @@ fn draw_keyboard_cues(ui: &Ui, rect: Rect, ink: Color32) {
         }
         perimeter += length;
     }
+    ui.painter().add(mesh);
 }
 
 impl TypeSearch {
@@ -490,8 +533,76 @@ mod tests {
     use super::*;
 
     #[test]
+    fn horizontal_focus_dash_covers_one_device_pixel_at_the_native_phase() {
+        let mut mesh = Mesh::default();
+        paint_focus_dash(
+            &mut mesh,
+            pos2(30.5, 98.4),
+            pos2(31.5, 98.4),
+            1.,
+            Color32::BLACK,
+        );
+        assert_eq!(mesh.vertices.len(), 8);
+        assert_eq!(
+            mesh.calc_bounds(),
+            Rect::from_min_max(pos2(30., 98.), pos2(32., 99.))
+        );
+        assert!(
+            mesh.vertices
+                .iter()
+                .all(|v| v.color == Color32::from_black_alpha(128))
+        );
+    }
+
+    #[test]
+    fn newly_opened_selector_uses_the_previous_input_device() {
+        let ctx = Context::default();
+        track_input(&ctx);
+        let key = Event::Key {
+            key: Key::A,
+            physical_key: Some(Key::A),
+            pressed: true,
+            repeat: false,
+            modifiers: Modifiers::NONE,
+        };
+        let dialog = |name: &str, event: Event| {
+            // The selector wasn't present when the owner received this input.
+            let _ = ctx.run(
+                RawInput {
+                    events: vec![event],
+                    ..Default::default()
+                },
+                |_| {},
+            );
+            let mut visible = false;
+            let _ = ctx.run(RawInput::default(), |ctx| {
+                CentralPanel::default().show(ctx, |ui| {
+                    let id = ui.make_persistent_id(Id::new(name));
+                    ui.memory_mut(|m| m.request_focus(id));
+                    choose(ui, name, 120., &["Codex", "Claude"], 0, 13.);
+                    assert!(ui.memory(|m| m.has_focus(id)));
+                    visible = ui.data(|d| {
+                        d.get_temp::<bool>(id.with("keyboard focus visual"))
+                            .unwrap()
+                    });
+                });
+            });
+            visible
+        };
+        assert!(dialog("connecting provider", key));
+        let pointer = Event::PointerButton {
+            pos: pos2(10., 10.),
+            button: PointerButton::Primary,
+            pressed: true,
+            modifiers: Modifiers::NONE,
+        };
+        assert!(!dialog("license document", pointer));
+    }
+
+    #[test]
     fn first_arrow_after_focus_keeps_keyboard_on_provider() {
         let ctx = Context::default();
+        track_input(&ctx);
         let mut selected = 0;
         let mut path = String::new();
         let key = |key| Event::Key {
@@ -536,9 +647,8 @@ mod tests {
         assert_eq!(frame(vec![key(Key::ArrowDown), focus.clone()]).1, 1);
         let shows_keyboard_cues = || {
             ctx.data(|d| {
-                d.get_temp::<KeyboardCues>(provider.with("keyboard focus visual"))
+                d.get_temp::<bool>(provider.with("keyboard focus visual"))
                     .unwrap()
-                    .visible
             })
         };
         assert!(

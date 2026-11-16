@@ -479,6 +479,7 @@ fn main() -> eframe::Result {
         #[cfg(windows)]
         {
             platform::constrain_dashboard_window(cc);
+            windows_choice::track_input(&cc.egui_ctx);
             cc.egui_ctx
                 .tessellation_options_mut(|options| options.round_rects_to_pixels = false);
             cc.egui_ctx
