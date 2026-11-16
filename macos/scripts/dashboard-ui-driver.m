@@ -424,10 +424,33 @@ static NSDictionary *selectionStyle(NSWindow *window) {
     return result;
 }
 
+static NSArray *connectionFieldViews(NSWindow *window) {
+    if (!window) return @[];
+    NSView *content = window.contentView;
+    NSMutableArray *queue = [NSMutableArray arrayWithObject:content], *fields = [NSMutableArray array];
+    while (queue.count) {
+        NSView *view = queue.lastObject;
+        [queue removeLastObject];
+        if (view.isHiddenOrHasHiddenAncestor) continue;
+        [queue addObjectsFromArray:view.subviews];
+        if (![view isKindOfClass:NSTextField.class]) continue;
+        NSTextField *field = (NSTextField *)view;
+        if (!field.editable) continue;
+        NSRect rect = [content convertRect:field.bounds fromView:field];
+        if (!content.isFlipped) rect.origin.y = NSHeight(content.bounds) - NSMaxY(rect);
+        [fields addObject:@{@"placeholder": field.placeholderString ?: @"", @"frame": rectangle(rect),
+                           @"bezel": @(field.bezelStyle), @"bezeled": @(field.bezeled),
+                           @"bordered": @(field.bordered), @"fontSize": @(field.font.pointSize),
+                           @"controlSize": @(field.controlSize), @"editing": @(field.currentEditor != nil)}];
+    }
+    return fields;
+}
+
 static NSDictionary *perform(NSDictionary *request) {
     NSWindow *window = dashboardWindow();
     if (!window) return @{@"pending": @"dashboard window"};
     NSString *op = request[@"op"], *label = request[@"label"];
+    if ([op isEqual:@"connectionFields"]) return @{@"fields": connectionFieldViews(window.attachedSheet)};
     if ([op isEqual:@"selectText"] || [op isEqual:@"copySelection"] || [op isEqual:@"selectionStyle"])
         window = window.attachedSheet ?: window;
     if ([op isEqual:@"selectionStyle"]) return selectionStyle(window);

@@ -184,6 +184,8 @@ def exercise(dashboard, executable, folder, library, fixture, observed, help_tex
             ):
                 controls.request("press", segment)
                 time.sleep(0.35)
+                if provider == "gemini":
+                    help_text["connectionFields"] = controls.request("connectionFields")
                 controls.request("press", "연결")
                 request = command("connect")
                 request_id = request.pop("id")
