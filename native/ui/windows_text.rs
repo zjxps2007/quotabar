@@ -690,25 +690,74 @@ pub fn text_block(ui: &mut Ui, text: &str, size: f32, semibold: bool, color: Col
 }
 
 pub fn natural_size(ui: &Ui, text: &str, size: f32, semibold: bool) -> Option<Vec2> {
-    let scale = ui.ctx().pixels_per_point();
-    let renderer = ui.ctx().plugin_opt::<TextRenderer>()?;
-    let mut renderer = renderer.lock();
-    let key = RunKey {
-        text: text.into(),
-        pixels: (size * scale).to_bits(),
-        scale: scale.to_bits(),
-        semibold,
-        stacked: renderer.stacked_viewport == Some(ui.ctx().viewport_id()),
-        line: LineWidth::Natural,
-        origin: RasterOrigin::default(),
-        colors: None,
-    };
-    Some(
-        renderer
-            .run(ui.ctx(), key, ui.input(|i| i.max_texture_side))?
+    Some(MeasuredLabel::new(ui, text, size, semibold, LineWidth::Natural)?.size)
+}
+
+pub struct MeasuredLabel {
+    key: RunKey,
+    pub size: Vec2,
+}
+
+impl MeasuredLabel {
+    fn new(ui: &Ui, text: &str, size: f32, semibold: bool, line: LineWidth) -> Option<Self> {
+        let scale = ui.ctx().pixels_per_point();
+        let renderer = ui.ctx().plugin_opt::<TextRenderer>()?;
+        let mut renderer = renderer.lock();
+        let key = RunKey {
+            text: text.into(),
+            pixels: (size * scale).to_bits(),
+            scale: scale.to_bits(),
+            semibold,
+            stacked: renderer.stacked_viewport == Some(ui.ctx().viewport_id()),
+            line,
+            origin: RasterOrigin::default(),
+            colors: None,
+        };
+        let size = renderer
+            .run(ui.ctx(), key.clone(), ui.input(|i| i.max_texture_side))?
             .layout_size
-            / scale,
-    )
+            / scale;
+        Some(Self { key, size })
+    }
+
+    pub fn fit(
+        ui: &Ui,
+        text: &str,
+        size: f32,
+        semibold: bool,
+        width: f32,
+        layout: LabelLayout<'_>,
+    ) -> Option<Self> {
+        let measure = |line| Self::new(ui, text, size, semibold, line);
+        if let Some(label) = measure(LineWidth::Natural)
+            && label.size.x <= width
+        {
+            return Some(label);
+        }
+        let pixels = (width * ui.ctx().pixels_per_point()).to_bits();
+        measure(if matches!(layout, LabelLayout::SingleLine) {
+            LineWidth::Ellipsis(pixels)
+        } else {
+            LineWidth::Wrap(pixels)
+        })
+    }
+
+    pub fn paint(mut self, painter: &Painter, pos: Pos2, color: Color32) -> Option<()> {
+        let ctx = painter.ctx();
+        let scale = ctx.pixels_per_point();
+        let (start, origin) = raster_origin(pos, scale, self.key.stacked);
+        self.key.origin = origin;
+        let renderer = ctx.plugin_opt::<TextRenderer>()?;
+        let mut renderer = renderer.lock();
+        let run = renderer.run(ctx, self.key, ctx.input(|i| i.max_texture_side))?;
+        painter.image(
+            run.texture.id(),
+            Rect::from_min_size(start, run.texture.size_vec2() / scale),
+            Rect::from_min_max(Pos2::ZERO, pos2(1., 1.)),
+            color,
+        );
+        Some(())
+    }
 }
 
 pub fn draw_label(
@@ -720,33 +769,13 @@ pub fn draw_label(
     layout: LabelLayout<'_>,
 ) -> Option<Response> {
     let width = ui.available_width();
-    let scale = ui.ctx().pixels_per_point();
-    let max_size = ui.input(|i| i.max_texture_side);
     if !width.is_finite() || width <= 0. || ui.layout().main_wrap() {
         return None;
     }
-    let constrained = natural_size(ui, text, size, semibold).is_none_or(|v| v.x > width);
-    let line = match (constrained, layout) {
-        (false, _) => LineWidth::Natural,
-        (true, LabelLayout::SingleLine) => LineWidth::Ellipsis((width * scale).to_bits()),
-        (true, _) => LineWidth::Wrap((width * scale).to_bits()),
-    };
-    let renderer = ui.ctx().plugin_opt::<TextRenderer>()?;
-    let mut renderer = renderer.lock();
-    let mut key = RunKey {
-        text: text.into(),
-        pixels: (size * scale).to_bits(),
-        scale: scale.to_bits(),
-        semibold,
-        stacked: renderer.stacked_viewport == Some(ui.ctx().viewport_id()),
-        line,
-        origin: RasterOrigin::default(),
-        colors: None,
-    };
-    let measured = renderer.run(ui.ctx(), key.clone(), max_size)?.layout_size;
+    let measured = MeasuredLabel::fit(ui, text, size, semibold, width, layout)?;
     // WPF measures TextBlocks before arranging their parent. Retain the
     // fractional natural size across stacked rows, independently of the bitmap.
-    let mut desired = measured / scale;
+    let mut desired = measured.size;
     desired.x = if matches!(layout, LabelLayout::Inline) {
         desired.x.min(width)
     } else {
@@ -757,21 +786,13 @@ pub fn draw_label(
     if let LabelLayout::Stacked(stack) = layout {
         pos.y = stack.top(pos.y);
     }
-    let (start, origin) = raster_origin(pos, scale, key.stacked);
-    key.origin = origin;
-    let run = renderer.run(ui.ctx(), key, max_size)?;
     let mut painter = ui.painter().clone();
-    if matches!(layout, LabelLayout::SingleLine) && constrained {
+    if matches!(measured.key.line, LineWidth::Ellipsis(_)) {
         let mut clip = painter.clip_rect();
         clip.max.x = clip.max.x.min(rect.right());
         painter.set_clip_rect(clip);
     }
-    painter.image(
-        run.texture.id(),
-        Rect::from_min_size(start, run.texture.size_vec2() / scale),
-        Rect::from_min_max(Pos2::ZERO, pos2(1., 1.)),
-        color,
-    );
+    measured.paint(&painter, pos, color)?;
     response.widget_info(|| WidgetInfo::labeled(WidgetType::Label, ui.is_enabled(), text));
     if let LabelLayout::Stacked(stack) = layout {
         stack.advance(desired.y);

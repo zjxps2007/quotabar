@@ -341,7 +341,7 @@ pub fn dashboard_titlebar_height(frame: &eframe::Frame) -> i8 {
 
 #[cfg(target_os = "macos")]
 pub fn restore_window(cc: &eframe::CreationContext<'_>) {
-    use objc2_app_kit::NSView;
+    use objc2_app_kit::{NSUserInterfaceItemIdentification, NSView};
     use objc2_foundation::NSString;
     use raw_window_handle::{HasWindowHandle, RawWindowHandle};
     let Ok(handle) = cc.window_handle() else {
@@ -353,7 +353,10 @@ pub fn restore_window(cc: &eframe::CreationContext<'_>) {
     let view = unsafe { h.ns_view.cast::<NSView>().as_ref() };
     if let Some(window) = view.window() {
         let name = NSString::from_str("DashboardWindow");
-        window.setFrameUsingName(&name);
+        window.setIdentifier(Some(&NSString::from_str("dashboard")));
+        if !window.setFrameUsingName(&name) {
+            window.center();
+        }
         window.setFrameAutosaveName(&name);
     }
 }

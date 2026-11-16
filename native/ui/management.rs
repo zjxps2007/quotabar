@@ -354,7 +354,7 @@ impl Dashboard {
                         vec2(mini_toggle_width(ui, "모니터링"), 15.)
                     };
                     #[cfg(windows)]
-                    let toggle_size = vec2(86., 16.);
+                    let toggle_size = switch_natural_size(ui, "모니터링");
                     ui.allocate_ui_with_layout(toggle_size, Layout::top_down(Align::Min), |ui| {
                         let switch = named_toggle(
                             ui,

@@ -487,13 +487,14 @@ fn main() -> eframe::Result {
         });
     #[cfg(target_os = "macos")]
     let viewport = viewport
+        .with_clamp_size_to_monitor_size(false)
         .with_fullsize_content_view(true)
         .with_titlebar_shown(false)
         .with_title_shown(false);
     let options = eframe::NativeOptions {
         renderer: eframe::Renderer::Glow,
         viewport,
-        centered: true,
+        centered: cfg!(windows),
         persist_window: false,
         vsync: true,
         // Native control surfaces have a uniform fill at every pixel.

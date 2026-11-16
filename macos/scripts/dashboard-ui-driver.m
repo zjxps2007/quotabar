@@ -471,6 +471,17 @@ static NSArray *insertionColor(NSTextView *editor) {
 
 static NSDictionary *editTextField(NSWindow *window, NSDictionary *request) {
     NSString *op = request[@"op"], *label = request[@"label"];
+    if ([op isEqual:@"windowPlacement"]) {
+        return @{@"frame": rectangle(window.frame), @"identifier": window.identifier ?: @"",
+                 @"autosave": window.frameAutosaveName ?: @"", @"savedFrame": window.stringWithSavedFrame};
+    }
+    if ([op isEqual:@"moveDashboard"]) {
+        NSRect usable = (window.screen ?: NSScreen.mainScreen).visibleFrame;
+        NSRect frame = NSMakeRect(NSMinX(usable) + 12, NSMinY(usable) + 4,
+                                  MIN(940, NSWidth(usable) - 24), MIN(668, NSHeight(usable) - 8));
+        [window setFrame:frame display:YES];
+        return @{@"frame": rectangle(window.frame), @"savedFrame": window.stringWithSavedFrame};
+    }
     for (NSTextField *field in connectionFields(window)) {
         if (![field.placeholderString isEqualToString:label]) continue;
         if ([op isEqual:@"fieldValue"])

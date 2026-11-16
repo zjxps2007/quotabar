@@ -140,9 +140,11 @@ def main():
                 save_results()
         compare_popovers(work, app, originals, results, save_results, library)
         windows_match = dashboard_actions.compare_windows(dashboard, work, app, library)
+        placement_matches = dashboard_actions.compare_window_placement(
+            dashboard, work, app, library, json.loads((report / "fixture-light.json").read_text()))
         monitor_matches = compare_monitor.compare(dashboard, work, app)
     save_results()
-    return 0 if actions_match and windows_match and monitor_matches and all(record["identical"] for record in results.values()) else 1
+    return 0 if actions_match and windows_match and placement_matches and monitor_matches and all(record["identical"] for record in results.values()) else 1
 
 
 if __name__ == "__main__":

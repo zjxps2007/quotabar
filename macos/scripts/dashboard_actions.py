@@ -625,6 +625,50 @@ def capture_windows(dashboard, program, folder, library, fixture, output, theme,
     return observed
 
 
+def compare_window_placement(dashboard, work, original, library, fixture):
+    results = {}
+    for side, program in (("original", original), ("rust", dashboard.APP)):
+        observed = results[side] = {}
+        for phase in ("fresh", "restored"):
+            folder = work / f"placement-{side}-{phase}"
+            folder.mkdir()
+            # AppKit reads the saved frame from the process's argument defaults domain.
+            # Reopen at the real frame stored after a move on the current display.
+            saved = "" if phase == "fresh" else observed["moved"]["savedFrame"]
+            env = {**os.environ, **dashboard.fixture_environment(), "HOME": str(folder), "CFFIXED_USER_HOME": str(folder),
+                   "DYLD_INSERT_LIBRARIES": str(library), "QUOTABAR_TEST_UI_DIRECTORY": str(folder)}
+            args = [program, "--dashboard-helper", "--demo", "-NSWindow Frame DashboardWindow", saved]
+            with subprocess.Popen(args, stdin=subprocess.PIPE, stdout=subprocess.PIPE, bufsize=0, env=env) as app:
+                controls = Controls(folder, app)
+                try:
+                    dashboard.wait_for(app.stdout, "ready")
+                    dashboard.send(app.stdin, {"state": {"_0": fixture}})
+                    dashboard.send(app.stdin, {"show": {"route": "dashboard"}})
+                    dashboard.wait_for(app.stdout, "route")
+                    observed[phase] = controls.request("windowPlacement")
+                    if phase == "fresh":
+                        observed["moved"] = controls.request("moveDashboard")
+                except (OSError, ValueError, RuntimeError, TimeoutError, EOFError, subprocess.SubprocessError) as error:
+                    observed["error"] = str(error)
+                    break
+                finally:
+                    if app.poll() is None:
+                        try:
+                            dashboard.send(app.stdin, {"close": {}})
+                            app.wait(timeout=4)
+                        except (OSError, subprocess.TimeoutExpired):
+                            app.kill()
+    matched = results["original"] == results["rust"] and all(
+        "error" not in observed
+        and all(observed[phase]["identifier"] == "dashboard" and observed[phase]["autosave"] == "DashboardWindow"
+                for phase in ("fresh", "restored"))
+        and observed["fresh"]["frame"] != observed["moved"]["frame"] == observed["restored"]["frame"]
+        for observed in results.values())
+    results["identical"] = matched
+    (dashboard.REPORT / "window-placement.json").write_text(json.dumps(results, indent=2))
+    return matched
+
+
 def compare_windows(dashboard, work, original, library):
     dest = dashboard.REPORT / "windows"
     results = {"original": {}, "rust": {}, "comparisons": {}, "repeatability": {}}

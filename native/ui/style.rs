@@ -603,6 +603,10 @@ pub use crate::mac::popup_choice as choose;
 /// Windows ButtonBase activates on Space release and cancels a held press on
 /// focus loss. Enter, pointer clicks and accessibility Invoke keep their own timing.
 pub fn button_pressed(ui: &Ui, response: &mut Response) -> bool {
+    control_pressed(ui, response, true)
+}
+
+fn control_pressed(ui: &Ui, response: &mut Response, accepts_return: bool) -> bool {
     let pointer = response.is_pointer_button_down_on() && response.contains_pointer();
     if !cfg!(windows) {
         return pointer;
@@ -631,11 +635,12 @@ pub fn button_pressed(ui: &Ui, response: &mut Response) -> bool {
                     }
                 }
             }
-            if down || activate {
+            let enter = i.key_pressed(Key::Enter);
+            if down || activate || (enter && !accepts_return) {
                 response.flags.set(
                     egui::response::Flags::FAKE_PRIMARY_CLICKED,
                     activate
-                        || i.key_pressed(Key::Enter)
+                        || (enter && accepts_return)
                         || i.has_accesskit_action_request(
                             response.id,
                             egui::accesskit::Action::Click,
@@ -848,6 +853,55 @@ pub fn action(ui: &mut Ui, s: &str, primary: bool, p: Palette) -> Response {
 #[cfg(all(test, windows))]
 mod button_tests {
     use super::*;
+
+    #[test]
+    fn narrow_switch_wraps_its_caption_and_focuses_the_track() {
+        use windows::Win32::System::Com::{
+            COINIT_APARTMENTTHREADED, CoInitializeEx, CoUninitialize,
+        };
+        unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED) }
+            .ok()
+            .unwrap();
+        let ctx = Context::default();
+        ctx.add_plugin(crate::windows_text::TextRenderer::default());
+        let p = Palette::new(&ctx, "light");
+        let frame = || {
+            let mut row = None;
+            let input = RawInput {
+                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(100., 120.))),
+                ..Default::default()
+            };
+            let output = ctx.run(input, |ctx| {
+                CentralPanel::default().frame(Frame::NONE).show(ctx, |ui| {
+                    ui.set_width(100.);
+                    let title = "작업 표시줄에 앱 아이콘 표시";
+                    row = Some(named_toggle(ui, title, title, true, p.accent, p));
+                });
+            });
+            (row.unwrap(), output.shapes)
+        };
+        frame().0.request_focus();
+        let (response, shapes) = frame();
+        let row = response.rect;
+        assert!((row.height() - 43.89).abs() < 1. / 32., "{row:?}");
+        let ring = shapes
+            .iter()
+            .find_map(|s| match &s.shape {
+                Shape::Rect(r) if r.fill == Color32::TRANSPARENT && r.stroke.color == p.ink => {
+                    Some(r.rect)
+                }
+                _ => None,
+            })
+            .expect("focused switch border");
+        assert_eq!(
+            ring,
+            Rect::from_min_max(
+                pos2(row.right() - 31., row.top() - 3.),
+                row.max + vec2(3., 3.)
+            )
+        );
+        unsafe { CoUninitialize() };
+    }
 
     #[test]
     fn stacked_link_centers_its_label_in_the_full_hit_area() {
@@ -1111,7 +1165,7 @@ pub fn checkbox_in_row(
     );
     let (row, mut response) = ui.allocate_exact_size(row_size, Sense::click());
     let row = top.map_or(row, |y| Rect::from_min_size(pos2(row.left(), y), row_size));
-    button_pressed(ui, &mut response);
+    control_pressed(ui, &mut response, false);
     if response.clicked() {
         *checked = !*checked;
         response.mark_changed();
@@ -1183,6 +1237,118 @@ pub fn mini_toggle_width(ui: &Ui, title: &str) -> f32 {
     caption.ceil() + 8. + 26.
 }
 
+#[cfg(windows)]
+const SWITCH_TRACK: Vec2 = vec2(28., 16.);
+#[cfg(windows)]
+const SWITCH_CAPTION_GAP: f32 = 12.;
+
+#[cfg(windows)]
+pub fn switch_natural_size(ui: &Ui, title: &str) -> Vec2 {
+    let caption = crate::windows_text::natural_size(ui, title, 11., false).unwrap_or_else(|| {
+        ui.painter()
+            .layout_no_wrap(title.into(), FontId::proportional(11.), Color32::WHITE)
+            .size()
+    });
+    vec2(
+        caption.x + SWITCH_CAPTION_GAP + SWITCH_TRACK.x,
+        caption.y.max(SWITCH_TRACK.y),
+    )
+}
+
+#[cfg(windows)]
+pub fn named_toggle(
+    ui: &mut Ui,
+    title: &str,
+    name: &str,
+    value: bool,
+    tint: Color32,
+    p: Palette,
+) -> Response {
+    use crate::{
+        windows_border::rounded_rectangle,
+        windows_text::{LabelLayout, MeasuredLabel},
+    };
+    let width = ui.available_width().max(SWITCH_TRACK.x);
+    let caption_width = (width - SWITCH_TRACK.x - SWITCH_CAPTION_GAP).max(0.);
+    let caption = if caption_width > 0. {
+        MeasuredLabel::fit(ui, title, 11., false, caption_width, LabelLayout::Block)
+    } else {
+        None
+    };
+    let fallback = || {
+        ui.painter().layout(
+            title.into(),
+            FontId::proportional(11.),
+            p.ink,
+            caption_width,
+        )
+    };
+    let fallback = (caption.is_none() && caption_width > 0.).then(fallback);
+    let height = caption
+        .as_ref()
+        .map(|c| c.size.y)
+        .or_else(|| fallback.as_ref().map(|g| g.size().y))
+        .unwrap_or(0.);
+    let (row, mut response) =
+        ui.allocate_exact_size(vec2(width, height.max(SWITCH_TRACK.y)), Sense::click());
+    control_pressed(ui, &mut response, false);
+    response
+        .widget_info(|| WidgetInfo::selected(WidgetType::Checkbox, ui.is_enabled(), value, name));
+
+    // WPF composites the disabled CheckBox as one layer over its card.
+    let opacity = ui.opacity();
+    if !ui.is_enabled() {
+        ui.set_opacity(1.);
+    }
+    let origin = pos2(row.left(), row.center().y - height * 0.5);
+    if let Some(caption) = caption {
+        caption.paint(ui.painter(), origin, p.ink);
+    } else if let Some(galley) = fallback {
+        ui.painter().galley(origin, galley, p.ink);
+    }
+    let track = Rect::from_center_size(
+        row.right_center() - vec2(SWITCH_TRACK.x * 0.5, 0.),
+        SWITCH_TRACK,
+    );
+    rounded_rectangle(
+        ui,
+        track,
+        8.,
+        if value { tint } else { p.track },
+        Stroke::NONE,
+    );
+    let thumb_x = if value {
+        track.right() - 8.
+    } else {
+        track.left() + 8.
+    };
+    let thumb = Rect::from_center_size(pos2(thumb_x, track.center().y), Vec2::splat(12.));
+    rounded_rectangle(
+        ui,
+        thumb,
+        6.,
+        if value { p.card } else { p.muted },
+        Stroke::NONE,
+    );
+    if response.has_focus() {
+        let focus = Rect::from_x_y_ranges(track.x_range(), row.y_range()).expand(3.);
+        rounded_rectangle(
+            ui,
+            focus,
+            10.,
+            Color32::TRANSPARENT,
+            Stroke::new(1.0_f32, p.ink),
+        );
+    }
+    if !ui.is_enabled() {
+        ui.painter()
+            .rect_filled(row, 0., p.card.gamma_multiply(1. - opacity));
+        ui.set_opacity(opacity);
+    }
+    response.on_hover_cursor(CursorIcon::PointingHand)
+}
+
+#[cfg(target_os = "macos")]
 pub fn named_toggle(
     ui: &mut Ui,
     s: &str,
@@ -1191,10 +1357,6 @@ pub fn named_toggle(
     tint: Color32,
     p: Palette,
 ) -> Response {
-    #[cfg(windows)]
-    let height =
-        crate::windows_text::natural_size(ui, s, 11., false).map_or(16., |size| size.y.max(16.));
-    #[cfg(not(windows))]
     let height = 15.;
     let (r, mut response) =
         ui.allocate_exact_size(vec2(ui.available_width(), height), Sense::click());
@@ -1206,18 +1368,13 @@ pub fn named_toggle(
         r.left_center(),
         Align2::LEFT_CENTER,
         s,
-        FontId::proportional(if cfg!(target_os = "macos") { 10. } else { 11. }),
+        FontId::proportional(10.),
         p.ink,
     );
-    let size = if cfg!(target_os = "macos") {
-        vec2(26., 15.)
-    } else {
-        vec2(28., 16.)
-    };
+    let size = vec2(26., 15.);
     let t = Rect::from_center_size(r.right_center() - vec2(size.x * 0.5, 0.), size);
     // SwiftUI aligns a mini switch to the caption baseline, one point below
     // the geometric center of the row.
-    #[cfg(target_os = "macos")]
     let t = {
         let track = t.translate(vec2(0., 1.));
         // AppKit exposes the switch itself to accessibility, including the
@@ -1232,7 +1389,6 @@ pub fn named_toggle(
         });
         track
     };
-    #[cfg(target_os = "macos")]
     let native = crate::mac::draw_switch(
         ui,
         t,
@@ -1241,8 +1397,6 @@ pub fn named_toggle(
         objc2_app_kit::NSControlSize::Mini,
         Some(tint),
     );
-    #[cfg(windows)]
-    let native = false;
     if !native {
         painter.rect_filled(t, 8, if value { tint } else { p.track });
         painter.circle_filled(
@@ -1251,9 +1405,7 @@ pub fn named_toggle(
                 t.center().y,
             ),
             6.,
-            if cfg!(windows) {
-                if value { p.card } else { p.muted }
-            } else if value || p.dark {
+            if value || p.dark {
                 Color32::WHITE
             } else {
                 p.muted

@@ -108,7 +108,8 @@ impl Tile {
             for x in 0..width {
                 let outside = Self::coverage(outer, radius + 0.5 * stroke, x as f32, y as f32);
                 let fill = Self::coverage(inner, radius - 0.5 * stroke, x as f32, y as f32);
-                let pen = outside.saturating_sub(fill) * (64 - fill);
+                let fill_opacity = (fill * u32::from(self.fill.a()) + 127) / 255;
+                let pen = outside.saturating_sub(fill) * (64 - fill_opacity);
                 let background = fill * 64;
                 let mix = |a: u8, b: u8| {
                     ((u32::from(a) * pen + u32::from(b) * background + 2048) / 4096) as u8

@@ -58,9 +58,16 @@ internal static partial class DashboardActions
                 Expect(child, "refresh");
                 if (includeKeyboard)
                 {
-                    Toggle(window, $"{first.Provider} {first.Name} 트레이에 표시");
-                    var tray = Expect(child, "edit").Payload;
+                    var traySwitch = FocusToggle(window, $"{first.Provider} {first.Name} 트레이에 표시");
+                    var command = Task.Run(child.ReadNext);
+                    TypeKey(traySwitch, "{ENTER}");
+                    Suite.Check(!command.Wait(250), "Enter activated the tray switch");
+                    SendSpace(traySwitch, () => Suite.Check(!command.Wait(250), "Space activated the tray switch before release"));
+                    var trayEdit = command.WaitAsync(TimeSpan.FromSeconds(5)).GetAwaiter().GetResult();
+                    Suite.Check(trayEdit?.Type == "edit", "Releasing Space must edit the account");
+                    var tray = trayEdit!.Payload;
                     Suite.Check(tray.GetProperty("id").GetGuid() == first.Id && tray.GetProperty("tray").GetBoolean() != first.ShowInTray);
+                    Console.WriteLine("PASS focused switch ignores Enter and toggles on Space release");
                 }
                 Press(window, errorLink);
                 Suite.Check(Expect(child, "route").Body<string>() == "accounts");
@@ -317,15 +324,20 @@ internal static partial class DashboardActions
         ((InvokePattern)node.GetCurrentPattern(InvokePattern.Pattern)).Invoke();
     }
 
-    private static void Toggle(AutomationElement parent, string label)
+    private static AutomationElement FocusToggle(AutomationElement parent, string label)
     {
         var condition = new AndCondition(new PropertyCondition(AutomationElement.NameProperty, label),
                                          new PropertyCondition(AutomationElement.IsTogglePatternAvailableProperty, true));
         var node = Wait(() => parent.FindFirst(TreeScope.Descendants, condition), label);
+        node.SetFocus();
+        return Wait(() => node.Current.HasKeyboardFocus ? node : null, label);
+    }
+
+    private static void Toggle(AutomationElement parent, string label)
+    {
         // WPF's TogglePattern sets IsChecked without the Click event subscribed
         // by the monitor. Activate the focused control with the user's Space key.
-        node.SetFocus();
-        SendSpace(node);
+        SendSpace(FocusToggle(parent, label));
     }
 
     private static nint FocusedKeyboardTarget(AutomationElement node)
