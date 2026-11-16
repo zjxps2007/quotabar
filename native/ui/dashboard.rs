@@ -38,6 +38,10 @@ impl Dashboard {
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 10.;
                     mark(ui, 38., p);
+                    #[cfg(target_os = "macos")]
+                    crate::mac_text::centered_label(ui, "QuotaBar", 18., true, p.ink)
+                        .unwrap_or_else(|| label(ui, "QuotaBar", 18., true, p.ink));
+                    #[cfg(windows)]
                     label(ui, "QuotaBar", 18., true, p.ink);
                 });
                 ui.add_space(30.);
@@ -86,32 +90,70 @@ impl Dashboard {
                         1.
                     };
                     if selected {
-                        ui.painter().rect_filled(
+                        #[cfg(target_os = "macos")]
+                        crate::mac::rounded_rect(
+                            ui,
                             r,
-                            if MAC { 9 } else { 8 },
-                            p.rail.lerp_to_gamma(p.accent, opacity),
+                            9.,
+                            p.accent,
+                            Stroke::NONE,
+                            crate::mac::Curve::Continuous,
                         );
+                        #[cfg(windows)]
+                        ui.painter()
+                            .rect_filled(r, 8, p.rail.lerp_to_gamma(p.accent, opacity));
                     }
                     let fg = p
                         .rail
                         .lerp_to_gamma(if selected { p.on } else { p.ink }, opacity);
-                    let icon =
-                        Rect::from_center_size(r.left_center() + vec2(20., 0.), Vec2::splat(16.));
-                    glyph(ui.painter(), icon, key, fg, selected);
-                    ui.painter().text(
-                        r.left_center() + vec2(38., 0.),
-                        Align2::LEFT_CENTER,
-                        display,
-                        FontId::new(
+                    #[cfg(target_os = "macos")]
+                    {
+                        // SwiftUI uses 12 points of leading padding, an 18-point
+                        // symbol frame and a 9-point gap before the text.
+                        let icon = Rect::from_center_size(
+                            r.left_center() + vec2(21., 0.),
+                            vec2(18., r.height()),
+                        );
+                        if !crate::mac::symbol(
+                            ui.painter(),
+                            icon,
+                            system_symbol_name(key),
                             12.,
-                            if selected {
-                                FontFamily::Name("system-semibold".into())
-                            } else {
-                                FontFamily::Proportional
-                            },
-                        ),
-                        fg,
-                    );
+                            selected,
+                            fg,
+                        ) {
+                            glyph(ui.painter(), icon, key, fg, selected);
+                        }
+                        crate::mac_text::navigation_title(
+                            ui,
+                            r.min + vec2(39., 11.),
+                            display,
+                            selected,
+                            fg,
+                        );
+                    }
+                    #[cfg(windows)]
+                    {
+                        let icon = Rect::from_center_size(
+                            r.left_center() + vec2(20., 0.),
+                            Vec2::splat(16.),
+                        );
+                        glyph(ui.painter(), icon, key, fg, selected);
+                        ui.painter().text(
+                            r.left_center() + vec2(38., 0.),
+                            Align2::LEFT_CENTER,
+                            display,
+                            FontId::new(
+                                12.,
+                                if selected {
+                                    FontFamily::Name("system-semibold".into())
+                                } else {
+                                    FontFamily::Proportional
+                                },
+                            ),
+                            fg,
+                        );
+                    }
                     if res.has_focus() {
                         ui.painter().rect_stroke(
                             if MAC { r } else { r.shrink2(vec2(9., 8.)) },
@@ -125,8 +167,12 @@ impl Dashboard {
                     }
                     ui.add_space(5.);
                 }
+                #[cfg(target_os = "macos")]
+                let footer_height = crate::mac_text::system_line_height(ui, 11.);
+                #[cfg(windows)]
+                let footer_height = 15.;
                 let footer = Rect::from_min_max(
-                    pos2(side.left() + 12., side.bottom() - 15.),
+                    pos2(side.left() + 12., side.bottom() - footer_height),
                     side.right_bottom(),
                 );
                 ui.scope_builder(UiBuilder::new().max_rect(footer), |ui| {

@@ -315,6 +315,8 @@ def capture_windows(dashboard, program, folder, library, fixture, output, theme,
                 if route == "accounts":
                     controls.request("size")
                 capture(route)
+                if route == "dashboard":
+                    observed["appMark"] = controls.request("help", "QuotaBar 로고")
             show("accounts")
             time.sleep(0.35)
             controls.request("press", "계정 연결")
@@ -449,6 +451,8 @@ def compare_windows(dashboard, work, original, library):
                            check=True, timeout=20)
             results["repeatability"][side][repeated.stem] = json.loads(result.read_text())
     (dest / "comparison.json").write_text(json.dumps(results, ensure_ascii=False, indent=2))
+    app_mark_matches = all(results[side][theme].get("appMark", {}).get("found") is True
+                           for side in ("original", "rust") for theme in dashboard.THEMES)
     documents_match = all(results[side][theme].get("licenseDocuments") == ["NOTICE", "LICENSE", "NOTICE", "closed"]
                           and results[side][theme].get("licenseEscapeClosed") is True
                           for side in ("original", "rust") for theme in dashboard.THEMES)
@@ -463,7 +467,7 @@ def compare_windows(dashboard, work, original, library):
                                "unused": {"found": False, "help": None},
                            }
                            for side in ("original", "rust") for theme in dashboard.THEMES)
-    return documents_match and scroll_matches and activity_matches and all(row["identical"] for row in results["comparisons"].values())
+    return app_mark_matches and documents_match and scroll_matches and activity_matches and all(row["identical"] for row in results["comparisons"].values())
 
 
 def compare(dashboard, work, original, fixture, library):

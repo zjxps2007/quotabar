@@ -12,22 +12,61 @@ struct TypeSearch {
     last_input: f64,
 }
 
-fn keyboard_cues(ui: &Ui) -> bool {
-    let id = Id::new(("Windows keyboard cues", ui.ctx().viewport_id()));
-    let input = ui.input(|i| {
-        i.raw.events.iter().rev().find_map(|e| match e {
-            Event::Key { pressed: true, .. } => Some(true),
-            Event::PointerButton { pressed: true, .. } => Some(false),
-            _ => None,
-        })
-    });
-    ui.data_mut(|d| {
-        let cues = d.get_temp_mut_or_default::<bool>(id);
-        if let Some(keyboard) = input {
-            *cues = keyboard;
+#[derive(Clone, Copy, Default)]
+struct KeyboardCues {
+    last_input_keyboard: bool,
+    visible: bool,
+}
+
+fn keyboard_cues(ui: &Ui, response: &Response) -> bool {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{SPI_GETKEYBOARDCUES, SystemParametersInfoW};
+
+    let id = response.id.with("keyboard focus visual");
+    let mut cues = ui
+        .data(|d| d.get_temp::<KeyboardCues>(id))
+        .unwrap_or_default();
+    if response.gained_focus() {
+        cues.visible = cues.last_input_keyboard;
+    }
+    ui.input(|input| {
+        for event in &input.raw.events {
+            match event {
+                Event::PointerButton { pressed: true, .. } => {
+                    cues.last_input_keyboard = false;
+                    cues.visible = false;
+                }
+                Event::AccessKitActionRequest(r)
+                    if r.action == accesskit::Action::Focus
+                        && r.target == response.id.value().into() =>
+                {
+                    cues.visible = cues.last_input_keyboard;
+                }
+                Event::Key {
+                    key, pressed: true, ..
+                } => {
+                    cues.last_input_keyboard = true;
+                    // WPF processes navigation after the ComboBox handles its own keys.
+                    // Changing the selection in place does not create a focus adorner.
+                    if *key == Key::Tab
+                        || (matches!(
+                            key,
+                            Key::ArrowLeft | Key::ArrowRight | Key::ArrowUp | Key::ArrowDown
+                        ) && input.events.contains(event))
+                    {
+                        cues.visible = true;
+                    }
+                }
+                _ => {}
+            }
         }
-        *cues
-    })
+    });
+    ui.data_mut(|d| d.insert_temp(id, cues));
+    response.has_focus()
+        && (cues.visible || {
+            let mut always = 0_i32;
+            unsafe { SystemParametersInfoW(SPI_GETKEYBOARDCUES, 0, (&raw mut always).cast(), 0) };
+            always != 0
+        })
 }
 
 fn draw_keyboard_cues(ui: &Ui, rect: Rect, ink: Color32) {
@@ -183,7 +222,6 @@ fn choose_presented(
     documents: Option<&[(String, String)]>,
 ) -> Option<usize> {
     let id = ui.make_persistent_id(Id::new(name));
-    let show_focus = keyboard_cues(ui);
     let popup = id.with("popup");
     let was_open = ComboBox::is_open(ui.ctx(), id);
     let highlight = id.with("highlighted");
@@ -398,6 +436,7 @@ fn choose_presented(
     } else {
         ui.data_mut(|d| d.remove::<usize>(highlight));
     }
+    let show_focus = keyboard_cues(ui, &response);
     if response.has_focus() {
         ui.memory_mut(|m| {
             m.set_focus_lock_filter(
@@ -494,9 +533,18 @@ mod tests {
         let (provider, _) = frame(vec![]);
         ctx.memory_mut(|m| m.request_focus(provider));
         assert_eq!(frame(vec![key(Key::ArrowDown)]).1, 1);
+        let shows_keyboard_cues = || {
+            ctx.data(|d| {
+                d.get_temp::<KeyboardCues>(provider.with("keyboard focus visual"))
+                    .unwrap()
+                    .visible
+            })
+        };
+        assert!(!shows_keyboard_cues());
         assert_eq!(ctx.memory(|m| m.focused()), Some(provider));
         assert_eq!(frame(vec![key(Key::Home)]).1, 0);
         frame(vec![key(Key::Tab)]);
+        assert!(shows_keyboard_cues());
         assert_ne!(ctx.memory(|m| m.focused()), Some(provider));
 
         let focus = Event::AccessKitActionRequest(accesskit::ActionRequest {

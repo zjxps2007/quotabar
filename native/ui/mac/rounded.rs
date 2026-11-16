@@ -4,10 +4,22 @@ use objc2_app_kit::{NSColor, NSGraphicsContext};
 use objc2_foundation::{NSPoint, NSRect, NSSize};
 use objc2_quartz_core::{CALayer, kCACornerCurveContinuous};
 
-fn mask(ui: &Ui, pixels: [usize; 2], radius: f32, stroke: f32) -> Option<TextureHandle> {
-    // A grid uses at most two rounded device-pixel widths and heights. Replace
-    // each mask when resizing changes its radius, and share it across dates.
-    let key = Id::new(("calendar corner mask", pixels, stroke.to_bits()));
+#[derive(Clone, Copy, Hash, Eq, PartialEq)]
+pub enum Curve {
+    Continuous,
+    Circular,
+}
+
+fn mask(
+    ui: &Ui,
+    pixels: [usize; 2],
+    radius: f32,
+    stroke: f32,
+    curve: Curve,
+) -> Option<TextureHandle> {
+    // Equal-sized views share a backing mask. Replace it when resizing
+    // changes the effective radius at this size.
+    let key = Id::new(("AppKit rounded mask", pixels, stroke.to_bits(), curve));
     if let Some((cached_radius, texture)) = ui.data(|d| d.get_temp::<(f32, TextureHandle)>(key))
         && cached_radius == radius
     {
@@ -26,7 +38,9 @@ fn mask(ui: &Ui, pixels: [usize; 2], radius: f32, stroke: f32) -> Option<Texture
     let context = NSGraphicsContext::graphicsContextWithBitmapImageRep(&rep)?;
     let shape = CALayer::layer();
     shape.setBounds(canvas);
-    shape.setCornerCurve(unsafe { kCACornerCurveContinuous });
+    if curve == Curve::Continuous {
+        shape.setCornerCurve(unsafe { kCACornerCurveContinuous });
+    }
     shape.setCornerRadius(f64::from(radius) * factor);
     let white = NSColor::whiteColor().CGColor();
     if stroke > 0. {
@@ -63,7 +77,7 @@ fn mask(ui: &Ui, pixels: [usize; 2], radius: f32, stroke: f32) -> Option<Texture
         .map(|p| Color32::from_white_alpha(p[3]))
         .collect();
     let texture = ui.ctx().load_texture(
-        "Calendar cell",
+        "Rounded shape",
         ColorImage::new(pixels, alpha),
         TextureOptions::NEAREST,
     );
@@ -71,7 +85,7 @@ fn mask(ui: &Ui, pixels: [usize; 2], radius: f32, stroke: f32) -> Option<Texture
     Some(texture)
 }
 
-pub fn paint_cell(ui: &Ui, rect: Rect, radius: f32, fill: Color32, stroke: Stroke) {
+pub fn rounded_rect(ui: &Ui, rect: Rect, radius: f32, fill: Color32, stroke: Stroke, curve: Curve) {
     if !ui.is_rect_visible(rect.expand(stroke.width)) {
         return;
     }
@@ -86,6 +100,7 @@ pub fn paint_cell(ui: &Ui, rect: Rect, radius: f32, fill: Color32, stroke: Strok
             [size.x as usize, size.y as usize],
             (radius + half) * scale,
             width * scale,
+            curve,
         ) {
             ui.painter().image(
                 texture.id(),

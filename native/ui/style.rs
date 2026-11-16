@@ -1271,8 +1271,26 @@ impl Assets {
     }
 }
 pub fn mark(ui: &mut Ui, size: f32, p: Palette) {
-    let (r, _) = ui.allocate_exact_size(Vec2::splat(size), Sense::hover());
+    let (r, _response) = ui.allocate_exact_size(Vec2::splat(size), Sense::hover());
+    #[cfg(target_os = "macos")]
+    {
+        _response.widget_info(|| {
+            WidgetInfo::labeled(WidgetType::Image, ui.is_enabled(), "QuotaBar 로고")
+        });
+        crate::mac::rounded_rect(
+            ui,
+            r,
+            size * 108. / 456.,
+            p.accent,
+            Stroke::NONE,
+            crate::mac::Curve::Circular,
+        );
+        if crate::mac::app_mark(ui, r, p.on) {
+            return;
+        }
+    }
     let painter = ui.painter();
+    #[cfg(windows)]
     painter.rect_filled(r, (size * 108. / 456.).round() as u8, p.accent);
     let s = size / 456.;
     let org = r.center() - vec2(133., 141.) * s;

@@ -27,8 +27,8 @@ use std::{
 
 mod buttons;
 pub use buttons::{draw_checkbox, draw_segments, draw_switch, popup_choice, standard_button};
-mod calendar;
-pub use calendar::paint_cell;
+mod rounded;
+pub use rounded::{Curve, rounded_rect};
 mod document;
 pub use document::DocumentReader;
 mod scroller;
@@ -109,6 +109,61 @@ pub fn provider_logo(
     );
     ctx.data_mut(|d| d.insert_temp(key, texture.clone()));
     Some(texture)
+}
+
+pub fn app_mark(
+    ui: &eframe::egui::Ui,
+    rect: eframe::egui::Rect,
+    ink: eframe::egui::Color32,
+) -> bool {
+    use eframe::egui::{Color32, ColorImage, Id, Pos2, Rect, TextureHandle, TextureOptions, pos2};
+    use objc2_app_kit::{NSGraphicsContext, NSImageInterpolation};
+    use objc2_foundation::{NSPoint, NSRect, NSSize};
+
+    let pixels = (rect.height() * ui.ctx().pixels_per_point())
+        .round()
+        .max(1.) as isize;
+    let id = Id::new(("QuotaBar app mark", pixels));
+    let cached = ui.data(|data| data.get_temp::<TextureHandle>(id));
+    let texture = cached.or_else(|| {
+        let side = pixels as f64;
+        let width = side * 266. / 456.;
+        let height = side * 282. / 456.;
+        let source = quotabar::mac_menu::menu_preview("iconOnly", "")?;
+        let rep = bitmap_rep(pixels, pixels)?;
+        let context = NSGraphicsContext::graphicsContextWithBitmapImageRep(&rep)?;
+        NSGraphicsContext::saveGraphicsState_class();
+        NSGraphicsContext::setCurrentContext(Some(&context));
+        context.setImageInterpolation(NSImageInterpolation::High);
+        source.drawInRect(NSRect::new(
+            NSPoint::new((side - width) / 2., (side - height) / 2.),
+            NSSize::new(width, height),
+        ));
+        NSGraphicsContext::restoreGraphicsState_class();
+        let image = bitmap_pixels(&rep)?;
+        let mask = image
+            .pixels()
+            .map(|p| Color32::from_white_alpha(p[3]))
+            .collect();
+        let texture = ui.ctx().load_texture(
+            "AppMark.svg",
+            ColorImage::new([pixels as usize; 2], mask),
+            TextureOptions::NEAREST,
+        );
+        ui.data_mut(|data| data.insert_temp(id, texture.clone()));
+        Some(texture)
+    });
+    if let Some(texture) = texture {
+        ui.painter().image(
+            texture.id(),
+            rect,
+            Rect::from_min_max(Pos2::ZERO, pos2(1., 1.)),
+            ink,
+        );
+        true
+    } else {
+        false
+    }
 }
 
 pub fn menu_preview(

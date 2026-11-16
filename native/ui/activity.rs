@@ -407,7 +407,14 @@ impl Dashboard {
                     } else {
                         track
                     };
-                    crate::mac::paint_cell(ui, bounds, radius, fill, outline);
+                    crate::mac::rounded_rect(
+                        ui,
+                        bounds,
+                        radius,
+                        fill,
+                        outline,
+                        crate::mac::Curve::Continuous,
+                    );
                 }
                 if accessible {
                     response.widget_info(|| {

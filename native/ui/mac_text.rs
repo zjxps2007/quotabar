@@ -15,7 +15,7 @@ use core_text::{
     font::{CTFont, CTFontRef},
     line::CTLine,
     string_attributes::{
-        kCTFontAttributeName, kCTForegroundColorFromContextAttributeName,
+        kCTFontAttributeName, kCTForegroundColorFromContextAttributeName, kCTKernAttributeName,
         kCTUnderlineStyleAttributeName,
     },
 };
@@ -54,10 +54,11 @@ struct Key {
     size: u32,
     scale: u32,
     face: Face,
+    tracking: u32,
     light_ink: bool,
 }
 
-fn attributed(value: &str, size: f64, face: Face) -> CFMutableAttributedString {
+fn attributed(value: &str, size: f64, face: Face, tracking: f32) -> CFMutableAttributedString {
     // NSFont and CTFont are toll-free bridged. Use the AppKit font at its
     // logical point size so Retina drawing preserves its optical size.
     let weight = unsafe {
@@ -88,6 +89,13 @@ fn attributed(value: &str, size: f64, face: Face) -> CFMutableAttributedString {
     text.replace_str(&CFString::new(value), CFRange::init(0, 0));
     let range = CFRange::init(0, text.char_len());
     text.set_attribute(range, unsafe { kCTFontAttributeName }, &font);
+    if tracking != 0. {
+        text.set_attribute(
+            range,
+            unsafe { kCTKernAttributeName },
+            &CFNumber::from(f64::from(tracking)),
+        );
+    }
     if face == Face::Underlined {
         text.set_attribute(
             range,
@@ -106,7 +114,7 @@ fn attributed(value: &str, size: f64, face: Face) -> CFMutableAttributedString {
 fn raster(key: &Key, limit: usize) -> Option<(ColorImage, Vec2, f32)> {
     let size = f64::from(f32::from_bits(key.size));
     let scale = f64::from(f32::from_bits(key.scale));
-    let text = attributed(&key.text, size, key.face);
+    let text = attributed(&key.text, size, key.face, f32::from_bits(key.tracking));
     let line = CTLine::new_with_attributed_string(text.as_concrete_TypeRef());
     let bounds = line.get_typographic_bounds();
     let ascent = (bounds.ascent * scale).ceil();
@@ -182,6 +190,18 @@ impl Renderer {
         face: Face,
         color: Color32,
     ) -> Option<&Run> {
+        self.tracked_run(ctx, text, size, face, color, 0.)
+    }
+
+    fn tracked_run(
+        &mut self,
+        ctx: &Context,
+        text: &str,
+        size: f32,
+        face: Face,
+        color: Color32,
+        tracking: f32,
+    ) -> Option<&Run> {
         let [r, g, b, _] = color.to_srgba_unmultiplied();
         let ink = Color32::from_rgb(r, g, b).intensity();
         let key = Key {
@@ -189,6 +209,7 @@ impl Renderer {
             size: size.to_bits(),
             scale: ctx.pixels_per_point().to_bits(),
             face,
+            tracking: tracking.to_bits(),
             light_ink: ink > ctx.style().visuals.panel_fill.intensity(),
         };
         let cached = match self.runs.entry(key) {
@@ -222,7 +243,6 @@ impl Renderer {
         if text.angle != 0.
             || format.italics
             || !text.underline.is_empty()
-            || format.extra_letter_spacing != 0.
             || text
                 .galley
                 .rows
@@ -242,7 +262,14 @@ impl Renderer {
                 continue;
             }
             let string: String = row.glyphs.iter().map(|g| g.chr).collect();
-            let run = self.run(ctx, &string, format.font_id.size, face, color)?;
+            let run = self.tracked_run(
+                ctx,
+                &string,
+                format.font_id.size,
+                face,
+                color,
+                format.extra_letter_spacing,
+            )?;
             let origin = text.pos + row.pos.to_vec2() + vec2(0., (row.size.y - run.size.y) * 0.5);
             shapes.push(run.shape(origin, ctx.pixels_per_point(), color));
         }
@@ -296,6 +323,31 @@ pub fn calendar_label(ui: &Ui, at: Pos2, align: Align2, text: &str, size: f32, c
     }
 }
 
+pub fn navigation_title(ui: &Ui, start: Pos2, text: &str, selected: bool, color: Color32) {
+    let scale = ui.ctx().pixels_per_point();
+    let advance = system_line_height(ui, 12.);
+    let renderer = ui.ctx().plugin_opt::<Renderer>();
+    for (index, line) in text.lines().enumerate() {
+        let top = start + vec2(0., index as f32 * advance);
+        if let Some(renderer) = &renderer
+            && let Some(run) =
+                renderer
+                    .lock()
+                    .run(ui.ctx(), line, 12., Face::label(selected), color)
+        {
+            ui.painter().add(run.shape(top, scale, color));
+        } else {
+            ui.painter().text(
+                top,
+                Align2::LEFT_TOP,
+                line,
+                FontId::proportional(12.),
+                color,
+            );
+        }
+    }
+}
+
 pub fn system_line_height(ui: &Ui, size: f64) -> f32 {
     // The control reserves its system font's line box even if every glyph
     // comes from a shorter fallback face, e.g. an all-Hangul button title.
@@ -316,6 +368,16 @@ fn font_line_height(size: f64) -> f64 {
 
 pub fn label(ui: &mut Ui, text: &str, size: f32, heavy: bool, color: Color32) -> Option<Response> {
     draw_label(ui, text, size, Face::label(heavy), color, LineBox::Glyphs)
+}
+
+pub fn centered_label(
+    ui: &mut Ui,
+    text: &str,
+    size: f32,
+    heavy: bool,
+    color: Color32,
+) -> Option<Response> {
+    draw_label(ui, text, size, Face::label(heavy), color, LineBox::Centered)
 }
 
 pub fn system_label(
@@ -396,6 +458,7 @@ pub fn hyperlink(
 
 enum LineBox {
     Glyphs,
+    Centered,
     System,
     Stack,
 }
@@ -422,7 +485,7 @@ fn draw_label(
         return None;
     }
     let height = match line_box {
-        LineBox::Glyphs => run.size.y,
+        LineBox::Glyphs | LineBox::Centered => run.size.y,
         LineBox::System => {
             let scale = f64::from(ui.ctx().pixels_per_point());
             let system = (font_line_height(f64::from(size)) * scale).round() / scale;
@@ -433,9 +496,14 @@ fn draw_label(
             .max(system_line_height(ui, f64::from(size))),
     };
     let (rect, response) = ui.allocate_exact_size(vec2(run.size.x, height), Sense::hover());
-    let top = rect.min + vec2(0., (height - run.size.y) * 0.5);
-    ui.painter()
-        .add(run.shape(top, ui.ctx().pixels_per_point(), color));
+    let scale = ui.ctx().pixels_per_point();
+    let top = if matches!(line_box, LineBox::Centered) {
+        let y = (rect.center().y * scale - run.texture.size_vec2().y / 2.).floor() / scale;
+        pos2(rect.left(), y)
+    } else {
+        rect.min + vec2(0., (height - run.size.y) * 0.5)
+    };
+    ui.painter().add(run.shape(top, scale, color));
     response.widget_info(|| WidgetInfo::labeled(WidgetType::Label, ui.is_enabled(), text));
     Some(response)
 }
@@ -588,6 +656,7 @@ mod tests {
             size: 12.0_f32.to_bits(),
             scale: 1.0_f32.to_bits(),
             face: Face::Regular,
+            tracking: 0,
             light_ink: false,
         };
         let (plain, size, _) = raster(&key, 4096).unwrap();
@@ -614,6 +683,7 @@ mod tests {
                     size: 15.0_f32.to_bits(),
                     scale: scale.to_bits(),
                     face: Face::label(heavy),
+                    tracking: 0,
                     light_ink,
                 };
                 let (image, bounds, _) = raster(&key, 4096).unwrap();
