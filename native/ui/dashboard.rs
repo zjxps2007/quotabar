@@ -626,13 +626,26 @@ impl Dashboard {
             self.assets.logo(ui, a.provider, 36.);
             ui.vertical(|ui| {
                 ui.horizontal(|ui| {
+                    #[cfg(target_os = "macos")]
+                    {
+                        // The title and plan use the inner HStack's default spacing.
+                        ui.spacing_mut().item_spacing.x = 8.;
+                    }
                     label(ui, a.provider, 13., true, p.ink);
                     if let Some(plan) = a.snapshot["plan"].as_str() {
+                        #[cfg(target_os = "macos")]
+                        let fill = surface_fill(p.card, p.ink, 0.05);
+                        #[cfg(windows)]
+                        let fill = p.track;
                         Frame::new()
-                            .fill(p.track)
-                            .corner_radius(8)
+                            .fill(fill)
+                            .corner_radius(if MAC { u8::MAX } else { 8 })
                             .inner_margin(Margin::symmetric(6, 3))
                             .show(ui, |ui| {
+                                #[cfg(target_os = "macos")]
+                                if crate::mac_text::plan_label(ui, plan, p.ink).is_some() {
+                                    return;
+                                }
                                 label(ui, plan, 9., false, p.ink);
                             });
                     }

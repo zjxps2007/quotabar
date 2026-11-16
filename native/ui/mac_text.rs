@@ -431,6 +431,10 @@ pub fn bold_label(ui: &mut Ui, text: &str, size: f32, color: Color32) -> Option<
     draw_label(ui, text, size, Face::Bold, color, LineBox::Stack)
 }
 
+pub fn plan_label(ui: &mut Ui, text: &str, color: Color32) -> Option<Response> {
+    draw_label(ui, text, 9., Face::Medium, color, LineBox::Stack)
+}
+
 pub fn preferred_label(
     ui: &mut Ui,
     text: &str,

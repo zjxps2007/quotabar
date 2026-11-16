@@ -111,7 +111,7 @@ pub fn provider_logo(
     let texture = ctx.load_texture(
         provider,
         ColorImage::from_rgba_unmultiplied([pixels as usize; 2], rgba.as_raw()),
-        TextureOptions::LINEAR,
+        TextureOptions::NEAREST,
     );
     ctx.data_mut(|d| d.insert_temp(key, texture.clone()));
     Some(texture)

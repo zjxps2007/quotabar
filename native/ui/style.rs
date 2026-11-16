@@ -1291,13 +1291,24 @@ impl Assets {
         }];
         let (r, response) = ui.allocate_exact_size(Vec2::splat(size), Sense::hover());
         response.widget_info(|| WidgetInfo::labeled(WidgetType::Image, ui.is_enabled(), p));
+        let artwork = Rect::from_center_size(r.center(), Vec2::splat(size * scale));
         #[cfg(target_os = "macos")]
-        let native = crate::mac::provider_logo(ui.ctx(), p, size * scale);
+        let native = crate::mac::provider_logo(ui.ctx(), p, artwork.width());
         #[cfg(target_os = "macos")]
-        let texture = native.as_ref().unwrap_or(texture);
+        let (texture, artwork) = native.as_ref().map_or((texture, artwork), |native| {
+            // AppKit has already resampled the artwork at backing resolution.
+            // Align its bottom-left origin in Cocoa coordinates so each texel
+            // covers one physical pixel, including odd-sized centered icons.
+            let backing = ui.pixels_per_point();
+            let pixels = native.size_vec2();
+            let left = (artwork.center().x * backing - pixels.x / 2. + 0.5).floor();
+            let bottom = (-artwork.center().y * backing - pixels.y / 2. + 0.5).floor();
+            let top_left = pos2(left, -bottom - pixels.y) / backing;
+            (native, Rect::from_min_size(top_left, pixels / backing))
+        });
         ui.painter().image(
             texture.id(),
-            Rect::from_center_size(r.center(), Vec2::splat(size * scale)),
+            artwork,
             Rect::from_min_max(Pos2::ZERO, pos2(1., 1.)),
             Color32::WHITE,
         );
