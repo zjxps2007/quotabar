@@ -2,6 +2,8 @@ use crate::{Dashboard, dialogs::Dialog, model::*, style::*};
 use eframe::egui::*;
 use serde_json::{Value, json};
 
+#[cfg(target_os = "macos")]
+use crate::mac_text::{PreferredFont, preferred_label};
 #[cfg(windows)]
 use crate::account_text::AccountField;
 use crate::account_text::{contains_query, email_matches_alias};
@@ -738,8 +740,7 @@ impl Dashboard {
             ui.add_space(if MAC { 12. } else { 14. });
             let credit = "AIUsage · sylearn 및 기여자";
             #[cfg(target_os = "macos")]
-            crate::mac_text::bold_label(ui, credit, 12., p.ink)
-                .unwrap_or_else(|| label(ui, credit, 12., true, p.ink));
+            preferred_label(ui, credit, PreferredFont::CalloutBold, p.ink);
             #[cfg(not(target_os = "macos"))]
             label(ui, credit, 12., true, p.ink);
             ui.add_space(if MAC { 12. } else { 6. });
@@ -761,14 +762,28 @@ impl Dashboard {
         });
     }
     fn app_settings(&mut self, ui: &mut Ui, p: Palette) {
+        let app_caption = |ui: &mut Ui, text: &str| {
+            #[cfg(target_os = "macos")]
+            preferred_label(ui, text, PreferredFont::Caption, p.muted);
+            #[cfg(windows)]
+            caption(ui, text, p);
+        };
+        #[cfg(target_os = "macos")]
+        let app_divider = |ui: &mut Ui| {
+            let contrast = if p.dark { Color32::WHITE } else { Color32::BLACK };
+            spaced_divider(ui, p.card.lerp_to_gamma(contrast, 0.10), 18., 18.);
+        };
         p.frame(20).show(ui, |ui| {
             ui.set_width(ui.available_width());
             ui.horizontal(|ui| {
                 mark(ui, 24., p);
+                #[cfg(target_os = "macos")]
+                preferred_label(ui, "QuotaBar", PreferredFont::Headline, p.ink);
+                #[cfg(windows)]
                 label(ui, "QuotaBar", 14., true, p.ink);
                 let prefix = if MAC { "" } else { "Windows · " };
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    caption(ui, format!("{prefix}버전 {}", env!("QUOTABAR_VERSION")), p)
+                    app_caption(ui, &format!("{prefix}버전 {}", env!("QUOTABAR_VERSION")));
                 });
             });
             ui.add_space(18.);
@@ -779,9 +794,9 @@ impl Dashboard {
             }).inner.clicked() {
                 self.wire.action("startup", json!(!enabled));
             }
-            ui.add_space(6.);
-            caption(ui, if MAC { "Mac 재시동 후 로그인하면 Dashboard를 열지 않고 상단바에서 시작합니다." }
-                        else { "Windows 재시작 후 로그인하면 Dashboard를 열지 않고 트레이에서 시작합니다." }, p);
+            ui.add_space(if MAC { 14. } else { 6. });
+            app_caption(ui, if MAC { "Mac 재시동 후 로그인하면 Dashboard를 열지 않고 상단바에서 시작합니다." }
+                            else { "Windows 재시작 후 로그인하면 Dashboard를 열지 않고 트레이에서 시작합니다." });
             if let Some(note) = match (MAC, startup) {
                 (true, "requiresApproval") => Some("macOS 로그인 항목 설정에서 QuotaBar의 실행을 허용해 주세요."),
                 (true, "unavailable") => Some("빌드된 QuotaBar.app에서 자동 실행을 설정할 수 있습니다."),
@@ -789,23 +804,35 @@ impl Dashboard {
                 (false, "unavailable") => Some("설치된 QuotaBar 앱에서 자동 실행을 설정하세요."),
                 (false, _) => Some("Windows의 시작 앱 설정에서도 QuotaBar를 허용해야 합니다. 앱을 옮겼다면 이 옵션을 다시 켜세요."),
             } {
-                ui.add_space(6.);
-                caption(ui, note, p);
+                ui.add_space(if MAC { 14. } else { 6. });
+                app_caption(ui, note);
             }
-            if !MAC || startup == "requiresApproval" {
-                let title = if MAC { "로그인 항목 설정 열기" } else { "Windows 시작 앱 설정 열기" };
-                if link(ui, title, p, p.card).clicked() { self.wire.action("startup-settings", Value::Null); }
+            #[cfg(target_os = "macos")]
+            {
+                if startup == "requiresApproval" {
+                    ui.add_space(14.);
+                    if sheet_button(ui, "로그인 항목 설정 열기", p).clicked() {
+                        self.wire.action("startup-settings", Value::Null);
+                    }
+                }
+                app_divider(ui);
             }
-            divider(ui, p);
+            #[cfg(windows)]
+            {
+                if link(ui, "Windows 시작 앱 설정 열기", p, p.card).clicked() {
+                    self.wire.action("startup-settings", Value::Null);
+                }
+                divider(ui, p);
+            }
             settings_title(ui, "앱 업데이트", "arrow.triangle.2.circlepath", p);
-            ui.add_space(18.);
+            ui.add_space(if MAC { 14. } else { 18. });
             let automatic = self.state.flag("automaticUpdates", "automaticUpdates");
             if toggle(ui, "자동 업데이트", automatic, p.accent, p).clicked() {
                 self.preference("automaticUpdates", "automaticUpdates", json!(!automatic));
             }
-            ui.add_space(6.);
-            caption(ui, if MAC { "새 정식 버전을 자동으로 내려받고, Dashboard가 닫혀 있으면 설치 후 다시 시작합니다." }
-                        else { "새 버전을 자동으로 내려받고, Dashboard를 닫으면 설치 후 다시 시작합니다." }, p);
+            ui.add_space(if MAC { 14. } else { 6. });
+            app_caption(ui, if MAC { "새 정식 버전을 자동으로 내려받고, Dashboard가 닫혀 있으면 설치 후 다시 시작합니다." }
+                            else { "새 버전을 자동으로 내려받고, Dashboard를 닫으면 설치 후 다시 시작합니다." });
             if MAC { ui.add_space(14.); } else { divider(ui, p); }
             let update = &self.state.raw["appUpdate"];
             let phase = text(update, "phase", "idle");
@@ -833,10 +860,14 @@ impl Dashboard {
                 });
             ui.horizontal(|ui| {
                 if MAC && busy { ui.spinner(); }
-                label(ui, status, 12., false, if phase == "failed" { p.warning } else { p.ink });
+                let ink = if phase == "failed" { p.warning } else { p.ink };
+                #[cfg(target_os = "macos")]
+                preferred_label(ui, &status, PreferredFont::Callout, ink);
+                #[cfg(windows)]
+                label(ui, status, 12., false, ink);
             });
             if phase == "downloading" {
-                ui.add_space(12.);
+                ui.add_space(if MAC { 14. } else { 12. });
                 ui.add(ProgressBar::new(progress as f32 / 100.).desired_height(5.));
             }
             ui.add_space(if MAC { 14. } else { 16. });
@@ -847,7 +878,7 @@ impl Dashboard {
                     self.wire.action("check-app-update", Value::Null);
                 }
                 if matches!(phase, "available" | "ready") {
-                    let enabled = !self.state.demo && self.state.raw["loggingIn"] != true;
+                    let enabled = !self.state.demo && (MAC || self.state.raw["loggingIn"] != true);
                     if ui.add_enabled_ui(enabled, |ui| sheet_button(ui, "설치 후 다시 시작", p)).inner.clicked() {
                         self.wire.action("install-app-update", Value::Null);
                     }
@@ -855,8 +886,7 @@ impl Dashboard {
             });
             #[cfg(target_os = "macos")]
             {
-                let contrast = if p.dark { Color32::WHITE } else { Color32::BLACK };
-                spaced_divider(ui, p.card.lerp_to_gamma(contrast, 0.10), 18., 18.);
+                app_divider(ui);
                 crate::mac_text::hyperlink(ui, "QuotaBar · GitHub", "https://github.com/zjxps2007/quotabar", 13., p.accent, false);
             }
         });

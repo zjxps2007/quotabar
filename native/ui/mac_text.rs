@@ -33,6 +33,7 @@ pub enum PreferredFont {
     Body,
     Headline,
     Callout,
+    CalloutBold,
     Title3Bold,
     SubheadlineSemibold,
     Caption,
@@ -51,7 +52,7 @@ impl PreferredFont {
             let style = match self {
                 Self::Body => NSFontTextStyleBody,
                 Self::Headline => NSFontTextStyleHeadline,
-                Self::Callout => NSFontTextStyleCallout,
+                Self::Callout | Self::CalloutBold => NSFontTextStyleCallout,
                 Self::Title3Bold => NSFontTextStyleTitle3,
                 Self::SubheadlineSemibold => NSFontTextStyleSubheadline,
                 Self::Caption | Self::CaptionSemibold => NSFontTextStyleCaption1,
@@ -63,6 +64,14 @@ impl PreferredFont {
 
     fn resolved(self) -> Retained<NSFont> {
         let font = self.base();
+        if self == Self::CalloutBold {
+            // SwiftUI applies the bold trait to the preferred callout face.
+            // The resulting Latin and Korean faces differ from absolute system bold.
+            let descriptor = font.fontDescriptor().fontDescriptorWithSymbolicTraits(
+                objc2_app_kit::NSFontDescriptorSymbolicTraits::TraitBold,
+            );
+            return NSFont::fontWithDescriptor_size(&descriptor, 0.).unwrap_or(font);
+        }
         let weight = unsafe {
             match self {
                 Self::Title3Bold => NSFontWeightBold,
@@ -733,10 +742,6 @@ pub fn stacked_label(
     draw_label(ui, text, size, Face::label(heavy), color, LineBox::Stack)
 }
 
-pub fn bold_label(ui: &mut Ui, text: &str, size: f32, color: Color32) -> Option<Response> {
-    draw_label(ui, text, size, Face::Bold, color, LineBox::Stack)
-}
-
 pub fn plan_label(ui: &mut Ui, text: &str, color: Color32) -> Option<Response> {
     medium_label(ui, text, 9., color)
 }
@@ -898,6 +903,7 @@ pub fn preferred_label(ui: &mut Ui, text: &str, style: PreferredFont, color: Col
         let heavy = matches!(
             style,
             PreferredFont::Headline
+                | PreferredFont::CalloutBold
                 | PreferredFont::Title3Bold
                 | PreferredFont::SubheadlineSemibold
                 | PreferredFont::CaptionSemibold
