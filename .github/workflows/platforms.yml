@@ -40,29 +40,27 @@ jobs:
         working-directory: ${{ steps.validation.outputs.root }}
         run: bash scripts/test.sh
       - name: Native Rust contracts
-        working-directory: ${{ steps.validation.outputs.root }}
         run: cargo test --locked --workspace --all-targets
       - name: Signed update release tooling
         run: python3 -m unittest discover -s scripts/tests -v
       - name: Build and package application and Dashboard helper
         id: package
         if: ${{ !cancelled() && steps.source.outcome == 'success' }}
-        working-directory: ${{ steps.validation.outputs.root }}
         run: bash macos/scripts/package.sh
       - name: Packaged Claude callback
         if: ${{ !cancelled() && steps.package.outcome == 'success' }}
-        working-directory: ${{ steps.validation.outputs.root }}
         run: python3 scripts/check-statusline.py
       - name: Packaged Rust dashboard on AppKit
         if: ${{ !cancelled() && steps.package.outcome == 'success' }}
-        working-directory: ${{ steps.validation.outputs.root }}
         run: python3 macos/scripts/check-dashboard.py
+      - name: Stage clean native package for legacy UI comparison
+        run: python3 scripts/stage_legacy_packages.py macos
       - uses: actions/upload-artifact@v7
         with:
           name: macos-release
           path: |
-            ${{ steps.validation.outputs.root }}/artifacts/QuotaBar-*-macOS-*.zip
-            ${{ steps.validation.outputs.root }}/artifacts/macos-build-info.json
+            artifacts/QuotaBar-*-macOS-*.zip
+            artifacts/macos-build-info.json
           if-no-files-found: error
       - name: Compare original SwiftUI and Rust windows, popovers and actions
         if: ${{ !cancelled() && steps.package.outcome == 'success' }}
@@ -96,49 +94,48 @@ jobs:
         working-directory: ${{ steps.validation.outputs.root }}
         run: ./windows/scripts/test.ps1
       - name: Native Rust contracts
-        working-directory: ${{ steps.validation.outputs.root }}
         run: cargo test --locked --workspace --all-targets
       - name: Self-contained x64 package
         id: package
-        working-directory: ${{ steps.validation.outputs.root }}
         run: ./windows/scripts/package.ps1
+      - name: Stage clean native package for legacy Windows comparison
+        run: python scripts/stage_legacy_packages.py windows
       - name: Packaged callback on PowerShell and Git Bash
         working-directory: ${{ steps.validation.outputs.root }}
         run: |
-          $env:QUOTABAR_TEST_HELPER = Join-Path $PWD 'artifacts/QuotaBar-Windows-x64/StatusLine/QuotaBar.StatusLine.exe'
+          $env:QUOTABAR_TEST_HELPER = Join-Path $env:GITHUB_WORKSPACE 'artifacts/QuotaBar-Windows-x64/StatusLine/QuotaBar.StatusLine.exe'
           ./windows/scripts/test.ps1 -NoBuild
       - name: Packaged Dashboard lifetime, foreground relaunch and parent crash cleanup
-        working-directory: ${{ steps.validation.outputs.root }}
         run: ./windows/scripts/smoke.ps1 -VerifyForeground
       - name: Per-user Windows EXE installer
         id: installer
         if: ${{ !cancelled() && steps.package.outcome == 'success' }}
-        working-directory: ${{ steps.validation.outputs.root }}
         run: ./windows/scripts/package-installer.ps1
       - name: Install, reinstall, launch and uninstall
         if: ${{ !cancelled() && steps.installer.outcome == 'success' }}
-        working-directory: ${{ steps.validation.outputs.root }}
         run: ./windows/scripts/test-installer.ps1
+      - name: Verify clean production package metadata
+        run: python scripts/stage_legacy_packages.py verify-windows
       - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: windows-validation-logs
           path: |
-            ${{ steps.validation.outputs.root }}/artifacts/windows/tests.log
-            ${{ steps.validation.outputs.root }}/artifacts/windows/foreground.json
-            ${{ steps.validation.outputs.root }}/artifacts/windows/installer-test-*/*.log
+            artifacts/windows/tests.log
+            artifacts/windows/foreground.json
+            artifacts/windows/installer-test-*/*.log
           if-no-files-found: warn
       - uses: actions/upload-artifact@v7
         with:
           name: windows-x64-release
           path: |
-            ${{ steps.validation.outputs.root }}/artifacts/QuotaBar-*-Windows-x64.zip
-            ${{ steps.validation.outputs.root }}/artifacts/QuotaBar-*-Windows-x64-Setup.exe
-            ${{ steps.validation.outputs.root }}/artifacts/windows/installer-build-info.json
-            ${{ steps.validation.outputs.root }}/artifacts/windows/installer-validation.json
-            ${{ steps.validation.outputs.root }}/artifacts/windows/packaged-probe.json
-            ${{ steps.validation.outputs.root }}/artifacts/windows/*-light.png
-            ${{ steps.validation.outputs.root }}/artifacts/windows/*-dark.png
+            artifacts/QuotaBar-*-Windows-x64.zip
+            artifacts/QuotaBar-*-Windows-x64-Setup.exe
+            artifacts/windows/installer-build-info.json
+            artifacts/windows/installer-validation.json
+            artifacts/windows/packaged-probe.json
+            artifacts/windows/*-light.png
+            artifacts/windows/*-dark.png
           if-no-files-found: error
       - name: Compare original Windows dashboard and tray with the Rust package
         if: ${{ !cancelled() && steps.package.outcome == 'success' }}

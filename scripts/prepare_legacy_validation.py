@@ -22,6 +22,7 @@ FILES = {
     "windows/scripts/package-installer.ps1", "windows/scripts/write-update-version.ps1",
     "windows/scripts/ComponentVersion.csproj", "windows/scripts/get-inno.ps1",
     "windows/scripts/common.ps1", "windows/global.json",
+    "windows/tests/resident_contract.rs", "windows/tests/capture-window.rs",
 }
 
 
@@ -88,7 +89,7 @@ def prepare(destination=None):
     marker = {"sourceRepository": str(ROOT), "sourceCommit": revision,
               "sourceFingerprint": fingerprint, "legacyCommit": metadata["legacyCommit"]}
     if destination is None:
-        destination = ROOT / "target/legacy-validation" / (revision[:7] + "-" + fingerprint[:12])
+        destination = ROOT / ".tools/legacy-validation" / (revision[:7] + "-" + fingerprint[:12])
     destination = destination.resolve()
     if destination == ROOT or ROOT.is_relative_to(destination):
         raise ValueError("The validation workspace must not contain the source checkout")
@@ -113,6 +114,23 @@ def prepare(destination=None):
     subprocess.run(["git", "config", "core.longpaths", "true"], cwd=destination, check=True)
     subprocess.run(["git", "checkout", "--quiet", "--detach", revision], cwd=destination, check=True)
     extract_snapshot(git("archive", archive), destination)
+    # Share the compiler cache with the clean source checkout. Product packaging
+    # runs there; only the compatibility suite runs in this reconstructed clone.
+    target = ROOT / "target"
+    target.mkdir(exist_ok=True)
+    link = destination / "target"
+    if link.exists() or link.is_symlink():
+        raise ValueError("Unexpected target directory in the archived source")
+    if os.name == "nt":
+        environment = {**os.environ, "QUOTABAR_CACHE_LINK": str(link),
+                       "QUOTABAR_CACHE_TARGET": str(target)}
+        subprocess.run(["pwsh", "-NoProfile", "-NonInteractive", "-Command",
+                        "$ErrorActionPreference='Stop'; New-Item -ItemType Junction -Path $env:QUOTABAR_CACHE_LINK -Target $env:QUOTABAR_CACHE_TARGET | Out-Null"],
+                       env=environment, check=True)
+    else:
+        link.symlink_to(target, target_is_directory=True)
+    if not link.samefile(target):
+        raise ValueError("Compiler cache link does not point to the source checkout")
     # Replace production directories completely, preserving the archived test code.
     for name in DIRECTORIES:
         path = inside(destination, destination / name)

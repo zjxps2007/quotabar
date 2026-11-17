@@ -48,9 +48,9 @@ python3 macos/scripts/compare-dashboard.py --allow-raster-differences
 ./windows/scripts/smoke.ps1 -VerifyForeground
 ```
 
-prepare_legacy_validation.py는 shared/legacy-validation.json에 고정한 legacy 커밋과 트리 해시를 확인하고 Git에서 제외한 target/legacy-validation 아래에 별도 Git 복제본을 만듭니다. 레거시 검사 코드를 복원한 다음 현재 체크아웃의 Rust 소스·Cargo 설정·공유 데이터·운영체제 리소스·제품 빌드 스크립트를 덮어쓰고 모든 파일의 SHA-256을 대조합니다. Swift·C# 소스를 main의 추적 파일로 복원하지 않습니다.
+prepare_legacy_validation.py는 shared/legacy-validation.json에 고정한 legacy 커밋과 트리 해시를 확인하고 Git에서 제외한 .tools/legacy-validation 아래에 별도 Git 복제본을 만듭니다. 레거시 검사 코드를 복원한 다음 현재 체크아웃의 Rust 소스·Cargo 설정·공유 데이터·운영체제 리소스·제품 빌드 스크립트를 덮어쓰고 모든 파일의 SHA-256을 대조합니다. Swift·C# 소스를 main의 추적 파일로 복원하지 않습니다.
 
-CI도 이 별도 폴더에서 기존 Swift 109개 검사, Windows 통합 검사, 실제 창·팝오버·입력·트레이 비교, 설치·제거와 업데이트·복구 검사를 실행합니다. 제품 빌드는 현재 Rust 소스를 사용하고 비교용 파일은 고정한 legacy 자료를 사용합니다. 코드 제거를 이유로 기능·화면 검사 항목을 생략하지 않습니다.
+CI는 별도 폴더에서 기존 Swift 109개 검사, Windows 통합 검사와 실제 창·팝오버·입력·트레이 비교를 실행합니다. 제품 빌드·설치·제거 검사는 깨끗한 현재 체크아웃을 사용하고, 비교 검사에는 여기서 만든 제품 패키지를 전달합니다. 배포 메타데이터의 source_dirty 및 소스 커밋을 확인하므로 레거시 검사 코드 복원 때문에 서명용 패키지가 수정된 소스로 표시되지 않습니다. 업데이트·복구의 임시 버전과 서명 키는 별도 검증 폴더에서만 사용합니다. 코드 제거를 이유로 기능·화면 검사 항목을 생략하지 않습니다.
 
 로컬에서 비교 검사를 실행하려면 Swift 6 이상(macOS) 또는 .NET 10 SDK(Windows)가 필요합니다. 얕은 복제에 legacy 객체가 없으면 고정한 자료를 확인하기 위해 origin의 legacy 브랜치를 가져옵니다. --destination으로 별도 검증 폴더를 지정하거나 --script와 뒤의 인자로 보관된 검사를 직접 실행할 수 있습니다.
 
