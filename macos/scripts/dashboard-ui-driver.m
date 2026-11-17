@@ -614,7 +614,7 @@ static NSDictionary *perform(NSDictionary *request) {
         return @{@"text": [text substringWithRange:range]};
     }
     if ([op isEqual:@"selectText"] || [op isEqual:@"dismissBanner"]) {
-        if ([op isEqual:@"selectText"] && !window.isKeyWindow) {
+        if ([op isEqual:@"selectText"] && (![NSApp isActive] || !window.isKeyWindow)) {
             [NSApp activateIgnoringOtherApps:YES];
             [window makeKeyAndOrderFront:nil];
             return @{@"pending": @"key text window"};
@@ -624,6 +624,18 @@ static NSDictionary *perform(NSDictionary *request) {
         NSRect textFrame = [message accessibilityFrame];
         if (NSIsEmptyRect(textFrame)) return @{@"pending": @"message frame"};
         if ([op isEqual:@"selectText"]) {
+            // Adding an email or source path moves the name row. AX can expose
+            // the new text while AppKit is still positioning its field editor.
+            static __weak NSWindow *lastWindow;
+            static NSString *lastLabel;
+            static NSRect lastFrame;
+            if (lastWindow != window || ![lastLabel isEqualToString:label] || !NSEqualRects(lastFrame, textFrame)) {
+                lastWindow = window;
+                lastLabel = [label copy];
+                lastFrame = textFrame;
+                return @{@"pending": @"stable text frame"};
+            }
+            lastWindow = nil;
             [fixturePasteboard(nil, NULL) clearContents];
             CGFloat left = NSMinX(textFrame) + 0.5, right = NSMaxX(textFrame) + 2;
             CGFloat middle = NSMidY(textFrame);

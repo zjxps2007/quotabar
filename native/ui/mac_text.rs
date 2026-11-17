@@ -7,7 +7,6 @@ use core_foundation::{
 };
 use core_graphics::{
     base::kCGImageAlphaNoneSkipLast,
-    color::CGColor,
     color_space::CGColorSpace,
     context::CGContext,
     geometry::{CGPoint, CGRect, CGSize},
@@ -17,7 +16,7 @@ use core_text::{
     line::CTLine,
     string_attributes::{
         kCTFontAttributeName, kCTForegroundColorFromContextAttributeName, kCTKernAttributeName,
-        kCTUnderlineColorAttributeName, kCTUnderlineStyleAttributeName,
+        kCTUnderlineStyleAttributeName,
     },
 };
 use eframe::egui::{self, epaint::TextShape, *};
@@ -240,20 +239,11 @@ struct LineMetrics {
 fn raster(key: &Key, limit: usize) -> Option<(ColorImage, Vec2, LineMetrics)> {
     let size = f64::from(f32::from_bits(key.size));
     let scale = f64::from(f32::from_bits(key.scale));
-    let mut text = attributed(&key.text, size, key.face, f32::from_bits(key.tracking));
-    let ink = if key.light_ink { 1. } else { 0. };
-    let alpha = f64::from(key.ink_alpha) / 255.;
-    if key.face == Face::Underlined {
-        // Core Text uses black for an unspecified underline even when the
-        // glyphs take white from the drawing context for a dark appearance.
-        let range = CFRange::init(0, text.char_len());
-        text.set_attribute(
-            range,
-            unsafe { kCTUnderlineColorAttributeName },
-            &CGColor::rgb(ink, ink, ink, alpha),
-        );
-    }
-    let line = CTLine::new_with_attributed_string(text.as_concrete_TypeRef());
+    let make_line = |face| {
+        let text = attributed(&key.text, size, face, f32::from_bits(key.tracking));
+        CTLine::new_with_attributed_string(text.as_concrete_TypeRef())
+    };
+    let line = make_line(key.face);
     let bounds = line.get_typographic_bounds();
     let ascent = (bounds.ascent * scale).ceil();
     let height = (ascent + ((bounds.descent + bounds.leading) * scale).ceil()).max(1.) as usize;
@@ -261,43 +251,68 @@ fn raster(key: &Key, limit: usize) -> Option<(ColorImage, Vec2, LineMetrics)> {
     if width > limit || height > limit || width.checked_mul(height)? > 8_000_000 {
         return None;
     }
-    let mut canvas = CGContext::create_bitmap_context(
-        None,
-        width,
-        height,
-        8,
-        width * 4,
-        &CGColorSpace::create_device_rgb(),
-        kCGImageAlphaNoneSkipLast,
-    );
-    // Quartz smooths light ink on a dark surface differently from dark ink on
-    // a light surface. A transparent alpha-only mask loses that distinction.
-    let paper = 1. - ink;
-    canvas.set_rgb_fill_color(paper, paper, paper, 1.);
-    canvas.fill_rect(CGRect::new(
-        &CGPoint::new(0., 0.),
-        &CGSize::new(width as f64, height as f64),
-    ));
-    canvas.scale(scale, scale);
-    // Let Quartz composite the semantic label opacity with its glyph coverage
-    // in one pass. Multiplying an 8-bit mask by the label opacity later loses
-    // a level of edge coverage on both light and dark backgrounds.
-    canvas.set_rgb_fill_color(ink, ink, ink, alpha);
-    canvas.set_should_antialias(true);
-    canvas.set_allows_font_smoothing(true);
-    canvas.set_should_smooth_fonts(true);
-    canvas.set_text_position(0., (height as f64 - ascent) / scale);
-    line.draw(&canvas);
-    let pixels = canvas
-        .data()
-        .as_chunks::<4>()
-        .0
-        .iter()
-        .map(|rgb| {
-            let shade = ((u16::from(rgb[0]) + u16::from(rgb[1]) + u16::from(rgb[2]) + 1) / 3) as u8;
-            Color32::from_white_alpha(if key.light_ink { shade } else { 255 - shade })
-        })
-        .collect();
+    let mask = |line: &CTLine, light_ink: bool, alpha: u8| -> Vec<Color32> {
+        let mut canvas = CGContext::create_bitmap_context(
+            None,
+            width,
+            height,
+            8,
+            width * 4,
+            &CGColorSpace::create_device_rgb(),
+            kCGImageAlphaNoneSkipLast,
+        );
+        // Quartz smooths light ink on a dark surface differently from dark ink on
+        // a light surface. A transparent alpha-only mask loses that distinction.
+        let ink = if light_ink { 1. } else { 0. };
+        let paper = 1. - ink;
+        canvas.set_rgb_fill_color(paper, paper, paper, 1.);
+        canvas.fill_rect(CGRect::new(
+            &CGPoint::new(0., 0.),
+            &CGSize::new(width as f64, height as f64),
+        ));
+        canvas.scale(scale, scale);
+        // Let Quartz composite the semantic label opacity with its glyph coverage
+        // in one pass. Multiplying an 8-bit mask by the label opacity later loses
+        // a level of edge coverage on both light and dark backgrounds.
+        canvas.set_rgb_fill_color(ink, ink, ink, f64::from(alpha) / 255.);
+        canvas.set_should_antialias(true);
+        canvas.set_allows_font_smoothing(true);
+        canvas.set_should_smooth_fonts(true);
+        canvas.set_text_position(0., (height as f64 - ascent) / scale);
+        line.draw(&canvas);
+        canvas
+            .data()
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .map(|rgb| {
+                let shade =
+                    ((u16::from(rgb[0]) + u16::from(rgb[1]) + u16::from(rgb[2]) + 1) / 3) as u8;
+                Color32::from_white_alpha(if light_ink { shade } else { 255 - shade })
+            })
+            .collect()
+    };
+    let pixels = if key.face == Face::Underlined && key.light_ink {
+        // Core Text can draw an underline in black even when the context draws
+        // white glyphs. Isolate its coverage using two black-on-white runs.
+        // This retains the fallback fonts' underline positions at each scale.
+        let plain = make_line(Face::Regular);
+        let mut pixels = mask(&plain, true, key.ink_alpha);
+        let glyphs = mask(&plain, false, 255);
+        let decorated = mask(&line, false, 255);
+        for ((pixel, glyph), mark) in pixels.iter_mut().zip(glyphs).zip(decorated) {
+            let added = mark.a().saturating_sub(glyph.a());
+            if added > 0 {
+                // Ink covers this fraction of the area left clear by the glyph.
+                let clear = u32::from(255 - glyph.a());
+                let gain = u32::from(key.ink_alpha.saturating_sub(pixel.a())) * u32::from(added);
+                *pixel = Color32::from_white_alpha(pixel.a() + ((gain + clear / 2) / clear) as u8);
+            }
+        }
+        pixels
+    } else {
+        mask(&line, key.light_ink, key.ink_alpha)
+    };
     let line_pixels = (bounds.ascent + bounds.descent + bounds.leading) * scale;
     Some((
         ColorImage::new([width, height], pixels),
