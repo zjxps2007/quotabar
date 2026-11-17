@@ -287,6 +287,12 @@ impl Dashboard {
                     side.right_bottom(),
                 );
                 ui.scope_builder(UiBuilder::new().max_rect(footer), |ui| {
+                    #[cfg(target_os = "macos")]
+                    let version = crate::mac_text::centered_label(
+                        ui, concat!("v", env!("QUOTABAR_VERSION")), 11., false, p.muted,
+                    )
+                    .unwrap_or_else(|| caption(ui, concat!("v", env!("QUOTABAR_VERSION")), p));
+                    #[cfg(windows)]
                     let version = caption(ui, concat!("v", env!("QUOTABAR_VERSION")), p);
                     version.widget_info(|| {
                         WidgetInfo::labeled(

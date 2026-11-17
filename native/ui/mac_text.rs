@@ -76,8 +76,10 @@ impl PreferredFont {
         }
         let weight = unsafe {
             match self {
-                Self::Title2Bold | Self::Title3Bold => NSFontWeightBold,
-                Self::SubheadlineSemibold | Self::CaptionSemibold => NSFontWeightSemibold,
+                Self::Title2Bold => NSFontWeightBold,
+                Self::Title3Bold | Self::SubheadlineSemibold | Self::CaptionSemibold => {
+                    NSFontWeightSemibold
+                }
                 _ => return font,
             }
         };
@@ -133,12 +135,13 @@ impl PreferredFont {
                     .x,
             )
         });
-        native.unwrap_or_else(|| {
+        let width = native.unwrap_or_else(|| {
             ui.painter()
                 .layout_no_wrap(text.to_owned(), FontId::proportional(size), ink)
                 .size()
                 .x
-        })
+        });
+        (width * ui.pixels_per_point()).ceil() / ui.pixels_per_point()
     }
 }
 
@@ -615,6 +618,7 @@ pub fn calendar_label(ui: &Ui, at: Pos2, align: Align2, text: &str, size: f32, c
 pub fn navigation_title(ui: &Ui, start: Pos2, text: &str, selected: bool, color: Color32) {
     let scale = ui.ctx().pixels_per_point();
     let advance = system_line_height(ui, 12.);
+    let ascent = (NSFont::systemFontOfSize(12.).ascender() * f64::from(scale)).ceil() as f32 / scale;
     let renderer = ui.ctx().plugin_opt::<Renderer>();
     for (index, line) in text.lines().enumerate() {
         let top = start + vec2(0., index as f32 * advance);
@@ -624,7 +628,9 @@ pub fn navigation_title(ui: &Ui, start: Pos2, text: &str, selected: bool, color:
                     .lock()
                     .run(ui.ctx(), line, 12., Face::label(selected), color)
         {
-            ui.painter().add(run.shape(top, scale, color));
+            // A fallback face shares the system font's line box in SwiftUI.
+            ui.painter()
+                .add(run.preferred_shape(top, ascent, scale, color));
         } else {
             ui.painter().text(
                 top,
@@ -892,12 +898,8 @@ pub fn preferred_label(ui: &mut Ui, text: &str, style: PreferredFont, color: Col
     // The preferred font supplies line spacing even when its glyphs come
     // from a fallback face. In particular caption and caption2 both reserve
     // 13 points on macOS, but caption2 uses the system's medium face.
-    let line = if style == PreferredFont::Title2Bold {
+    let line = if matches!(style, PreferredFont::Title2Bold | PreferredFont::Title3Bold) {
         LineBox::CenteredStack
-    } else if style == PreferredFont::Title3Bold {
-        // SwiftUI lays the weighted title out with the resolved bold face.
-        // Its Korean title occupies 19 pt, including fallback glyphs.
-        LineBox::Stack
     } else {
         let LineMetrics { height, ascent } = PreferredFont::metrics(&font, ui);
         LineBox::Preferred { height, ascent }
@@ -1248,7 +1250,13 @@ fn draw_label(
             .height
             .max(system_line_height(ui, f64::from(size))),
     };
-    let (rect, response) = ui.allocate_exact_size(vec2(run.size.x, height), Sense::hover());
+    // SwiftUI rounds each Text's proposed width before positioning siblings.
+    let width = if matches!(face, Face::Preferred(_)) {
+        (run.size.x * ui.pixels_per_point()).ceil() / ui.pixels_per_point()
+    } else {
+        run.size.x
+    };
+    let (rect, response) = ui.allocate_exact_size(vec2(width, height), Sense::hover());
     let scale = ui.ctx().pixels_per_point();
     let shape = match line_box {
         LineBox::Preferred { ascent, .. } => run.preferred_shape(rect.min, ascent, scale, color),
