@@ -164,20 +164,25 @@ def capture(child, route, path, width=1120, height=810):
     return size
 
 
-def check_resize(child, controls, first):
+def check_resize(child, controls, first_path, first_size):
     observations = {}
+    captures = REPORT / "resize-captures"
+    captures.mkdir(exist_ok=True)
     for name, width, height in (("cold", 1120, 810), ("repeat", 1120, 810),
                                 ("smaller", 920, 666), ("restored", 1120, 810)):
-        size = first if name == "cold" else capture(child, "dashboard", controls.folder / "resize.png", width, height)
-        geometry = controls.request("captureGeometry")
-        observations[name] = {"requested": [width, height], "png": size, **geometry}
+        path = first_path if name == "cold" else captures / f"{name}.png"
+        size = first_size if name == "cold" else capture(child, "dashboard", path, width, height)
+        geometry = controls.request("captureGeometry", value=str(path))
+        observations[name] = {"requested": [width, height], "png": size, "image": str(path.relative_to(REPORT)), **geometry}
     (REPORT / "capture-geometry.json").write_text(json.dumps(observations, indent=2))
     for sample in observations.values():
         assert sample["png"] == [round(sample["backing"][k]) for k in ("width", "height")], sample
+    assert len(observations["cold"]["statCardColumns"]) == 4, observations
     for name in ("repeat", "restored"):
         sample = observations[name]
         if sample["visibleFrame"] == observations["cold"]["visibleFrame"]:
-            assert sample["png"] == first, observations
+            assert sample["png"] == first_size, observations
+            assert sample["statCardColumns"] == observations["cold"]["statCardColumns"], observations
     assert observations["smaller"]["view"]["width"] < observations["restored"]["view"]["width"], observations
 
 
@@ -215,7 +220,7 @@ def main():
                     path = REPORT / f"{route}-{theme}.png"
                     sizes[path.name] = capture(child, route, path)
                     if route == "dashboard" and theme == THEMES[0]:
-                        check_resize(child, controls, sizes[path.name])
+                        check_resize(child, controls, path, sizes[path.name])
             send(child.stdin, {"close": {}})
             assert child.wait(timeout=7) == 0
         finally:

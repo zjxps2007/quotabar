@@ -543,6 +543,41 @@ static NSDictionary *editTextField(NSWindow *window, NSDictionary *request) {
     return @{@"pending": @"editable field", @"field": label, @"visible": connectionFieldViews(window)};
 }
 
+// The light dashboard fixture has four white statistic cards to the right of
+// the sidebar. Measure their edges in the actual PNG, including the first frame.
+static NSArray *statCardColumns(NSString *path, CGFloat scale) {
+    NSData *data = [NSData dataWithContentsOfFile:path];
+    NSBitmapImageRep *image = data ? [NSBitmapImageRep imageRepWithData:data] : nil;
+    if (image.bitsPerSample != 8 || image.samplesPerPixel < 3 || image.samplesPerPixel > 4) return @[];
+    NSArray *best = @[];
+    NSInteger bestWidth = 0;
+    for (NSInteger y = 0; y < image.pixelsHigh; y += MAX(1, lround(4 * scale))) {
+        NSMutableArray *spans = [NSMutableArray array];
+        NSInteger start = -1, total = 0, widest = 0, narrowest = image.pixelsWide;
+        for (NSInteger x = lround(211 * scale); x <= image.pixelsWide; x++) {
+            NSUInteger components[4] = {};
+            if (x < image.pixelsWide) [image getPixel:components atX:x y:y];
+            BOOL white = components[0] == 255 && components[1] == 255 && components[2] == 255;
+            if (white && start < 0) start = x;
+            if (!white && start >= 0) {
+                NSInteger width = x - start;
+                if (width >= 55 * scale) {
+                    [spans addObject:@[@(start), @(x)]];
+                    total += width;
+                    widest = MAX(widest, width);
+                    narrowest = MIN(narrowest, width);
+                }
+                start = -1;
+            }
+        }
+        if (spans.count == 4 && widest - narrowest <= 3 * scale && total > bestWidth) {
+            best = spans;
+            bestWidth = total;
+        }
+    }
+    return best;
+}
+
 static NSDictionary *perform(NSDictionary *request) {
     NSWindow *window = dashboardWindow();
     if (!window) return @{@"pending": @"dashboard window"};
@@ -551,6 +586,7 @@ static NSDictionary *perform(NSDictionary *request) {
         NSView *view = window.contentView;
         return @{@"frame": rectangle(window.frame), @"view": rectangle(view.bounds),
                  @"backing": rectangle([view convertRectToBacking:view.bounds]),
+                 @"statCardColumns": statCardColumns(request[@"value"], window.backingScaleFactor),
                  @"visibleFrame": rectangle(window.screen.visibleFrame), @"scale": @(window.backingScaleFactor)};
     }
     if ([op isEqual:@"windowPlacement"]) {

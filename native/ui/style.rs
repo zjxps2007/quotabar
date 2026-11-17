@@ -673,19 +673,15 @@ pub fn mac_scroll(
         } else {
             Color32::from_gray(250)
         };
-        if let Some(width) = native_width {
-            style.spacing.scroll.bar_width = width;
-            style.spacing.scroll.bar_inner_margin = 0.;
-            style.spacing.scroll.bar_outer_margin = 0.;
-            style.visuals.extreme_bg_color = Color32::TRANSPARENT;
-            style.visuals.widgets.inactive.bg_fill = Color32::TRANSPARENT;
-            style.visuals.widgets.hovered.bg_fill = Color32::TRANSPARENT;
-            style.visuals.widgets.active.bg_fill = Color32::TRANSPARENT;
-        }
-        let area = scroll.show(ui, |ui| {
+        let show_content = |ui: &mut Ui| {
             ui.set_style(content_style);
             body(ui);
-        });
+        };
+        let area = if let Some(width) = native_width {
+            show_with_legacy_scroller(ui, scroll, width, show_content)
+        } else {
+            scroll.show(ui, show_content)
+        };
         if let Some(rail) = rail {
             if let Some(width) = native_width {
                 rail.place(
@@ -707,6 +703,60 @@ pub fn mac_scroll(
             }
         }
     });
+}
+
+#[cfg(any(target_os = "macos", test))]
+fn show_with_legacy_scroller<R>(
+    ui: &mut Ui,
+    scroll: ScrollArea,
+    width: f32,
+    body: impl FnOnce(&mut Ui) -> R,
+) -> scroll_area::ScrollAreaOutput<R> {
+    let id = ui.next_auto_id().with("AppKit scroller space");
+    let reserved = ui.data(|data| data.get_temp::<bool>(id).unwrap_or(false));
+    let content_width = ui.available_width() - if reserved { width } else { 0. };
+    // AppKit reserves the entire legacy scroller when the content overflows.
+    // The NSScroller handles its own input. Keep wheel and keyboard scrolling
+    // in the ScrollArea without animating a second gutter inside its content.
+    ui.spacing_mut().scroll = egui::style::ScrollStyle::floating();
+    let area = scroll
+        .scroll_bar_visibility(scroll_area::ScrollBarVisibility::AlwaysHidden)
+        .max_width(content_width.max(0.))
+        .show(ui, body);
+    let overflows = area.content_size.y > area.inner_rect.height();
+    if overflows != reserved {
+        ui.data_mut(|data| data.insert_temp(id, overflows));
+        ui.ctx()
+            .request_discard("Arrange content with the native scroller width");
+    }
+    area
+}
+
+#[cfg(test)]
+#[test]
+fn legacy_scroller_reserves_its_full_width_on_the_first_painted_frame() {
+    let ctx = Context::default();
+    let viewport = |screen_width, content_height| {
+        let mut content_width = 0.;
+        let input = RawInput {
+            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(screen_width, 130.))),
+            time: Some(1.),
+            ..Default::default()
+        };
+        let _ = ctx.run(input, |ctx| {
+            CentralPanel::default().frame(Frame::NONE).show(ctx, |ui| {
+                let area = show_with_legacy_scroller(ui, ScrollArea::vertical(), 15., |ui| {
+                    ui.allocate_space(vec2(ui.available_width(), content_height));
+                });
+                content_width = area.inner_rect.width();
+            });
+        });
+        content_width
+    };
+    assert_eq!(viewport(280., 300.), 265.);
+    assert_eq!(viewport(280., 300.), 265.);
+    assert_eq!(viewport(240., 40.), 240.);
+    assert_eq!(viewport(280., 300.), 265.);
 }
 
 #[cfg(target_os = "macos")]
