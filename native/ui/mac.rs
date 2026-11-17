@@ -27,7 +27,8 @@ use std::{
 
 mod buttons;
 pub use buttons::{
-    ButtonLayout, draw_checkbox, draw_segments, draw_switch, popup_choice, standard_button,
+    ButtonLayout, button_alignment_size, draw_checkbox, draw_segments, draw_switch, popup_choice,
+    standard_button,
 };
 mod banner;
 pub use banner::BannerLabel;

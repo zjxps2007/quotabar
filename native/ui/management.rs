@@ -21,7 +21,7 @@ fn provider_filter(ui: &mut Ui, filter: &mut String, width: f32) {
 }
 
 impl Dashboard {
-    pub fn accounts(&mut self, ui: &mut Ui, p: Palette) {
+    pub fn accounts(&mut self, ui: &mut Ui, p: Palette, #[cfg(windows)] body_offset: f32) {
         let width = ui.available_width();
         #[cfg(windows)]
         let filters = |app: &Dashboard| Id::new((&app.query, &app.filter, app.attention));
@@ -41,7 +41,9 @@ impl Dashboard {
                         query,
                     ))
         };
-        ui.horizontal(|ui| {
+        #[cfg(windows)]
+        let filter_top = ui.next_widget_position().y + body_offset;
+        let _filter_row = ui.horizontal(|ui| {
             if MAC {
                 ui.spacing_mut().item_spacing.x = 12.;
             }
@@ -90,8 +92,11 @@ impl Dashboard {
                     .iter()
                     .filter(|a| matches(a, &self.filter, &self.query, self.attention))
                     .count();
+                #[cfg(target_os = "macos")]
+                preferred_label(ui, &format!("{count} 계정"), PreferredFont::Caption, p.muted);
+                #[cfg(windows)]
                 caption(ui, format!("{count} 계정"), p);
-                checkbox(ui, &mut self.attention, "연결 확인 필요", 12., p);
+                checkbox(ui, &mut self.attention, "연결 확인 필요", if MAC { 13. } else { 12. }, p);
                 if !MAC {
                     provider_filter(ui, &mut self.filter, 128.);
                 }
@@ -102,6 +107,19 @@ impl Dashboard {
             reset_disclosures(ui.ctx());
         }
         ui.add_space(18.);
+        #[cfg(windows)]
+        let card_flow = {
+            // The TextBox template adds thirty DIPs to one TextFormatter line.
+            // Keep the list's fractional origin when the viewport is scrolled.
+            let measured = _filter_row.response.rect.height();
+            let native = crate::windows_text::TextStack::line_height(12.)
+                .map(|line| line + 30.)
+                .filter(|h| (h - measured).abs() < 0.5)
+                .unwrap_or(measured);
+            let flow = crate::windows_text::TextStack::at(filter_top);
+            flow.advance(native);
+            flow
+        };
         let rows: Vec<_> = self
             .state
             .accounts
@@ -169,7 +187,9 @@ impl Dashboard {
             for account in rows {
                 ui.push_id(&account.id, |ui| {
                     p.frame(20)
-                        .show(ui, |ui| self.connection_card(ui, p, &account))
+                        .show(ui, |ui| {
+                            self.connection_card(ui, p, &account, #[cfg(windows)] &card_flow)
+                        })
                 });
                 ui.add_space(14.);
             }
@@ -186,7 +206,13 @@ impl Dashboard {
             .filter(|_| self.capture.is_none() && !Popup::is_any_open(ui.ctx()))
     }
 
-    fn connection_card(&mut self, ui: &mut Ui, p: Palette, a: &Account) {
+    fn connection_card(
+        &mut self,
+        ui: &mut Ui,
+        p: Palette,
+        a: &Account,
+        #[cfg(windows)] flow: &crate::windows_text::TextStack,
+    ) {
         ui.set_width(ui.available_width());
         let tint = p.tint(a.provider);
         let status = if !a.enabled {
@@ -209,12 +235,8 @@ impl Dashboard {
         } else {
             tint
         };
-        #[cfg(windows)]
         let header_id = ui.id().with("account header height");
-        #[cfg(windows)]
         let labels_height = ui.data(|d| d.get_temp::<f32>(header_id)).unwrap_or(36.);
-        #[cfg(target_os = "macos")]
-        let labels_height = 36.;
         let header = |ui: &mut Ui| {
             ui.spacing_mut().item_spacing.x = 12.;
             self.assets.logo(ui, a.provider, 36.);
@@ -246,11 +268,15 @@ impl Dashboard {
                         let stack = crate::mac_text::title_stack_height(ui, 13., 12., 4.);
                         ui.add_space(((36. - stack) / 2.).max(0.));
                     }
-                    crate::mac_text::stacked_label(ui, a.provider, 13., true, p.ink)
+                    crate::mac_text::centered_stack_label(ui, a.provider, 13., true, p.ink)
                         .unwrap_or_else(|| label(ui, a.provider, 13., true, p.ink));
                 }
                 #[cfg(windows)]
-                crate::windows_text::TextStack::inline(ui).label(ui, a.provider, 13., true, p.ink);
+                let labels_top = ui.next_widget_position().y;
+                #[cfg(windows)]
+                let aligned = crate::windows_text::TextStack::at(flow.top(labels_top));
+                #[cfg(windows)]
+                aligned.label(ui, a.provider, 13., true, p.ink);
                 ui.add_space(4.);
                 #[cfg(windows)]
                 ui.scope(|ui| {
@@ -275,13 +301,21 @@ impl Dashboard {
                 }
                 #[cfg(windows)]
                 if let Some(email) = email {
-                    caption(ui, email, p);
+                    let line = caption(ui, email, p);
+                    aligned.advance_lines(11., line.rect.height());
+                }
+                #[cfg(windows)]
+                {
+                    // The alias always occupies a single 12-DIP text line.
+                    aligned.advance(crate::windows_text::TextStack::line_height(12.).unwrap_or(16.));
+                    let start = flow.top(labels_top);
+                    flow.advance((aligned.top(ui.next_widget_position().y) - start).max(36.));
                 }
             });
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 #[cfg(target_os = "macos")]
                 {
-                    let (bounds, button) = ui.allocate_exact_size(vec2(32., 20.), Sense::click());
+                    let (bounds, button) = ui.allocate_exact_size(vec2(33., 14.), Sense::click());
                     button.widget_info(|| {
                         WidgetInfo::labeled(
                             WidgetType::Button,
@@ -323,7 +357,7 @@ impl Dashboard {
                         }
                     }
                     ui.spacing_mut().item_spacing.x = 6.;
-                    label(ui, status, 11., false, color);
+                    preferred_label(ui, status, PreferredFont::Caption, color);
                     if a.loading {
                         ui.add(Spinner::new().size(10.));
                     } else {
@@ -338,29 +372,27 @@ impl Dashboard {
             });
             labels.response.rect.height().max(36.)
         };
-        #[cfg(target_os = "macos")]
-        ui.horizontal(header);
-        #[cfg(windows)]
-        {
-            // WPF's DockPanel measures the label stack before centering its
-            // 36-DIP logo. The stack can grow again when an email wraps.
-            let size = vec2(ui.available_width(), labels_height);
-            let measured = ui
-                .allocate_ui_with_layout(size, Layout::left_to_right(Align::Center), header)
-                .inner;
-            if measured != labels_height {
-                ui.data_mut(|d| d.insert_temp(header_id, measured));
-                ui.ctx()
-                    .request_discard("Center the provider logo in the measured account row");
-            }
+        // Both native layouts center the logo after the optional email wraps.
+        let size = vec2(ui.available_width(), labels_height);
+        let measured = ui
+            .allocate_ui_with_layout(size, Layout::left_to_right(Align::Center), header)
+            .inner;
+        if measured != labels_height {
+            ui.data_mut(|d| d.insert_temp(header_id, measured));
+            ui.ctx()
+                .request_discard("Center the provider logo in the measured account row");
         }
         if let Some(message) = a.connection_message() {
             ui.add_space(16.);
-            label(ui, message, 11., false, p.warning);
+            let _line = label(ui, message, 11., false, p.warning);
+            #[cfg(windows)]
+            flow.advance_lines(11., _line.rect.height());
         }
         if let Some(note) = &a.note {
             ui.add_space(8.);
-            caption(ui, note, p);
+            let _line = caption(ui, note, p);
+            #[cfg(windows)]
+            flow.advance_lines(11., _line.rect.height());
         }
         ui.add_space(if MAC { 16. } else { 18. });
         ui.scope(|ui| {
@@ -437,6 +469,8 @@ impl Dashboard {
                 "연결한 로그인 파일"
             };
             let size = if MAC { 10. } else { 11. };
+            #[cfg(windows)]
+            flow.advance(crate::windows_text::TextStack::line_height(size).unwrap_or(size));
             disclosure(ui, (&a.id, "source"), title, size, p, |ui| {
                 #[cfg(target_os = "macos")]
                 ui.add_space(8.);
@@ -450,7 +484,10 @@ impl Dashboard {
                     );
                 }
                 #[cfg(windows)]
-                caption(ui, &a.path, p);
+                {
+                    let line = caption(ui, &a.path, p);
+                    flow.advance_lines(11., line.rect.height());
+                }
                 let detail = match (MAC, a.provider) {
                     (true, "Claude") => {
                         "Claude에서 메시지를 보내면 잔여량이 갱신됩니다. 계정 삭제 시 기존 statusLine 명령을 복구합니다."
@@ -465,15 +502,19 @@ impl Dashboard {
                 #[cfg(target_os = "macos")]
                 {
                     ui.add_space(8.);
-                    system_label(ui, detail, 10., false, p.muted);
+                    preferred_label(ui, detail, PreferredFont::Caption, p.muted);
                 }
                 #[cfg(windows)]
-                caption(ui, detail, p);
+                {
+                    let line = caption(ui, detail, p);
+                    flow.advance_lines(11., line.rect.height());
+                }
             });
         }
-        if !MAC {
+        #[cfg(windows)]
+        {
             ui.add_space(16.);
-            ui.horizontal_wrapped(|ui| {
+            let actions = ui.horizontal_wrapped(|ui| {
                 if ui
                     .add_enabled_ui(a.enabled && !a.loading, |ui| {
                         action(ui, "새로고침", false, p)
@@ -490,6 +531,9 @@ impl Dashboard {
                     self.dialog = Some(Dialog::remove(a.clone()));
                 }
             });
+            let line = crate::windows_text::TextStack::line_height(12.).unwrap_or(16.);
+            let rows = (actions.response.rect.height() / (line + 16.)).round().max(1.);
+            flow.advance(rows * line);
         }
     }
     fn preference(&mut self, key: &str, mac: &str, value: Value) {

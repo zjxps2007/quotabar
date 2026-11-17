@@ -313,6 +313,8 @@ impl Dashboard {
                 });
         }
         CentralPanel::default().frame(Frame::new().fill(p.bg)).show(ctx, |ui| {
+            #[cfg(windows)]
+            let heading_flow = crate::windows_text::TextStack::inline(ui);
             Frame::new().inner_margin(Margin { left: 28, right: 28, top: 32 + titlebar, bottom: 22 }).show(ui, |ui| {
                 ui.set_width(ui.available_width());
                 let (title, subtitle) = match self.route.as_str() {
@@ -328,9 +330,18 @@ impl Dashboard {
                         crate::mac_text::dashboard_heading(ui, title, p.ink)
                             .unwrap_or_else(|| system_label(ui, title, 25., true, p.ink));
                         #[cfg(windows)]
-                        system_label(ui, title, 25., true, p.ink);
+                        {
+                            let line = system_label(ui, title, 25., true, p.ink);
+                            heading_flow.advance_lines(25., line.rect.height());
+                        }
                         ui.add_space(5.);
-                        system_label(ui, subtitle, if MAC { 12. } else { 11. }, false, p.muted);
+                        #[cfg(target_os = "macos")]
+                        system_label(ui, subtitle, 12., false, p.muted);
+                        #[cfg(windows)]
+                        {
+                            let line = system_label(ui, subtitle, 11., false, p.muted);
+                            heading_flow.advance_lines(11., line.rect.height());
+                        }
                     });
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| match self.route.as_str() {
                         "accounts" => {
@@ -368,7 +379,10 @@ impl Dashboard {
                         });
                     }
                     #[cfg(windows)]
-                    caption(ui, note, p);
+                    {
+                        let line = caption(ui, note, p);
+                        heading_flow.advance_lines(11., line.rect.height());
+                    }
                 });
                 if !MAC { ui.add_space(18.); }
             }
@@ -392,7 +406,7 @@ impl Dashboard {
                 let message = self.state.raw["message"].as_str()
                     .or_else(|| logging.then_some("브라우저에서 로그인을 완료하세요."));
                 if let Some(msg) = message {
-                    Frame::new().outer_margin(Margin::symmetric(28, 0)).inner_margin(14)
+                    let banner = Frame::new().outer_margin(Margin::symmetric(28, 0)).inner_margin(14)
                         .fill(p.warning.gamma_multiply(0.08)).show(ui, |ui| {
                         ui.set_width(ui.available_width());
                         ui.horizontal_wrapped(|ui| {
@@ -400,6 +414,7 @@ impl Dashboard {
                             if logging && action_on(ui, "로그인 취소", false, p, p.bg.lerp_to_gamma(p.warning, 0.08)).clicked() { self.wire.action("cancel-login", Value::Null); }
                         });
                     });
+                    heading_flow.advance(banner.response.rect.height());
                     ui.add_space(18.);
                 }
             }
@@ -421,11 +436,14 @@ impl Dashboard {
             #[cfg(target_os = "macos")]
             let capturing = self.capture.is_some();
             let viewport_top = ui.available_rect_before_wrap().top();
+            #[cfg(windows)]
+            let body_offset = heading_flow.top(viewport_top) - viewport_top;
             let body = |ui: &mut Ui| {
                 Frame::new().inner_margin(Margin { left: 28, right: 28, top: 0, bottom: 28 }).show(ui, |ui| {
                     ui.set_width(ui.available_width());
                     match self.route.as_str() {
-                        "accounts" => self.accounts(ui, p),
+                        #[cfg(windows)]
+                        "accounts" => self.accounts(ui, p, body_offset),
                         "settings" => self.settings(ui, p),
                         _ => self.overview(ui, p, viewport_top),
                     }

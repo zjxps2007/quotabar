@@ -1392,8 +1392,14 @@ pub fn checkbox_in_row(
     let content = crate::windows_text::natural_size(ui, title, size, false).unwrap_or(text.size());
     #[cfg(target_os = "macos")]
     let content = crate::mac_text::natural_size(ui, title, size, false).unwrap_or(text.size());
+    #[cfg(target_os = "macos")]
+    let body = (size - objc2_app_kit::NSFont::systemFontSize() as f32).abs() < f32::EPSILON;
+    #[cfg(target_os = "macos")]
+    let width = if body { 19. + content.x.ceil() } else { 20. + content.x };
+    #[cfg(windows)]
+    let width = 20. + content.x;
     let row_size = vec2(
-        20. + content.x,
+        width,
         ui.spacing().interact_size.y.max(content.y).max(13.),
     );
     let (row, mut response) = ui.allocate_exact_size(row_size, Sense::click());
@@ -1420,8 +1426,9 @@ pub fn checkbox_in_row(
                 StrokeKind::Outside,
             );
         }
+        let label_top = row.center().y - content.y / 2. - if body { 0. } else { 1. };
         ui.painter().galley(
-            pos2(row.left() + 19., row.center().y - content.y / 2. - 1.),
+            pos2(row.left() + 19., label_top),
             text,
             p.ink,
         );

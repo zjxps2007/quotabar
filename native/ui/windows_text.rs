@@ -512,14 +512,27 @@ impl TextStack {
     /// A column of TextBlocks beside another control uses its natural width.
     /// Only its own glyph runs use TextFormatter's fractional measurements.
     pub fn inline(ui: &Ui) -> Self {
+        Self::at(ui.next_widget_position().y)
+    }
+
+    pub fn at(top: f32) -> Self {
         Self {
-            cursor: std::cell::Cell::new(f64::from(ui.next_widget_position().y)),
+            cursor: std::cell::Cell::new(f64::from(top)),
             fill_width: false,
         }
     }
 
     pub fn line_height(size: f32) -> Option<f32> {
         FACTORIES.with(|f| Some(f.as_ref()?.line_box(size, false, 1., true)?.0))
+    }
+
+    pub fn advance_lines(&self, points: f32, allocated: f32) {
+        // The widget rectangle has already been rounded to egui's placement
+        // grid. Recover the ideal TextBlock extent, including wrapped lines.
+        let height = Self::line_height(points)
+            .filter(|&h| h > 0.)
+            .map_or(allocated, |h| h * (allocated / h).round().max(1.));
+        self.advance(height);
     }
 
     pub fn top(&self, allocated: f32) -> f32 {
@@ -568,14 +581,26 @@ struct RasterOrigin {
 
 fn raster_origin(position: Pos2, scale: f32, stacked: bool) -> (Pos2, RasterOrigin) {
     let x = (position.x * scale * 64.).round() as i32;
-    let y = position.y * scale;
-    let y = if stacked { y } else { (y * 64.).round() / 64. };
+    let logical = f64::from(position.y);
+    let ideal = (logical * 300.).round() / 300.;
+    // An ideal TextFormatter origin may have lost its last bit when stored
+    // as an egui f32. Recover it before subtracting the large integer part.
+    let logical = if stacked && (ideal - logical).abs() <= logical.abs() * f64::from(f32::EPSILON) {
+        ideal
+    } else {
+        logical
+    };
+    let y = if stacked {
+        logical * f64::from(scale)
+    } else {
+        f64::from((position.y * scale * 64.).round() / 64.)
+    };
     let top = y.floor();
     (
-        pos2(x.div_euclid(64) as f32 / scale, top / scale),
+        pos2(x.div_euclid(64) as f32 / scale, top as f32 / scale),
         RasterOrigin {
             x64: x.rem_euclid(64) as u8,
-            y_bits: (y - top).to_bits(),
+            y_bits: ((y - top) as f32).to_bits(),
         },
     )
 }
@@ -1109,6 +1134,25 @@ mod tests {
     impl Drop for Apartment {
         fn drop(&mut self) {
             unsafe { CoUninitialize() };
+        }
+    }
+
+    #[test]
+    fn account_heading_preserves_the_half_pixel_baseline_from_the_parent_stack() {
+        let _apartment = Apartment::open();
+        let flow = TextStack::at(0.);
+        for size in [25., 11., 11., 12.] {
+            let line = TextStack::line_height(size).unwrap();
+            flow.advance_lines(size, (line * 32.).round() / 32.);
+        }
+        let top = flow.top(242.46875);
+        let factory = Factories::new().unwrap();
+        for scale in [1., 1.25, 1.5, 1.75, 2.] {
+            let (_, ascent) = factory.line_box(13. * scale, true, scale, true).unwrap();
+            let (start, origin) = raster_origin(pos2(0., top), scale, true);
+            let baseline = (start.y * scale).round() + (f32::from_bits(origin.y_bits) + ascent).round();
+            // The WPF stack places this line at 72742/300 DIPs with ascent 4208/300.
+            assert_eq!(baseline, (256.5 * scale).round());
         }
     }
 

@@ -424,6 +424,39 @@ pub enum ButtonLayout {
     TitleLine,
 }
 
+pub fn button_alignment_size(
+    ui: &Ui,
+    title: &str,
+    symbol: Option<&str>,
+    control_size: NSControlSize,
+    font_size: Option<f32>,
+) -> Option<Vec2> {
+    let main = MainThreadMarker::new()?;
+    let key = Id::new((
+        "AppKit button alignment size",
+        title,
+        symbol,
+        control_size,
+        font_size.map(f32::to_bits),
+    ));
+    Some(ui.data_mut(|d| {
+        *d.get_temp_mut_or_insert_with(key, || {
+            let button = push_button(main, title, symbol, control_size, font_size);
+            button.sizeToFit();
+            let mut size = button.alignmentRectForFrame(button.frame()).size;
+            if let Some(image) = button.image() {
+                // SwiftUI's Label has an eight-point image gap and end insets.
+                size.width =
+                    image.size().width + 8. + button.attributedTitle().size().width.ceil() + 16.;
+            } else if symbol.is_none() {
+                let padding = if control_size == NSControlSize::Small { 12. } else { 16. };
+                size.width = button.attributedTitle().size().width.ceil() + padding;
+            }
+            vec2(size.width as f32, size.height as f32)
+        })
+    }))
+}
+
 pub fn standard_button(
     ui: &mut Ui,
     title: &str,
@@ -437,32 +470,7 @@ pub fn standard_button(
         ButtonLayout::TitleLine => NSControlSize::Regular,
     };
     let size = if matches!(layout, ButtonLayout::Intrinsic(_)) {
-        let main = MainThreadMarker::new()?;
-        let key = Id::new((
-            "AppKit button alignment size",
-            title,
-            symbol,
-            control_size,
-            font_size.map(f32::to_bits),
-        ));
-        ui.data_mut(|d| {
-            *d.get_temp_mut_or_insert_with(key, || {
-                let button = push_button(main, title, symbol, control_size, font_size);
-                button.sizeToFit();
-                let mut size = button.alignmentRectForFrame(button.frame()).size;
-                if let Some(image) = button.image() {
-                    // A SwiftUI Label places its symbol and title eight points
-                    // apart, with eight points of padding on each side.
-                    size.width = image.size().width
-                        + 8.
-                        + button.attributedTitle().size().width.ceil()
-                        + 16.;
-                } else if symbol.is_none() && control_size == NSControlSize::Regular {
-                    size.width = button.attributedTitle().size().width.ceil() + 16.;
-                }
-                vec2(size.width as f32, size.height as f32)
-            })
-        })
+        button_alignment_size(ui, title, symbol, control_size, font_size)?
     } else {
         let points = font_size.unwrap_or(13.);
         let label = crate::mac_text::natural_size(ui, title, points, false)?;

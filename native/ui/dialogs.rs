@@ -518,12 +518,11 @@ impl Dashboard {
                     } => {
                         #[cfg(windows)]
                         ui.shrink_clip_rect(ui.max_rect());
-                        form_text(
-                            ui,
-                            "오픈소스 라이선스",
-                            if MAC { 17. } else { 22. },
-                            true,
-                            p.ink,
+                        #[cfg(windows)]
+                        form_text(ui, "오픈소스 라이선스", 22., true, p.ink);
+                        #[cfg(target_os = "macos")]
+                        crate::mac_text::preferred_label(
+                            ui, "오픈소스 라이선스", crate::mac_text::PreferredFont::Title2Bold, p.ink,
                         );
                         ui.add_space(16.);
                         #[cfg(target_os = "macos")]
@@ -547,7 +546,10 @@ impl Dashboard {
                         ui.add_space(16.);
                         #[cfg(target_os = "macos")]
                         let attached = {
-                            let close_height = crate::mac_text::system_line_height(ui, 13.) + 6.;
+                            let close_height = crate::mac::button_alignment_size(
+                                ui, "닫기", None, objc2_app_kit::NSControlSize::Regular, None,
+                            )
+                            .map_or_else(|| crate::mac_text::system_line_height(ui, 13.) + 6., |s| s.y);
                             let size = vec2(
                                 ui.available_width(),
                                 (ui.available_height() - 16. - close_height).max(80.),
@@ -633,11 +635,15 @@ impl Dashboard {
                         ui.add_space(if MAC { 16. } else { 12. });
                         if ui
                             .with_layout(Layout::right_to_left(Align::Min), |ui| {
-                                if MAC {
-                                    sheet_button(ui, "닫기", p)
-                                } else {
-                                    action_on(ui, "닫기", false, p, p.bg)
+                                #[cfg(target_os = "macos")]
+                                if let Some(button) = crate::mac::standard_button(
+                                    ui, "닫기", None,
+                                    crate::mac::ButtonLayout::Intrinsic(objc2_app_kit::NSControlSize::Regular),
+                                    None, p.focus_ring,
+                                ) {
+                                    return button;
                                 }
+                                action_on(ui, "닫기", false, p, p.bg)
                             })
                             .inner
                             .clicked()

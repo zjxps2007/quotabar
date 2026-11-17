@@ -34,6 +34,7 @@ pub enum PreferredFont {
     Headline,
     Callout,
     CalloutBold,
+    Title2Bold,
     Title3Bold,
     SubheadlineSemibold,
     Caption,
@@ -46,13 +47,14 @@ impl PreferredFont {
         use objc2_app_kit::{
             NSFontTextStyleBody, NSFontTextStyleCallout, NSFontTextStyleCaption1,
             NSFontTextStyleCaption2, NSFontTextStyleHeadline, NSFontTextStyleSubheadline,
-            NSFontTextStyleTitle3,
+            NSFontTextStyleTitle2, NSFontTextStyleTitle3,
         };
         unsafe {
             let style = match self {
                 Self::Body => NSFontTextStyleBody,
                 Self::Headline => NSFontTextStyleHeadline,
                 Self::Callout | Self::CalloutBold => NSFontTextStyleCallout,
+                Self::Title2Bold => NSFontTextStyleTitle2,
                 Self::Title3Bold => NSFontTextStyleTitle3,
                 Self::SubheadlineSemibold => NSFontTextStyleSubheadline,
                 Self::Caption | Self::CaptionSemibold => NSFontTextStyleCaption1,
@@ -74,7 +76,7 @@ impl PreferredFont {
         }
         let weight = unsafe {
             match self {
-                Self::Title3Bold => NSFontWeightBold,
+                Self::Title2Bold | Self::Title3Bold => NSFontWeightBold,
                 Self::SubheadlineSemibold | Self::CaptionSemibold => NSFontWeightSemibold,
                 _ => return font,
             }
@@ -711,14 +713,13 @@ pub fn stat_value(ui: &mut Ui, text: &str, color: Color32) -> Option<Response> {
 }
 
 pub fn section_heading(ui: &mut Ui, text: &str, color: Color32) -> Option<Response> {
-    draw_label(
-        ui,
-        text,
-        15.,
-        Face::Emphasized,
-        color,
-        LineBox::CenteredStack,
-    )
+    centered_stack_label(ui, text, 15., true, color)
+}
+
+pub fn centered_stack_label(
+    ui: &mut Ui, text: &str, size: f32, heavy: bool, color: Color32,
+) -> Option<Response> {
+    draw_label(ui, text, size, Face::label(heavy), color, LineBox::CenteredStack)
 }
 
 pub fn stat_caption(ui: &mut Ui, text: &str, size: f32, color: Color32) -> Option<Response> {
@@ -891,7 +892,9 @@ pub fn preferred_label(ui: &mut Ui, text: &str, style: PreferredFont, color: Col
     // The preferred font supplies line spacing even when its glyphs come
     // from a fallback face. In particular caption and caption2 both reserve
     // 13 points on macOS, but caption2 uses the system's medium face.
-    let line = if style == PreferredFont::Title3Bold {
+    let line = if style == PreferredFont::Title2Bold {
+        LineBox::CenteredStack
+    } else if style == PreferredFont::Title3Bold {
         // SwiftUI lays the weighted title out with the resolved bold face.
         // Its Korean title occupies 19 pt, including fallback glyphs.
         LineBox::Stack
@@ -904,6 +907,7 @@ pub fn preferred_label(ui: &mut Ui, text: &str, style: PreferredFont, color: Col
             style,
             PreferredFont::Headline
                 | PreferredFont::CalloutBold
+                | PreferredFont::Title2Bold
                 | PreferredFont::Title3Bold
                 | PreferredFont::SubheadlineSemibold
                 | PreferredFont::CaptionSemibold

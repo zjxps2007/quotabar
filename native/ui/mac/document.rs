@@ -1,53 +1,41 @@
 use block2::RcBlock;
 use eframe::egui::{Context, Rect};
-use objc2::{MainThreadMarker, rc::Retained, runtime::AnyObject};
+use objc2::{MainThreadMarker, MainThreadOnly, rc::Retained, runtime::AnyObject};
 use objc2_app_kit::{
-    NSAccessibility, NSApplication, NSAutoresizingMaskOptions, NSBorderType, NSColor, NSEvent,
-    NSEventMask, NSFont, NSFontWeightRegular, NSScrollView, NSTextView, NSView,
+    NSAccessibility, NSApplication, NSBorderType, NSColor, NSEvent, NSEventMask, NSFont,
+    NSFontWeightRegular, NSLineBreakStrategy, NSScrollView, NSTextField, NSView,
 };
-use objc2_foundation::{NSPoint, NSRange, NSRect, NSSize, NSString};
+use objc2_foundation::{NSPoint, NSRect, NSSize, NSString};
 use std::{cell::Cell, ptr::NonNull, rc::Rc};
 
 pub struct DocumentReader {
     scroll: Retained<NSScrollView>,
-    text: Retained<NSTextView>,
+    document: Retained<NSView>,
+    text: Retained<NSTextField>,
     selected: Option<usize>,
+    measured: Option<(NSSize, f64)>,
     cancelled: Rc<Cell<bool>>,
     keyboard: Option<Retained<AnyObject>>,
 }
 
 impl DocumentReader {
     fn attach(ctx: &Context, parent: &NSView, main: MainThreadMarker) -> Option<Self> {
-        let scroll = NSTextView::scrollableTextView(main);
-        let text = scroll.documentView()?.downcast::<NSTextView>().ok()?;
+        let scroll = NSScrollView::initWithFrame(NSScrollView::alloc(main), NSRect::ZERO);
+        let document = NSView::initWithFrame(NSView::alloc(main), NSRect::ZERO);
+        let text = NSTextField::wrappingLabelWithString(&NSString::new(), main);
         scroll.setBorderType(NSBorderType::NoBorder);
         scroll.setDrawsBackground(false);
         scroll.setHasHorizontalScroller(false);
         scroll.setHasVerticalScroller(true);
         scroll.setAutohidesScrollers(true);
-        scroll.setWantsLayer(true);
-        if let Some(layer) = scroll.layer() {
-            layer.setCornerRadius(10.);
-            layer.setMasksToBounds(true);
-        }
-        text.setEditable(false);
         text.setSelectable(true);
-        text.setRichText(false);
-        text.setDrawsBackground(false);
-        text.setHorizontallyResizable(false);
-        text.setVerticallyResizable(true);
-        text.setAutoresizingMask(NSAutoresizingMaskOptions::ViewWidthSizable);
-        // The scrollable text view's TextKit stack owns this container.
-        let container = unsafe { text.textContainer() }?;
-        container.setWidthTracksTextView(true);
-        container.setLineFragmentPadding(0.);
-        text.setTextContainerInset(NSSize::new(16., 16.));
-        let font = unsafe { NSFont::monospacedSystemFontOfSize_weight(12., NSFontWeightRegular) };
-        text.setFont(Some(&font));
-        text.setTextColor(Some(&NSColor::labelColor()));
+        text.setLineBreakStrategy(NSLineBreakStrategy::Standard);
+        document.addSubview(&text);
+        scroll.setDocumentView(Some(&document));
         parent.addSubview(&scroll);
 
-        // Once the text view has the keyboard, Escape must still dismiss this sheet.
+        // The selectable field uses the window's field editor while copying.
+        // Escape dismisses the sheet even when that editor has the keyboard.
         let cancelled = Rc::new(Cell::new(false));
         let flag = Rc::clone(&cancelled);
         let listener = text.clone();
@@ -55,14 +43,8 @@ impl DocumentReader {
         let monitor = RcBlock::new(move |event: NonNull<NSEvent>| {
             let key = unsafe { event.as_ref() };
             if key.keyCode() == 53
-                && listener
-                    .window()
-                    .filter(|w| w.windowNumber() == key.windowNumber())
-                    .and_then(|w| w.firstResponder())
-                    .is_some_and(|r| {
-                        Retained::as_ptr(&r).cast::<AnyObject>()
-                            == Retained::as_ptr(&listener).cast::<AnyObject>()
-                    })
+                && listener.window().is_some_and(|w| w.windowNumber() == key.windowNumber())
+                && listener.currentEditor().is_some()
             {
                 flag.set(true);
                 context.request_repaint_of(eframe::egui::ViewportId::ROOT);
@@ -75,8 +57,10 @@ impl DocumentReader {
         };
         Some(Self {
             scroll,
+            document,
             text,
             selected: None,
+            measured: None,
             cancelled,
             keyboard,
         })
@@ -126,17 +110,43 @@ impl DocumentReader {
                 f64::from(rect.height()) * zoom,
             ),
         );
+        let clip = reader.scroll.contentView();
+        let visible = clip.bounds();
+        let top = reader.document.bounds().size.height - visible.origin.y - visible.size.height;
         if reader.scroll.frame() != frame {
             reader.scroll.setFrame(frame);
         }
-        if reader.selected != Some(index) {
-            reader.text.setString(&NSString::from_str(&doc.1));
+        let changed = reader.selected != Some(index);
+        if changed {
+            reader.text.abortEditing();
+            reader.text.setStringValue(&NSString::from_str(&doc.1));
             reader
                 .scroll
                 .setAccessibilityLabel(Some(&NSString::from_str(&doc.0)));
-            reader.text.setSelectedRange(NSRange::new(0, 0));
-            reader.text.scrollRangeToVisible(NSRange::new(0, 0));
             reader.selected = Some(index);
+        }
+        super::selectable_text::set_label_ink(&reader.text, &NSColor::labelColor());
+        let viewport = clip.bounds().size;
+        if changed || reader.measured != Some((viewport, zoom)) {
+            let font = unsafe {
+                NSFont::monospacedSystemFontOfSize_weight(12. * zoom, NSFontWeightRegular)
+            };
+            reader.text.setFont(Some(&font));
+            let padding = 16. * zoom;
+            // The wrapping cell draws two points inside each horizontal edge.
+            let maximum = (viewport.width - 2. * padding + 4.).max(4.);
+            let fit = reader.text.sizeThatFits(NSSize::new(maximum, f64::MAX));
+            let width = fit.width.ceil().min(maximum);
+            let text_height = fit.height.ceil();
+            let height = (text_height + 2. * padding).max(viewport.height);
+            reader.document.setFrameSize(NSSize::new(viewport.width, height));
+            reader.text.setFrame(NSRect::new(
+                NSPoint::new(padding - 2., height - padding - text_height),
+                NSSize::new(width, text_height),
+            ));
+            let top = if changed { 0. } else { top.max(0.) };
+            reader.document.scrollPoint(NSPoint::new(0., (height - viewport.height - top).max(0.)));
+            reader.measured = Some((viewport, zoom));
         }
         true
     }
