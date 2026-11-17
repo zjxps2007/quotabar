@@ -137,7 +137,7 @@ pub fn app_mark(
         let context = NSGraphicsContext::graphicsContextWithBitmapImageRep(&rep)?;
         NSGraphicsContext::saveGraphicsState_class();
         NSGraphicsContext::setCurrentContext(Some(&context));
-        quotabar::mac_menu::draw_app_mark(&source, side);
+        quotabar::mac_menu::draw_app_mark(&source, side, 1.);
         NSGraphicsContext::restoreGraphicsState_class();
         let image = bitmap_pixels(&rep)?;
         let mask = image

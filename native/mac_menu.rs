@@ -349,17 +349,22 @@ fn menu_mark() -> Option<Retained<NSImage>> {
 }
 
 /// Draw the SVG in the square used for the popover and dashboard logos.
-pub fn draw_app_mark(mark: &NSImage, side: f64) {
+pub fn draw_app_mark(mark: &NSImage, side: f64, scale: f64) {
     let width = side * 266. / 456.;
     let height = side * 282. / 456.;
+    // The resizable SwiftUI image aligns each edge to the backing grid.
+    // At 24 pt, rounding the height alone makes the mark a pixel too tall.
+    let edge = |value: f64| (value * scale).round() / scale;
+    let x = edge((side - width) / 2.);
+    let y = edge((side - height) / 2.);
     if let Some(context) = NSGraphicsContext::currentContext() {
         context.setImageInterpolation(NSImageInterpolation::High);
     }
     mark.drawInRect(rect(
-        (side - width) / 2.,
-        (side - height) / 2.,
-        width,
-        height,
+        x,
+        y,
+        edge((side + width) / 2.) - x,
+        edge((side + height) / 2.) - y,
     ));
 }
 
@@ -687,11 +692,14 @@ impl Status {
         } else {
             (NSColor::blackColor(), NSColor::whiteColor())
         };
-        // Give AppKit the complete tile so that the SVG keeps its fractional
-        // centered destination, independent of NSImageView's alignment rules.
+        let scale = self
+            .item
+            .button(m)
+            .and_then(|button| button.window())
+            .map_or(1., |window| window.backingScaleFactor());
         let mark = self.mark.clone();
         let draw = block2::RcBlock::new(move |_: NSRect| {
-            draw_app_mark(&mark, 24.);
+            draw_app_mark(&mark, 24., scale);
             objc2::runtime::Bool::YES
         });
         let artwork =
@@ -767,11 +775,6 @@ impl Status {
                 m,
             };
             let mut y = 0.;
-            let scale = self
-                .item
-                .button(m)
-                .and_then(|button| button.window())
-                .map_or(1., |window| window.backingScaleFactor());
             for (a, header) in accounts.iter().zip(&headers) {
                 list.account(a, header, y, scale);
                 y += account_height(a, header.height) + 14.;

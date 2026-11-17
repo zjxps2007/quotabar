@@ -778,7 +778,7 @@ pub fn quota_percent(ui: &mut Ui, text: &str, color: Color32) -> Option<Response
         11.,
         Face::TabularDigits(DigitWeight::Semibold),
         color,
-        LineBox::Stack,
+        LineBox::CenteredStack,
     )
 }
 

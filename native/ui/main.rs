@@ -37,6 +37,8 @@ struct Capture {
     path: String,
     #[cfg(target_os = "macos")]
     requested_height: f32,
+    #[cfg(target_os = "macos")]
+    backing_size: Option<[usize; 2]>,
     after: Instant,
     requested: bool,
     painted: std::sync::Arc<std::sync::Mutex<Option<std::sync::Arc<egui::ColorImage>>>>,
@@ -96,14 +98,29 @@ impl Capture {
         });
         #[cfg(target_os = "macos")]
         let pixels = {
-            let expected = platform::capture_backing_size(_frame, self.requested_height);
+            let Some((expected, screen_limited)) =
+                platform::capture_backing_size(_frame, self.requested_height)
+            else {
+                ctx.request_repaint_after(Duration::from_millis(25));
+                return None;
+            };
+            if self.backing_size.replace(expected) != Some(expected) {
+                // A moving Dock changes the work area after the first resize.
+                // Use the reference capture's settling interval while constrained.
+                let settle = if screen_limited {
+                    Duration::from_secs(2)
+                } else {
+                    Duration::from_millis(200)
+                };
+                self.after = Instant::now() + settle;
+                self.requested = false;
+            }
             pixels.filter(|image| {
-                let matches = expected.is_none_or(|size| image.size == size);
-                if !matches {
+                if image.size != expected {
                     // WindowServer resized the view while its OpenGL frame was in flight.
                     self.requested = false;
                 }
-                matches
+                self.requested
             })
         };
         if pixels.is_none() {
@@ -304,6 +321,8 @@ impl Dashboard {
                     path,
                     #[cfg(target_os = "macos")]
                     requested_height: height,
+                    #[cfg(target_os = "macos")]
+                    backing_size: None,
                     after: Instant::now() + Duration::from_millis(200),
                     requested: false,
                     painted: Default::default(),

@@ -323,7 +323,10 @@ pub fn dialog_owner(frame: &eframe::Frame, title: &str, open: bool) {
     }
 }
 #[cfg(target_os = "macos")]
-pub fn capture_backing_size(frame: &eframe::Frame, requested_height: f32) -> Option<[usize; 2]> {
+pub fn capture_backing_size(
+    frame: &eframe::Frame,
+    requested_height: f32,
+) -> Option<([usize; 2], bool)> {
     use objc2_app_kit::NSView;
     use objc2_foundation::NSSize;
     use raw_window_handle::{HasWindowHandle, RawWindowHandle};
@@ -333,26 +336,27 @@ pub fn capture_backing_size(frame: &eframe::Frame, requested_height: f32) -> Opt
     };
     let view = unsafe { handle.ns_view.cast::<NSView>().as_ref() };
     let window = view.window()?;
-    if let Some(screen) = window.screen() {
-        let available = window
-            .contentRectForFrameRect(screen.visibleFrame())
-            .size
-            .height;
-        let height = f64::from(requested_height)
-            .min(available)
-            .max(window.contentMinSize().height);
-        let size = view.bounds().size;
-        // The Dock can change the available height after the initial resize.
-        // AppKit permits a wider window and positions it independently.
-        if size.height > height + 0.5 / window.backingScaleFactor() {
-            window.setContentSize(NSSize::new(size.width, height));
-        }
+    let available = window
+        .contentRectForFrameRect(window.screen()?.visibleFrame())
+        .size
+        .height;
+    let requested = f64::from(requested_height);
+    let height = requested.min(available).max(window.contentMinSize().height);
+    let size = view.bounds().size;
+    if size.height > height + 0.5 / window.backingScaleFactor() {
+        window.setContentSize(NSSize::new(size.width, height));
     }
-    let pixels = view.convertRectToBacking(view.bounds()).size;
-    Some([
-        pixels.width.round() as usize,
-        pixels.height.round() as usize,
-    ])
+    // WindowServer can still expose the old view bounds after setContentSize.
+    let mut bounds = view.bounds();
+    bounds.size.height = bounds.size.height.min(height);
+    let pixels = view.convertRectToBacking(bounds).size;
+    Some((
+        [
+            pixels.width.round() as usize,
+            pixels.height.round() as usize,
+        ],
+        height < requested,
+    ))
 }
 
 #[cfg(target_os = "macos")]

@@ -846,8 +846,13 @@ impl Dashboard {
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 4.;
                 let (dot, _) = ui.allocate_exact_size(Vec2::splat(4.), Sense::hover());
+                let observed = local_date(&a.snapshot["observedAt"]).map_or_else(
+                    || "스냅샷 대기 중".into(),
+                    |date| format!("마지막 데이터 {}", crate::platform::quota_time(date, false)),
+                );
+                let caption = system_label(ui, &observed, 10., false, p.tertiary);
                 ui.painter().circle_filled(
-                    dot.center(),
+                    pos2(dot.center().x, caption.rect.center().y),
                     2.,
                     if a.error.is_some() {
                         p.warning
@@ -855,11 +860,6 @@ impl Dashboard {
                         p.tint(a.provider)
                     },
                 );
-                let observed = local_date(&a.snapshot["observedAt"]).map_or_else(
-                    || "스냅샷 대기 중".into(),
-                    |date| format!("마지막 데이터 {}", crate::platform::quota_time(date, false)),
-                );
-                system_label(ui, &observed, 10., false, p.tertiary);
                 if a.error.is_some() {
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         label(ui, "이전 값", 10., false, p.tertiary)

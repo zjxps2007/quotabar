@@ -481,7 +481,7 @@ static NSDictionary *visibleText(NSURL *frame, NSString *operation) {
         NSString *row = [pieces componentsJoinedByString:@" "];
         NSRange name = [row rangeOfString:@"atlas.*?north" options:NSCaseInsensitiveSearch | NSRegularExpressionSearch];
         NSString *visibleModel = name.location == NSNotFound ? @"" : [row substringWithRange:name];
-        return @{@"modelEnds": @(suffix && !middle), @"rowTotal": @(total), @"visibleModel": visibleModel, @"recognized": body};
+        return @{@"modelEnds": suffix && !middle ? @YES : @NO, @"rowTotal": @(total), @"visibleModel": visibleModel, @"recognized": body};
     }
     if ([operation isEqual:@"activityTotals"]) {
         BOOL claude = [letters containsString:@"560tokens"], codex = [letters containsString:@"810tokens"];
