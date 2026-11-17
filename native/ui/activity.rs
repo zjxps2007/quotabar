@@ -115,12 +115,19 @@ struct DayInput {
     hovered: Option<Id>,
     pressed: Option<Id>,
     active_visible: bool,
+    active_card: Option<Id>,
+    focused_card: Option<Id>,
 }
 
 #[cfg(target_os = "macos")]
 impl DaySelection {
     fn update(&mut self, ctx: &Context, input: DayInput, scanned_at: &Value) {
-        let next = if self.scanned_at != *scanned_at || ctx.input(|i| i.key_pressed(Key::Escape)) {
+        // SwiftUI's onExitCommand belongs to the focused activity card. An
+        // accessibility press or pointer hover alone does not focus that card.
+        let exit_command = input.active_card.is_some()
+            && input.active_card == input.focused_card
+            && ctx.input(|i| i.key_pressed(Key::Escape));
+        let next = if self.scanned_at != *scanned_at || exit_command {
             None
         } else if input.pressed.is_some() {
             input.pressed
@@ -486,6 +493,13 @@ impl Dashboard {
                         day_input.pressed = Some(response.id);
                     }
                     let highlighted = self.activity_selection.active == Some(response.id);
+                    let card = Id::new(("activity card", provider));
+                    if highlighted {
+                        day_input.active_card = Some(card);
+                    }
+                    if ui.memory(|memory| memory.had_focus_last_frame(response.id)) {
+                        day_input.focused_card = Some(card);
+                    }
                     day_input.active_visible |= highlighted && ui.is_rect_visible(cell);
                     let zoom = if highlighted
                         && !objc2_app_kit::NSWorkspace::sharedWorkspace()

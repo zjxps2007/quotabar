@@ -429,11 +429,13 @@ def capture_windows(dashboard, program, folder, library, fixture, output, theme,
             if value.get("_0") != route:
                 raise ValueError(f"Expected route {route}, got {value}")
 
-        def capture(route, sheet=False):
+        def capture(route, sheet=False, *, diagnostic=False):
             time.sleep(0.7)  # Allow the AppKit sheet/route transition to finish before capturing.
             try:
                 observed[route] = controls.request("snapshot", "sheet" if sheet else "dashboard")
-                shutil.copyfile(folder / "frame.png", output / f"{route}-{theme}.png")
+                destination = output / "diagnostic" if diagnostic else output
+                destination.mkdir(exist_ok=True)
+                shutil.copyfile(folder / "frame.png", destination / f"{route}-{theme}.png")
                 if route in ("dashboard", "accounts", "connect-claude", "connect-gemini", "remove"):
                     # A second frame from the untouched window measures e.g. caret blinking.
                     time.sleep(0.55)
@@ -619,6 +621,12 @@ def capture_windows(dashboard, program, folder, library, fixture, output, theme,
                         controls.request("activityEscape")
                         capture("activity-escape")
                         observed["activityDayAfterEscape"] = controls.request("activityDetail")
+                        controls.request("clickButton", used)
+                        capture("activity-pointer-detail", diagnostic=True)
+                        observed["activityPointerDayOpened"] = controls.request("activityDetail")
+                        controls.request("activityEscape")
+                        capture("activity-pointer-escape", diagnostic=True)
+                        observed["activityPointerDayAfterEscape"] = controls.request("activityDetail")
                         show("accounts")
                         show("dashboard")
                         scroll_activity_to_bottom(controls)
@@ -857,6 +865,14 @@ def compare_windows(dashboard, work, original, library, *, allow_raster_differen
                              and results[side][theme].get("activityDayReturnScroll") == "bottom"
                              and results[side][theme].get("activityDayAfterReturn", {}).get("model") is False
                              for side in ("original", "rust") for theme in dashboard.THEMES))
+    pointer_escape_states = {
+        side: [results[side][theme].get("activityPointerDayAfterEscape", {}).get("model")
+               for theme in dashboard.THEMES] for side in ("original", "rust")}
+    day_detail_matches &= (
+        all(isinstance(value, bool) for value in pointer_escape_states["original"])
+        and pointer_escape_states["original"] == pointer_escape_states["rust"]
+        and all(results[side][theme].get("activityPointerDayOpened", {}).get("model") is True
+                for side in ("original", "rust") for theme in dashboard.THEMES))
     long_model_matches = all(results[side][theme].get("activityLongModel", {}).get(key) is True
                              for side in ("original", "rust") for theme in dashboard.THEMES
                              for key in ("modelEnds", "rowTotal"))
