@@ -205,7 +205,9 @@ impl Dashboard {
         }
         #[cfg(target_os = "macos")]
         if page == "accounts" && self.route != page {
-            self.focus_query = true;
+            // SwiftUI chooses the search field for a new window, but leaves
+            // keyboard focus on the window when changing an existing page.
+            self.focus_query = self.visible.is_none();
         } else if self.route == "accounts" && page != "accounts" {
             // The reference owns these filters in the AccountsView's local state.
             self.account_search = None;

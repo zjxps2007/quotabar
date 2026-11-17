@@ -664,6 +664,29 @@ static NSDictionary *perform(NSDictionary *request) {
     NSWindow *window = dashboardWindow();
     if (!window) return @{@"pending": @"dashboard window"};
     NSString *op = request[@"op"], *label = request[@"label"];
+    if ([op isEqual:@"accountSearchFocused"]) {
+        NSMutableArray<NSView *> *views = [NSMutableArray arrayWithObject:window.contentView];
+        NSTextField *editable = nil;
+        NSUInteger editableCount = 0;
+        for (NSUInteger index = 0; index < views.count; ++index) {
+            NSView *view = views[index];
+            if ([view isKindOfClass:NSTextField.class]) {
+                NSTextField *field = (NSTextField *)view;
+                if (!field.isHiddenOrHasHiddenAncestor &&
+                    [field.placeholderString isEqual:@"계정 이름 또는 이메일 검색"])
+                    return @{@"focused": @(field.currentEditor != nil)};
+                if (!field.isHiddenOrHasHiddenAncestor && field.isEditable) {
+                    editable = field;
+                    ++editableCount;
+                }
+            }
+            [views addObjectsFromArray:view.subviews];
+        }
+        // SwiftUI may draw its prompt separately from the platform text field.
+        // The accounts page has exactly one visible editable field.
+        if (editableCount == 1) return @{@"focused": @(editable.currentEditor != nil)};
+        return @{@"pending": @"account search field"};
+    }
     if ([op isEqual:@"captureGeometry"]) {
         NSView *view = window.contentView;
         return @{@"frame": rectangle(window.frame), @"view": rectangle(view.bounds),

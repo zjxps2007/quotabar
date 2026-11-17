@@ -464,6 +464,7 @@ def capture_windows(dashboard, program, folder, library, fixture, output, theme,
                     controls.request("size")
                 capture(route)
                 if route == "accounts":
+                    observed["accountSearchInitialFocus"] = controls.request("accountSearchFocused")
                     account = fixture["settings"]["accounts"][0]
                     contact = deepcopy(fixture)
                     contact["snapshots"][1]["email"] = ACCOUNT_EMAIL
@@ -504,7 +505,12 @@ def capture_windows(dashboard, program, folder, library, fixture, output, theme,
                     dashboard.send(app.stdin, {"state": {"_0": {**fixture, "message": long_message.strip()}}})
                     capture("message-wrapped")
                     dashboard.send(app.stdin, {"state": {"_0": fixture}})
+            show("dashboard")
             show("accounts")
+            observed["accountSearchDashboardFocus"] = controls.request("accountSearchFocused")
+            show("settings")
+            show("accounts")
+            observed["accountSearchSettingsFocus"] = controls.request("accountSearchFocused")
             time.sleep(0.35)
             controls.request("press", "계정 연결")
             controls.request("sheet", expected={"sheet": True})
@@ -861,6 +867,13 @@ def compare_windows(dashboard, work, original, library, *, allow_raster_differen
         long_model_matches = long_model_matches and bool(original) and original == rust
     results["longActivityModelIdentical"] = long_model_matches
     results["activityDetailIdentical"] = day_detail_matches
+    search_focus_matches = all(
+        results[side][theme].get(name) == {"focused": focused}
+        for side in ("original", "rust") for theme in dashboard.THEMES
+        for name, focused in (("accountSearchInitialFocus", True),
+                              ("accountSearchDashboardFocus", False),
+                              ("accountSearchSettingsFocus", False)))
+    results["accountSearchFocusIdentical"] = search_focus_matches
     errors = comparison_errors(results["comparisons"], 70, require_content=True,
                                strict_pixels=not allow_raster_differences)
     results["appearanceCheck"] = {"passed": not errors,
@@ -868,7 +881,7 @@ def compare_windows(dashboard, work, original, library, *, allow_raster_differen
     (dest / "comparison.json").write_text(json.dumps(results, ensure_ascii=False, indent=2))
     return (app_mark_matches and message_matches and copied_accounts and documents_match and scroll_matches
             and activity_matches and switch_matches and frames_match and refresh_matches and manage_matches and reopen_matches
-            and quota_error_matches and day_detail_matches and long_model_matches
+            and quota_error_matches and day_detail_matches and long_model_matches and search_focus_matches
             and not errors)
 
 
