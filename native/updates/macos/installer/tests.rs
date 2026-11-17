@@ -132,6 +132,8 @@ fn signed_stage_helper_and_startup_preserve_the_original_until_handoff() {
     assert!(prepare_in(&updates, &plan, &pem).is_err());
     assert!(installer.join("marker").is_file() && !paths.incoming.exists() && !job.exists());
     fs::remove_dir_all(&installer).unwrap();
+    // The ordinary installer also accepts an intact stage without a signing key.
+    fs::remove_file(stage.join("update-manifest.sig")).unwrap();
     prepare_in(&updates, &plan, &pem).unwrap();
     assert_eq!(fs::read(&job).unwrap(), plan);
     assert_eq!(

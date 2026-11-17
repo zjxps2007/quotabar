@@ -24,7 +24,7 @@ pub(super) fn file_response(
     use std::io::Read;
     let name = match transfer.resource {
         Resource::Feed => "feed.json",
-        Resource::Asset => transfer
+        Resource::Asset | Resource::OptionalAsset => transfer
             .url
             .rsplit('/')
             .next()

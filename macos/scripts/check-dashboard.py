@@ -199,6 +199,7 @@ def main():
                        for path in libraries), (name, libraries)
     write_fixtures()
     sizes = {}
+    movement = {}
     with tempfile.TemporaryDirectory() as home, ExitStack() as stack:
         library = dashboard_actions.build_driver(Path(home))
         check_monitor()
@@ -219,6 +220,9 @@ def main():
                 for route in ROUTES:
                     path = REPORT / f"{route}-{theme}.png"
                     sizes[path.name] = capture(child, route, path)
+                    movement[path.name] = controls.request("windowMovement", expected={
+                        "movable": False, "backgroundMovable": False,
+                    })
                     if route == "dashboard" and theme == THEMES[0]:
                         check_resize(child, controls, path, sizes[path.name])
             send(child.stdin, {"close": {}})
@@ -227,6 +231,7 @@ def main():
             if child.poll() is None:
                 child.kill()
     (REPORT / "result.json").write_text(json.dumps(sizes, indent=2))
+    (REPORT / "window-movement.json").write_text(json.dumps(movement, indent=2))
     print(f"PASS {len(sizes)} packaged macOS dashboard and dialog captures, handshake, routing and shutdown")
 
 

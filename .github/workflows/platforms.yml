@@ -21,7 +21,7 @@ jobs:
       - name: Prepare isolated legacy validation
         id: validation
         run: python scripts/prepare_legacy_validation.py
-      - name: Automatic install, restart and rollback with a disposable signing key
+      - name: Automatic install, restart and rollback with signed and unsigned packages
         shell: pwsh
         working-directory: ${{ steps.validation.outputs.root }}
         run: ./windows/scripts/test-updater.ps1
@@ -43,7 +43,7 @@ jobs:
         run: bash scripts/test.sh
       - name: Native Rust contracts
         run: cargo test --locked --workspace --all-targets
-      - name: Signed update release tooling
+      - name: Update manifest and optional signature tooling
         run: python3 -m unittest discover -s scripts/tests -v
       - name: Build and package application and Dashboard helper
         id: package

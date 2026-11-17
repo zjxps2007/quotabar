@@ -687,6 +687,11 @@ static NSDictionary *perform(NSDictionary *request) {
         if (editableCount == 1) return @{@"focused": @(editable.currentEditor != nil)};
         return @{@"pending": @"account search field"};
     }
+    if ([op isEqual:@"windowMovement"]) {
+        NSWindow *selected = window.attachedSheet ?: window;
+        return @{@"movable": @([selected isMovable]),
+                 @"backgroundMovable": @([selected isMovableByWindowBackground])};
+    }
     if ([op isEqual:@"captureGeometry"]) {
         NSView *view = window.contentView;
         return @{@"frame": rectangle(window.frame), @"view": rectangle(view.bounds),

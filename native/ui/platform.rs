@@ -1,4 +1,36 @@
 #[cfg(windows)]
+fn prevent_window_drag(hwnd: windows_sys::Win32::Foundation::HWND) -> bool {
+    use windows_sys::Win32::{
+        Foundation::{HWND, LPARAM, LRESULT, WPARAM},
+        UI::{
+            Shell::{DefSubclassProc, RemoveWindowSubclass, SetWindowSubclass},
+            WindowsAndMessaging::*,
+        },
+    };
+    unsafe extern "system" fn fixed_position(
+        hwnd: HWND,
+        message: u32,
+        w: WPARAM,
+        l: LPARAM,
+        id: usize,
+        _: usize,
+    ) -> LRESULT {
+        unsafe {
+            if (message == WM_NCLBUTTONDOWN && w == HTCAPTION as usize)
+                || (message == WM_SYSCOMMAND && w & 0xfff0 == SC_MOVE as usize)
+            {
+                return 0;
+            }
+            if message == WM_NCDESTROY {
+                RemoveWindowSubclass(hwnd, Some(fixed_position), id);
+            }
+            DefSubclassProc(hwnd, message, w, l)
+        }
+    }
+    unsafe { SetWindowSubclass(hwnd, Some(fixed_position), 0x51424d56, 0) != 0 }
+}
+
+#[cfg(windows)]
 pub fn constrain_dashboard_window(cc: &eframe::CreationContext<'_>) {
     use raw_window_handle::{HasWindowHandle, RawWindowHandle};
     use windows_sys::Win32::{
@@ -53,6 +85,7 @@ pub fn constrain_dashboard_window(cc: &eframe::CreationContext<'_>) {
         && let RawWindowHandle::Win32(window) = handle.as_raw()
     {
         unsafe { SetWindowSubclass(window.hwnd.get() as HWND, Some(sizing), 1, 0) };
+        prevent_window_drag(window.hwnd.get() as HWND);
     }
 }
 
@@ -282,6 +315,7 @@ pub fn dialog_owner(frame: &eframe::Frame, title: &str, open: bool) {
         let Some(window) = dialog_hwnd(frame, title) else {
             return;
         };
+        prevent_window_drag(window);
         if GetWindowLongPtrW(window, GWLP_HWNDPARENT) != owner as isize {
             SetWindowLongPtrW(window, GWLP_HWNDPARENT, owner as isize);
         }
@@ -312,6 +346,8 @@ pub fn dialog_owner(frame: &eframe::Frame, title: &str, open: bool) {
     if open {
         for child in NSApplication::sharedApplication(m).windows().iter() {
             if child != owner && child.title().to_string() == title {
+                child.setMovable(false);
+                child.setMovableByWindowBackground(false);
                 if owner.attachedSheet().is_none() {
                     owner.beginSheet_completionHandler(&child, None);
                 }
@@ -389,6 +425,8 @@ pub fn restore_window(cc: &eframe::CreationContext<'_>) {
     };
     let view = unsafe { h.ns_view.cast::<NSView>().as_ref() };
     if let Some(window) = view.window() {
+        window.setMovable(false);
+        window.setMovableByWindowBackground(false);
         let name = NSString::from_str("DashboardWindow");
         window.setIdentifier(Some(&NSString::from_str("dashboard")));
         if !window.setFrameUsingName(&name) {
@@ -397,3 +435,7 @@ pub fn restore_window(cc: &eframe::CreationContext<'_>) {
         window.setFrameAutosaveName(&name);
     }
 }
+
+#[cfg(all(test, windows))]
+#[path = "platform/tests.rs"]
+mod tests;

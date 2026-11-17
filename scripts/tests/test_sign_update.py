@@ -72,6 +72,34 @@ class SigningTests(unittest.TestCase):
         self.assertEqual(manifest['version'], '0.1.1')
         self.assertNotIn(b'PRIVATE KEY', (self.output / 'update-manifest.json').read_bytes())
 
+    def unsigned(self, explicit=False):
+        env = dict(os.environ)
+        env.pop('QUOTABAR_UPDATE_SIGNING_KEY', None)
+        if explicit:
+            env['QUOTABAR_UPDATE_SIGNING_KEY'] = 'not a private key'
+        command = [sys.executable, str(self.repo / 'scripts/sign-update.py'),
+                   '--artifacts', str(self.assets), '--output', str(self.output)]
+        if explicit:
+            command.append('--unsigned')
+        result = subprocess.run(command, env=env, capture_output=True)
+        self.assertEqual(result.returncode, 0, result.stderr.decode())
+        self.assertFalse((self.output / 'update-manifest.sig').exists())
+        manifest = json.loads((self.output / 'update-manifest.json').read_bytes())
+        self.assertEqual((manifest['version'], manifest['build']), ('0.1.1', 7))
+        self.assertEqual(len(manifest['assets']), 3)
+        for asset in manifest['assets']:
+            payload = (self.assets / asset['name']).read_bytes()
+            self.assertEqual(asset['bytes'], len(payload))
+            self.assertEqual(asset['sha256'], hashlib.sha256(payload).hexdigest())
+
+    def test_missing_private_key_produces_unsigned_manifest(self):
+        self.unsigned()
+
+    def test_explicit_unsigned_mode_clears_old_signature_and_ignores_key_environment(self):
+        self.sign()
+        self.assertTrue((self.output / 'update-manifest.sig').is_file())
+        self.unsigned(explicit=True)
+
     def test_mismatched_commit_is_rejected(self):
         self.win['installer_commit'] = '0' * 40
         self.metadata(); self.sign(False)

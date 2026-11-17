@@ -152,6 +152,19 @@ def prepare(destination=None):
         raise ValueError("Unexpected archived reference builder")
     text = text.replace(anchor, '    (work / "NOTICE").write_bytes((dashboard.ROOT / "NOTICE").read_bytes())\n    (work / "shared/version.json").write_bytes((dashboard.ROOT / "shared/version.json").read_bytes())\n' + anchor)
     comparison.write_text(text, encoding="utf-8")
+    # Preserve the signed helper/tamper cases. The three resident scenarios now
+    # exercise actual discovery, download, restart and rollback with no .sig file.
+    integration = destination / "windows/tests/QuotaBar.Tests/UpdateIntegration.cs"
+    if integration.is_file():
+        text = integration.read_text(encoding="utf-8")
+        writes = 'PrivateFiles.Write(Path.Combine(directory, "update-manifest.json"), manifest); PrivateFiles.Write(Path.Combine(directory, "update-manifest.sig"), signature);'
+        feed = '            if (resident)\n            {\n                PrivateFiles.Write(Path.Combine(directory, "feed.json")'
+        if text.count(writes) != 1 or text.count(feed) != 1 or text.count('signed payload') != 1:
+            raise ValueError("Unexpected archived update integration fixture")
+        text = text.replace(writes, writes.replace('; PrivateFiles.Write', '; if (!resident) PrivateFiles.Write'))
+        text = text.replace(feed, '            if (resident)\n            {\n                Suite.Check(!File.Exists(Path.Combine(directory, "update-manifest.sig")));\n                PrivateFiles.Write(Path.Combine(directory, "feed.json")')
+        text = text.replace('signed payload', '{(resident ? "unsigned" : "signed")} payload')
+        integration.write_text(text, encoding="utf-8")
     # The resource symlink above may have been materialized before replacing shared/.
     if os.name == "nt":
         resources = destination / "macos/Sources/QuotaBar/Resources"

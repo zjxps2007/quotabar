@@ -5,7 +5,7 @@ use super::{
     validate_version,
 };
 use crate::files::{ensure_private_directory, invalid, read_file, reject_links, write_private};
-use crate::updates::{PUBLIC_KEY, Platform, read_signed_manifest, verify_file_while};
+use crate::updates::{PUBLIC_KEY, Platform, read_update_manifest, verify_file_while};
 use serde::Deserialize;
 use std::{
     fs, io,
@@ -97,7 +97,7 @@ pub(super) fn prepare_job(
     let update = &plan.staged.update;
     let stage = &plan.staged.directory;
     let offered = Platform::for_asset(&update.release).map_err(integrity)?;
-    let checked = read_signed_manifest(
+    let checked = read_update_manifest(
         &update.release,
         offered,
         &plan.current_version,

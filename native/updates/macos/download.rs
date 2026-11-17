@@ -55,8 +55,10 @@ define_class!(
             request: &NSURLRequest,
             complete: &DynBlock<dyn Fn(*mut NSURLRequest)>,
         ) {
-            let allowed = matches!(self.ivars().resource, Resource::Asset)
-                && request.URL().is_some_and(|u| https(&u));
+            let allowed = matches!(
+                self.ivars().resource,
+                Resource::Asset | Resource::OptionalAsset
+            ) && request.URL().is_some_and(|u| https(&u));
             complete.call((if allowed {
                 ptr::from_ref(request).cast_mut()
             } else {
@@ -141,7 +143,7 @@ impl Resource {
         check_cancel(cancel)?;
         let (request_timeout, resource_timeout) = match self {
             Self::Feed => (20., 30.),
-            Self::Asset => (30., 20. * 60.),
+            Self::Asset | Self::OptionalAsset => (30., 20. * 60.),
         };
         autoreleasepool(|_| {
             let config = NSURLSessionConfiguration::ephemeralSessionConfiguration();
@@ -195,16 +197,16 @@ impl Resource {
                         https,
                     }) => {
                         match (self, status) {
-                            (Self::Feed, 404) => return Ok(false),
+                            (Self::Feed | Self::OptionalAsset, 404) => return Ok(false),
                             (Self::Feed, 403 | 429) => return Err(Error::RateLimited),
                             (Self::Feed, 200) if length <= limit as i64 => {}
                             (Self::Feed, _) => return Err(Error::Network(-1011)),
-                            (Self::Asset, 200) if https => {
+                            (Self::Asset | Self::OptionalAsset, 200) if https => {
                                 if length > limit as i64 {
                                     return Err(Error::Network(-1103));
                                 }
                             }
-                            (Self::Asset, _) => return Err(Error::Download),
+                            (Self::Asset | Self::OptionalAsset, _) => return Err(Error::Download),
                         }
                         headers = true;
                     }

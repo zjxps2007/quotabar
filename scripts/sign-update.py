@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Sign the exact, verified release assets for both native updaters."""
+"""Prepare the verified update manifest, optionally signing for older clients."""
 import argparse
 import hashlib
 import json
@@ -27,7 +27,9 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--artifacts', type=Path, required=True)
     parser.add_argument('--output', type=Path, required=True)
-    parser.add_argument('--private-key', type=Path, help='Otherwise use QUOTABAR_UPDATE_SIGNING_KEY from the environment.')
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument('--private-key', type=Path, help='Optionally sign with an existing private key.')
+    mode.add_argument('--unsigned', action='store_true', help='Create the manifest without a signing key or signature.')
     args = parser.parse_args()
     repo = Path(__file__).resolve().parent.parent
     version = json.loads((repo / 'shared/version.json').read_text())
@@ -35,7 +37,7 @@ def main():
     require(type(version['build']) is int and version['build'] > 0, 'Invalid build number.')
     commit = subprocess.check_output(['git', '-C', str(repo), 'rev-parse', 'HEAD'], text=True).strip()
     require(not subprocess.check_output(['git', '-C', str(repo), 'status', '--porcelain', '--untracked-files=normal'], text=True).strip(),
-            'Release signing requires a clean checkout.')
+            'Release preparation requires a clean checkout.')
 
     def find(name):
         files = list(args.artifacts.rglob(name))
@@ -65,6 +67,14 @@ def main():
     manifest_path = args.output / 'update-manifest.json'
     signature_path = args.output / 'update-manifest.sig'
     payload = (json.dumps(manifest, sort_keys=True, separators=(',', ':')) + '\n').encode()
+    if manifest_path.is_symlink() or signature_path.is_symlink():
+        raise ValueError('Update output files must not be symbolic links.')
+    if args.unsigned or (args.private_key is None and not os.environ.get('QUOTABAR_UPDATE_SIGNING_KEY')):
+        signature_path.unlink(missing_ok=True)
+        manifest_path.write_bytes(payload)
+        print('Prepared unsigned update manifest:', version['version'], 'build', version['build'], 'source', commit)
+        print('Manifest SHA256:', sha256(manifest_path))
+        return
     with tempfile.TemporaryDirectory(prefix='quotabar-sign-') as temporary:
         key = args.private_key
         if key is None:

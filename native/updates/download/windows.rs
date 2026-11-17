@@ -51,16 +51,16 @@ impl Response<'_> {
     ) -> Result<bool, Error> {
         self.running()?;
         let head = match (self.transfer.resource, status) {
-            (Resource::Feed, 404) => Head::NoRelease,
+            (Resource::Feed | Resource::OptionalAsset, 404) => Head::NoRelease,
             (Resource::Feed, 403 | 429) => return Err(Error::RateLimited),
-            (Resource::Asset, 301 | 302 | 307 | 308) => Head::Redirect(
+            (Resource::Asset | Resource::OptionalAsset, 301 | 302 | 307 | 308) => Head::Redirect(
                 location
                     .ok_or_else(|| io::Error::other("Update redirect missing"))?
                     .into(),
             ),
             (_, 200) if length.is_none_or(|len| len <= self.transfer.limit) => Head::Body,
             (Resource::Feed, _) => return Err(Error::Network(NETWORK)),
-            (Resource::Asset, _) => return Err(Error::Download),
+            (Resource::Asset | Resource::OptionalAsset, _) => return Err(Error::Download),
         };
         let read = matches!(head, Head::Body);
         self.head = Some(head);
@@ -79,7 +79,9 @@ impl Response<'_> {
         if bytes.len() as u64 > self.transfer.limit - self.received {
             return Err(match self.transfer.resource {
                 Resource::Feed => Error::Network(NETWORK),
-                Resource::Asset => io::Error::other("Update exceeds declared size").into(),
+                Resource::Asset | Resource::OptionalAsset => {
+                    io::Error::other("Update exceeds declared size").into()
+                }
             });
         }
         self.transfer.output.write_all(bytes)?;
@@ -102,7 +104,7 @@ pub fn fetch_with(
     let end = Instant::now()
         + match transfer.resource {
             Resource::Feed => IDLE,
-            Resource::Asset => Duration::from_secs(20 * 60),
+            Resource::Asset | Resource::OptionalAsset => Duration::from_secs(20 * 60),
         };
     let mut response = Response {
         transfer,

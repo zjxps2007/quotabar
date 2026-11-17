@@ -118,7 +118,7 @@ struct InstallResult {
     message: String,
 }
 
-fn read_signed_manifest(
+fn read_update_manifest(
     release: &Release,
     platform: Platform,
     current: &str,
@@ -132,14 +132,14 @@ fn read_signed_manifest(
     for path in [&manifest, &signature] {
         crate::files::reject_links(path)?;
     }
-    verify_manifest(
-        release,
-        platform,
-        current,
-        &read_file(&manifest, MAX_MANIFEST)?,
-        &read_file(&signature, 128)?,
-        key,
-    )
+    let manifest = read_file(&manifest, MAX_MANIFEST)?;
+    match read_file(&signature, 128) {
+        Ok(signature) => verify_manifest(release, platform, current, &manifest, &signature, key),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            verify_unsigned_manifest(release, platform, current, &manifest)
+        }
+        Err(error) => Err(error),
+    }
 }
 
 fn verified_stage(
@@ -149,7 +149,7 @@ fn verified_stage(
     stage: &Path,
     key: &str,
 ) -> io::Result<()> {
-    let checked = read_signed_manifest(&update.release, platform, current, stage, key)?;
+    let checked = read_update_manifest(&update.release, platform, current, stage, key)?;
     if checked != *update {
         return Err(invalid("Staged update mismatch"));
     }
@@ -290,12 +290,27 @@ pub fn verify_manifest(
     {
         return Err(invalid("Invalid update version or signature"));
     }
-    let asset = release.validate_asset(platform)?;
+    release.validate_asset(platform)?;
     let key = VerifyingKey::from_public_key_pem(pem).map_err(|_| invalid("Invalid update key"))?;
     let signature =
         Signature::from_der(signature).map_err(|_| invalid("Invalid update signature"))?;
     key.verify(bytes, &signature)
         .map_err(|_| invalid("Update signature mismatch"))?;
+    verify_unsigned_manifest(release, platform, installed, bytes)
+}
+
+/// HTTPS release metadata supplies the archive's size and SHA-256. A separate
+/// signing key is optional; the manifest must still describe that exact asset.
+pub fn verify_unsigned_manifest(
+    release: &Release,
+    platform: Platform,
+    installed: &str,
+    bytes: &[u8],
+) -> io::Result<Verified> {
+    if bytes.len() > MAX_MANIFEST || release.version()? <= installed.parse()? {
+        return Err(invalid("Invalid update version or manifest"));
+    }
+    let asset = release.validate_asset(platform)?;
     let manifest: Manifest = serde_json::from_slice(bytes)?;
     let mut matches = manifest.assets.iter().filter(|a| a.name == asset.name);
     let signed = matches
@@ -362,6 +377,29 @@ mod tests {
     const MANIFEST: &[u8] = include_bytes!("../shared/fixtures/update-manifest.json");
     const SIGNATURE: &[u8] = include_bytes!("../shared/fixtures/update-manifest.sig");
     const KEY: &str = include_str!("../shared/fixtures/update-test-public.pem");
+
+    #[test]
+    fn unsigned_manifest_is_bound_to_the_official_release_metadata() {
+        let release = parse_feed(FEED, Platform::MacArm64).unwrap().unwrap();
+        let verify = |release: &Release, current: &str, bytes: &[u8]| {
+            verify_unsigned_manifest(release, Platform::MacArm64, current, bytes)
+        };
+        assert_eq!(verify(&release, "0.1.9", MANIFEST).unwrap().build, 7);
+        assert!(verify(&release, "0.1.10", MANIFEST).is_err());
+        let mut wrong_source = release.clone();
+        wrong_source.asset.as_mut().unwrap().url = "https://example.test/archive.zip".into();
+        assert!(verify(&wrong_source, "0.1.9", MANIFEST).is_err());
+        let mut wrong_size = release.clone();
+        wrong_size.asset.as_mut().unwrap().bytes += 1;
+        assert!(verify(&wrong_size, "0.1.9", MANIFEST).is_err());
+        let mut wrong_digest = release.clone();
+        wrong_digest.asset.as_mut().unwrap().sha256 = "0".repeat(64);
+        assert!(verify(&wrong_digest, "0.1.9", MANIFEST).is_err());
+        let mut manifest: serde_json::Value = serde_json::from_slice(MANIFEST).unwrap();
+        let duplicate = manifest["assets"][0].clone();
+        manifest["assets"].as_array_mut().unwrap().push(duplicate);
+        assert!(verify(&release, "0.1.9", &serde_json::to_vec(&manifest).unwrap()).is_err());
+    }
 
     #[test]
     fn signed_release_contract() {
