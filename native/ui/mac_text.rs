@@ -10,10 +10,12 @@ use core_graphics::{
     color_space::CGColorSpace,
     context::CGContext,
     geometry::{CGPoint, CGRect, CGSize},
+    path::CGPath,
 };
 use core_text::{
     font::{CTFont, CTFontRef},
-    line::{CTLine, CTLineRef},
+    framesetter::CTFramesetter,
+    line::CTLine,
     string_attributes::{
         kCTFontAttributeName, kCTForegroundColorFromContextAttributeName, kCTKernAttributeName,
         kCTUnderlineStyleAttributeName,
@@ -179,23 +181,6 @@ enum Truncation {
     Middle(u32),
 }
 
-#[repr(u32)]
-enum CTLineTruncationType {
-    End = 1,
-    Middle = 2,
-}
-
-// core-text 20 exposes CTLine but does not bind its truncation operation.
-#[link(name = "CoreText", kind = "framework")]
-unsafe extern "C" {
-    fn CTLineCreateTruncatedLine(
-        line: CTLineRef,
-        width: f64,
-        kind: CTLineTruncationType,
-        token: CTLineRef,
-    ) -> CTLineRef;
-}
-
 fn attributed(value: &str, size: f64, face: Face, tracking: f32) -> CFMutableAttributedString {
     // NSFont and CTFont are toll-free bridged. Use the AppKit font at its
     // logical point size so Retina drawing preserves its optical size.
@@ -263,41 +248,85 @@ struct LineMetrics {
     ascent: f32,
 }
 
+fn fitted_line(
+    text: &mut CFMutableAttributedString,
+    mode: objc2_app_kit::NSLineBreakMode,
+    width: f64,
+    height: f64,
+    scale: f64,
+) -> Option<CTLine> {
+    use objc2_app_kit::{NSMutableParagraphStyle, NSParagraphStyleAttributeName};
+    use objc2_foundation::{NSMutableAttributedString, NSRange};
+
+    if width <= 0. {
+        return None;
+    }
+    let style = NSMutableParagraphStyle::new();
+    style.setLineBreakMode(mode);
+    // NSMutableAttributedString is toll-free bridged with CFMutableAttributedString.
+    unsafe {
+        let native = &*text
+            .as_concrete_TypeRef()
+            .cast::<NSMutableAttributedString>();
+        native.addAttribute_value_range(
+            NSParagraphStyleAttributeName,
+            &style,
+            NSRange::new(0, native.length()),
+        );
+    }
+    let setter = CTFramesetter::new_with_attributed_string(text.as_concrete_TypeRef());
+    let range = CFRange::init(0, 0);
+    // SwiftUI measures the label in the available space, then draws it in its
+    // allocated pixel-aligned bounds. Core Text may choose a different suffix
+    // on the second layout even when both results fit the original proposal.
+    let (fit, _) = setter.suggest_frame_size_with_constraints(
+        range,
+        std::ptr::null(),
+        CGSize::new(width, height),
+    );
+    let fitted = ((fit.width * scale).ceil() / scale).min(width);
+    if fitted <= 0. {
+        return None;
+    }
+    let path = CGPath::from_rect(
+        CGRect::new(&CGPoint::new(0., 0.), &CGSize::new(fitted, height)),
+        None,
+    );
+    setter
+        .create_frame(range, &path)
+        .get_lines()
+        .into_iter()
+        .next()
+}
+
 fn raster(key: &Key, limit: usize) -> Option<(ColorImage, Vec2, LineMetrics)> {
     let size = f64::from(f32::from_bits(key.size));
     let scale = f64::from(f32::from_bits(key.scale));
     let make_line = |face| {
-        let line_for = |text: &str| {
-            let text = attributed(text, size, face, f32::from_bits(key.tracking));
-            CTLine::new_with_attributed_string(text.as_concrete_TypeRef())
-        };
-        let line = line_for(&key.text);
+        use objc2_app_kit::NSLineBreakMode;
+        let mut text = attributed(&key.text, size, face, f32::from_bits(key.tracking));
+        let line = CTLine::new_with_attributed_string(text.as_concrete_TypeRef());
         let (width, kind) = match key.truncation {
             Truncation::None => return line,
-            Truncation::End(bits) => (f64::from(f32::from_bits(bits)), CTLineTruncationType::End),
+            Truncation::End(bits) => (
+                f64::from(f32::from_bits(bits)),
+                NSLineBreakMode::ByTruncatingTail,
+            ),
             Truncation::Middle(bits) => (
                 f64::from(f32::from_bits(bits)),
-                CTLineTruncationType::Middle,
+                NSLineBreakMode::ByTruncatingMiddle,
             ),
         };
-        if line.get_typographic_bounds().width <= width {
+        let bounds = line.get_typographic_bounds();
+        if bounds.width <= width {
             return line;
         }
-        let token = line_for("…");
-        let result = unsafe {
-            CTLineCreateTruncatedLine(
-                line.as_concrete_TypeRef(),
-                width,
-                kind,
-                token.as_concrete_TypeRef(),
+        let height = (bounds.ascent + bounds.descent + bounds.leading).ceil();
+        fitted_line(&mut text, kind, width, height, scale).unwrap_or_else(|| {
+            CTLine::new_with_attributed_string(
+                CFMutableAttributedString::new().as_concrete_TypeRef(),
             )
-        };
-        if result.is_null() {
-            // Core Text returns null when even the ellipsis will not fit.
-            line_for("")
-        } else {
-            unsafe { CTLine::wrap_under_create_rule(result) }
-        }
+        })
     };
     let line = make_line(key.face);
     let bounds = line.get_typographic_bounds();

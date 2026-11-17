@@ -455,11 +455,13 @@ static NSDictionary *visibleText(NSURL *frame, NSString *operation) {
                 if ([candidate.string.lowercaseString containsString:@"atlas"]) prefix = line.boundingBox;
         }
         BOOL suffix = NO, middle = NO, total = NO;
+        NSMutableArray<VNRecognizedTextObservation *> *modelRow = [NSMutableArray array];
         if (!CGRectIsNull(prefix)) {
             // Vision may split a single displayed row into several observations.
             for (VNRecognizedTextObservation *line in request.results) {
                 if (fabs(CGRectGetMidY(line.boundingBox) - CGRectGetMidY(prefix)) > 0.65 * CGRectGetHeight(prefix)
                     || CGRectGetMaxX(line.boundingBox) < CGRectGetMinX(prefix)) continue;
+                [modelRow addObject:line];
                 for (VNRecognizedText *candidate in [line topCandidates:3]) {
                     NSString *value = candidate.string.lowercaseString;
                     if ([value containsString:@"north"]) suffix = YES;
@@ -468,7 +470,18 @@ static NSDictionary *visibleText(NSURL *frame, NSString *operation) {
                 }
             }
         }
-        return @{@"modelEnds": suffix && !middle ? @YES : @NO, @"rowTotal": @(total), @"recognized": body};
+        [modelRow sortUsingComparator:^NSComparisonResult(VNRecognizedTextObservation *a, VNRecognizedTextObservation *b) {
+            return [@(CGRectGetMinX(a.boundingBox)) compare:@(CGRectGetMinX(b.boundingBox))];
+        }];
+        NSMutableArray<NSString *> *pieces = [NSMutableArray array];
+        for (VNRecognizedTextObservation *line in modelRow) {
+            NSString *value = [line topCandidates:1].firstObject.string;
+            if (value) [pieces addObject:value];
+        }
+        NSString *row = [pieces componentsJoinedByString:@" "];
+        NSRange name = [row rangeOfString:@"atlas.*?north" options:NSCaseInsensitiveSearch | NSRegularExpressionSearch];
+        NSString *visibleModel = name.location == NSNotFound ? @"" : [row substringWithRange:name];
+        return @{@"modelEnds": @(suffix && !middle), @"rowTotal": @(total), @"visibleModel": visibleModel, @"recognized": body};
     }
     if ([operation isEqual:@"activityTotals"]) {
         BOOL claude = [letters containsString:@"560tokens"], codex = [letters containsString:@"810tokens"];

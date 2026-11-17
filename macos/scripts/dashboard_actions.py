@@ -849,6 +849,11 @@ def compare_windows(dashboard, work, original, library):
     long_model_matches = all(results[side][theme].get("activityLongModel", {}).get(key) is True
                              for side in ("original", "rust") for theme in dashboard.THEMES
                              for key in ("modelEnds", "rowTotal"))
+    for theme in dashboard.THEMES:
+        visible = [results[side][theme].get("activityLongModel", {}).get("visibleModel", "")
+                   for side in ("original", "rust")]
+        original, rust = ("".join(name.casefold().replace("…", "...").split()) for name in visible)
+        long_model_matches = long_model_matches and bool(original) and original == rust
     results["longActivityModelIdentical"] = long_model_matches
     results["activityDetailIdentical"] = day_detail_matches
     (dest / "comparison.json").write_text(json.dumps(results, ensure_ascii=False, indent=2))

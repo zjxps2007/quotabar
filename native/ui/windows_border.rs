@@ -57,42 +57,81 @@ struct Tile {
     fill: Color32,
 }
 
-impl Tile {
-    // Count the covered samples on the Windows software rasterizer's 8×8 grid.
-    fn coverage(rect: Rect, radius: f32, x: f32, y: f32) -> u32 {
+// Each scan line contains the first included and first excluded sample on
+// the WPF software rasterizer's 8×8 grid.
+struct Coverage(Vec<[i32; 2]>);
+
+impl Coverage {
+    fn new(rect: Rect, radius: f32, height: usize) -> Self {
+        let fixed = |p: Pos2| (p * 16. + Vec2::splat(0.5)).floor();
+        let first = |x: f32| (x * 0.5).ceil() as i32;
+        let min = fixed(rect.min);
+        let max = fixed(rect.max);
+        let mut rows = vec![[0, 0]; height * 8];
+        let start = first(min.y).clamp(0, rows.len() as i32) as usize;
+        let end = first(max.y).clamp(start as i32, rows.len() as i32) as usize;
+        rows[start..end].fill([first(min.x), first(max.x)]);
         let radius = radius.max(0.).min(rect.width().min(rect.height()) * 0.5);
-        if (x >= rect.left() + radius
-            && x + 1. <= rect.right() - radius
-            && y >= rect.top()
-            && y + 1. <= rect.bottom())
-            || (y >= rect.top() + radius
-                && y + 1. <= rect.bottom() - radius
-                && x >= rect.left()
-                && x + 1. <= rect.right())
-        {
-            return 64;
-        }
-        let sample_index = |edge: f32| ((edge - x) * 8.).ceil().clamp(0., 8.) as u32;
-        let mut covered = 0;
-        for row in 0..8 {
-            let sample = y + row as f32 / 8.;
-            if sample < rect.top() || sample >= rect.bottom() {
-                continue;
+        if radius > 0. {
+            // Border supplies cubic quarter arcs. Both their control points
+            // and the vertices emitted by the flattener use 28.4 coordinates.
+            let control = radius * (1. - 0.552_284_8);
+            for (x, dx, side) in [(rect.left(), 1., 0), (rect.right(), -1., 1)] {
+                for (y, dy) in [(rect.top(), 1.), (rect.bottom(), -1.)] {
+                    let points = [(radius, 0.), (control, 0.), (0., control), (0., radius)]
+                        .map(|(u, v)| fixed(pos2(x + dx * u, y + dy * v)));
+                    let mut previous = points[0];
+                    Self::flatten(points, &mut |to| {
+                        Self::edge(&mut rows, side, previous, to);
+                        previous = to;
+                    });
+                }
             }
-            let dy = (rect.top() + radius - sample)
-                .max(sample - rect.bottom() + radius)
-                .max(0.);
-            let inset = if dy == 0. {
-                0.
-            } else {
-                radius - (radius * radius - dy * dy).max(0.).sqrt()
-            };
-            covered += sample_index(rect.right() - inset)
-                .saturating_sub(sample_index(rect.left() + inset));
         }
-        covered
+        Self(rows)
     }
 
+    fn flatten([a, b, c, d]: [Pos2; 4], emit: &mut impl FnMut(Pos2)) {
+        // At one quarter of a device pixel (four fixed units), the chord
+        // represents the curve at WPF's flattening tolerance.
+        let bend = ((b - a) - (c - b)).abs().max(((c - b) - (d - c)).abs());
+        if bend.x.max(bend.y) <= 4. {
+            emit((d + Vec2::splat(0.5)).floor());
+            return;
+        }
+        let ab = a.lerp(b, 0.5);
+        let bc = b.lerp(c, 0.5);
+        let cd = c.lerp(d, 0.5);
+        let left = ab.lerp(bc, 0.5);
+        let right = bc.lerp(cd, 0.5);
+        let middle = left.lerp(right, 0.5);
+        Self::flatten([a, ab, left, middle], emit);
+        Self::flatten([middle, right, cd, d], emit);
+    }
+
+    fn edge(rows: &mut [[i32; 2]], side: usize, a: Pos2, b: Pos2) {
+        let (lo, hi) = if a.y <= b.y { (a, b) } else { (b, a) };
+        let first = (lo.y * 0.5).ceil().clamp(0., rows.len() as f32) as usize;
+        let end = (hi.y * 0.5).ceil().clamp(0., rows.len() as f32) as usize;
+        let dx = (hi.x - lo.x) as i64;
+        let dy = (hi.y - lo.y) as i64;
+        for (i, row) in rows[first..end].iter_mut().enumerate() {
+            let y = 2 * (first + i) as i64;
+            let x = lo.x as i64 * dy + (y - lo.y as i64) * dx;
+            row[side] = (x + 2 * dy - 1).div_euclid(2 * dy) as i32;
+        }
+    }
+
+    fn pixel(&self, x: usize, y: usize) -> u32 {
+        let start = (x * 8) as i32;
+        self.0[y * 8..y * 8 + 8]
+            .iter()
+            .map(|&[left, right]| (right.min(start + 8) - left.max(start)).max(0) as u32)
+            .sum()
+    }
+}
+
+impl Tile {
     fn image(&self) -> ColorImage {
         let [left, top, right, bottom] = self.inset.map(f32::from_bits);
         let [width, height] = self.size;
@@ -103,11 +142,16 @@ impl Tile {
         let stroke = f32::from_bits(self.stroke);
         let inner = outer.shrink(stroke);
         let radius = f32::from_bits(self.radius);
+        let pen_coverage = Coverage::new(outer, radius + 0.5 * stroke, height);
+        let fill_coverage =
+            (stroke > 0.).then(|| Coverage::new(inner, radius - 0.5 * stroke, height));
         let mut pixels = Vec::with_capacity(width * height);
         for y in 0..height {
             for x in 0..width {
-                let outside = Self::coverage(outer, radius + 0.5 * stroke, x as f32, y as f32);
-                let fill = Self::coverage(inner, radius - 0.5 * stroke, x as f32, y as f32);
+                let outside = pen_coverage.pixel(x, y);
+                let fill = fill_coverage
+                    .as_ref()
+                    .map_or(outside, |mask| mask.pixel(x, y));
                 let fill_opacity = (fill * u32::from(self.fill.a()) + 127) / 255;
                 let pen = outside.saturating_sub(fill) * (64 - fill_opacity);
                 let background = fill * 64;
@@ -135,9 +179,9 @@ mod tests {
         let bounds = Rect::from_min_size(pos2(0., 1. / 16.), vec2(34., 22.));
         // In WPF's switch focus visual the straight edge covers 7/8 of one
         // physical pixel and 1/8 of the next on both sides of the track.
-        let samples = [0., 1., 21., 22.].map(|y| {
-            Tile::coverage(bounds, 10.5, 16., y) - Tile::coverage(bounds.shrink(1.), 9.5, 16., y)
-        });
+        let outer = Coverage::new(bounds, 10.5, 23);
+        let inner = Coverage::new(bounds.shrink(1.), 9.5, 23);
+        let samples = [0, 1, 21, 22].map(|y| outer.pixel(16, y) - inner.pixel(16, y));
         assert_eq!(samples, [56, 8, 56, 8]);
     }
 
@@ -150,21 +194,28 @@ mod tests {
                 for phase in 0..=64 {
                     let y = origin + phase as f32 / 64.;
                     let rect = Rect::from_min_size(pos2(0., y / scale), vec2(80., 24.) / scale);
-                    let rect = device_bounds(rect, scale);
+                    let relative = (rect * scale).translate(vec2(0., -origin));
+                    let mask = Coverage::new(relative, 7., 25);
                     let expected = 64 - ((phase + 6) / 8) * 8;
-                    assert_eq!(Tile::coverage(rect, 7., 40., origin), expected);
-                    assert_eq!(Tile::coverage(rect, 7., 40., origin + 24.), 64 - expected);
+                    assert_eq!(mask.pixel(40, 0), expected);
+                    assert_eq!(mask.pixel(40, 24), 64 - expected);
                 }
             }
         }
     }
-}
-
-fn device_bounds(rect: Rect, scale: f32) -> Rect {
-    // WPF rounds shape coordinates to 1/16 of a device pixel before
-    // taking eight edge samples. The first sample lies at the pixel edge.
-    let snap = |p: Pos2| (p * (scale * 16.) + Vec2::splat(0.5)).floor() / 16.;
-    Rect::from_min_max(snap(rect.min), snap(rect.max))
+    #[test]
+    fn corner_samples_match_wpf_at_fractional_origins_and_radii() {
+        for (origin, radius, x, y, expected) in [
+            (pos2(0., 0.), 2., 0, 0, [13, 46, 64]),
+            (pos2(17. / 64., 3. / 64.), 3.5, 1, 0, [5, 38, 52]),
+            (pos2(23. / 64., 53. / 64.), 7., 2, 2, [8, 48, 64]),
+            (pos2(27. / 64., 1. / 64.), 16., 5, 3, [0, 21, 61]),
+        ] {
+            let rect = Rect::from_min_size(origin, vec2(64.6875, 48.25));
+            let coverage = Coverage::new(rect, radius, 50);
+            assert_eq!([x, x + 1, x + 2].map(|i| coverage.pixel(i, y)), expected);
+        }
+    }
 }
 
 impl BorderRenderer {
@@ -197,7 +248,7 @@ impl BorderRenderer {
         let scale = ctx.pixels_per_point();
         let r = radius * scale;
         let s = stroke.width * scale;
-        let rect = device_bounds(rect, scale);
+        let rect = rect * scale;
         if rect.width().min(rect.height()) <= s * 2. {
             return None;
         }
