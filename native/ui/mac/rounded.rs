@@ -42,7 +42,7 @@ pub fn rounded_shadow(
                 let coverage = (radius + 0.5 - distance).clamp(0., 1.);
                 image::Luma([(255. * coverage).round() as u8])
             });
-            let blurred = image::imageops::fast_blur(&mask, sigma);
+            let blurred = image::imageops::blur(&mask, sigma);
             let colors = blurred
                 .into_raw()
                 .into_iter()

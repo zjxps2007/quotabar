@@ -301,6 +301,29 @@ pub fn symbol(
     true
 }
 
+pub fn intrinsic_symbol_at(
+    painter: &eframe::egui::Painter,
+    center: eframe::egui::Pos2,
+    name: &str,
+    points: f32,
+    semibold: bool,
+    tint: eframe::egui::Color32,
+) -> bool {
+    let Some(texture) = symbol_texture(painter.ctx(), name, points, semibold) else {
+        return false;
+    };
+    // SwiftUI's fixed frame positions an Image without shrinking its intrinsic
+    // bitmap. A wide symbol can extend beyond the frame's layout proposal.
+    let size = texture.size_vec2() / painter.ctx().pixels_per_point();
+    paint_symbol(
+        painter,
+        eframe::egui::Rect::from_center_size(center, size),
+        &texture,
+        tint,
+    );
+    true
+}
+
 fn paint_symbol(
     painter: &eframe::egui::Painter,
     bounds: eframe::egui::Rect,

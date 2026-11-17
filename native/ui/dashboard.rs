@@ -225,9 +225,9 @@ impl Dashboard {
                             r.left_center() + vec2(21., 0.),
                             vec2(18., r.height()),
                         );
-                        if !crate::mac::symbol(
+                        if !crate::mac::intrinsic_symbol_at(
                             ui.painter(),
-                            icon,
+                            icon.center(),
                             system_symbol_name(key),
                             12.,
                             selected,
@@ -376,12 +376,19 @@ impl Dashboard {
                         ui.spacing_mut().interact_size.y = 0.;
                         ui.horizontal_top(|ui| {
                             ui.spacing_mut().item_spacing.x = 7.;
-                            if !crate::mac::intrinsic_symbol(ui, "eye", 10., false, p.muted) {
-                                ui.allocate_exact_size(vec2(16., 13.), Sense::hover());
-                            }
-                            if crate::mac_text::paragraph(ui, note, 10., 0., p.muted).is_none() {
-                                system_label(ui, note, 10., false, p.muted);
-                            }
+                            let size = crate::mac::symbol_size(ui.ctx(), "eye", 10., false)
+                                .unwrap_or(vec2(16., 13.));
+                            let (icon, _) = ui.allocate_exact_size(size, Sense::hover());
+                            let text = crate::mac_text::paragraph(ui, note, 10., 0., p.muted)
+                                .unwrap_or_else(|| system_label(ui, note, 10., false, p.muted));
+                            crate::mac::intrinsic_symbol_at(
+                                ui.painter(),
+                                pos2(icon.center().x, text.rect.center().y),
+                                "eye",
+                                10.,
+                                false,
+                                p.muted,
+                            );
                         });
                     }
                     #[cfg(windows)]
@@ -556,7 +563,7 @@ impl Dashboard {
                         }
                         ui.horizontal(|ui| {
                             #[cfg(target_os = "macos")]
-                            crate::mac_text::stacked_label(ui, title, 11., false, p.muted)
+                            crate::mac_text::stat_title(ui, title, p.muted)
                                 .unwrap_or_else(|| system_label(ui, title, 11., false, p.muted));
                             #[cfg(windows)]
                             system_label(ui, title, 11., false, p.muted);

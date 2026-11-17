@@ -707,6 +707,23 @@ pub fn dashboard_heading(ui: &mut Ui, text: &str, color: Color32) -> Option<Resp
     draw_label(ui, text, 25., Face::Bold, color, line)
 }
 
+pub fn stat_title(ui: &mut Ui, text: &str, color: Color32) -> Option<Response> {
+    // Keep the system baseline when Core Text adds fallback-font leading to
+    // the bitmap. Centering its rounded logical height can move the title.
+    let metrics = PreferredFont::metrics(&NSFont::systemFontOfSize(11.), ui);
+    draw_label(
+        ui,
+        text,
+        11.,
+        Face::Regular,
+        color,
+        LineBox::Preferred {
+            height: metrics.height,
+            ascent: metrics.ascent,
+        },
+    )
+}
+
 pub fn stat_value(ui: &mut Ui, text: &str, color: Color32) -> Option<Response> {
     draw_label(
         ui,
