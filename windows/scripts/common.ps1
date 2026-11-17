@@ -11,3 +11,10 @@ function Invoke-Dotnet([string[]]$Arguments) {
     & $Dotnet @Arguments
     if ($LASTEXITCODE -ne 0) { throw "dotnet failed: $LASTEXITCODE" }
 }
+
+
+function Get-LegacyValidationRoot {
+    $suite = & python (Join-Path $RepoRoot 'scripts\prepare_legacy_validation.py')
+    if ($LASTEXITCODE -or -not $suite) { throw 'Could not prepare the archived compatibility suite.' }
+    return [string]($suite | Select-Object -Last 1)
+}

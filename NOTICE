@@ -7,7 +7,8 @@ Original project: https://github.com/sylearn/AIUsage
 Source revision: e3502ea77b79c2ef5b88f33e36231f156243a86b
 Original license: Apache License, Version 2.0 (included in LICENSE).
 
-The files in macos/Sources/UsageCore/Upstream and the selected ClaudeSubscriptionTests
+The original files in macos/Sources/UsageCore/Upstream and selected ClaudeSubscriptionTests,
+now archived on the legacy branch under rust-validation/,
 derive from AIUsage. Modifications include removing proxy/server and OAuth refresh
 code, adding memory-only read-only quota fetches, isolating storage paths, extracting
 shared data types, and extending the streaming JSON projection for Codex usage.
@@ -33,8 +34,9 @@ aggregation in windows/src/QuotaBar.Core and windows/src/QuotaBar.Windows port t
 corresponding QuotaBar/AIUsage rules. Windows DPAPI/ACL storage, native tray and WPF
 processes are new platform implementations. Shared synthetic fixtures exercise
 both native implementations. shared/assets retains the existing logo originals.
-Windows self-contained builds include Microsoft's .NET runtime with its license
-and notices under licenses/.
+The archived Windows implementation includes Microsoft's .NET runtime with its
+license and notices. Current Rust packages include no managed runtime. Their
+three version-only compatibility DLLs contain no methods or entry points.
 The Windows menu scroll arrows in windows/assets/MenuScrollArrows.png are
 the ScrollButtonUp and ScrollButtonDown images from .NET Windows Forms.
 Copyright (c) .NET Foundation and Contributors. They are distributed under the
@@ -57,3 +59,9 @@ workspace identity rules and the existing platform-specific import formats.
 The Windows native provider transport uses libcurl and Schannel for explicitly
 configured proxies. The libcurl, curl-rust, schannel and zlib notices are
 included in licenses/libcurl/LICENSE in the Windows distribution.
+
+Current Rust implementations in native/claude, native/codex_sessions, native/usage,
+native/provider_requests and native/ui/activity.rs preserve the corresponding
+AIUsage-derived rules and attribution above. Swift and C# application/test sources
+are maintained only on the legacy branch. AppIcon-4.icns and AppDockIcon.png are
+pre-rendered from the same QuotaBar AppMark.svg used by the validated native build.

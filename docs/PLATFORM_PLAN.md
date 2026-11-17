@@ -1,5 +1,8 @@
 # QuotaBar macOS Windows 구현 계획
 
+> 이 문서는 기존 Swift/WPF 구현의 기록입니다. 해당 소스는 [legacy](https://github.com/zjxps2007/quotabar/tree/legacy)에 보존하며, 현재 main의 빌드·검증 방법은 [Rust 네이티브 검증](RUST_NATIVE_VALIDATION.md)을 참고하세요.
+
+
 Windows에서도 **트레이에 상주하며 계정별 사용량을 조회하고, Dashboard를 열 때만 별도 화면 프로세스를 실행하는 구조**를 구현할 수 있다. 권장안은 macOS의 SwiftUI 앱을 유지하고 Windows에 C#/.NET 앱을 추가하는 것이다. 사용량 계산 규칙, 합성 테스트 데이터, 디자인 원본을 공유하고 OS 통합 코드는 플랫폼별로 둔다.
 
 검토 기준은 2026-10-17, 저장소 `c7e697c`이다. 2026-10-18에 아래 계획의 Windows x64 시제품과 플랫폼 디렉터리 분리를 구현했다. 실제 검증 범위는 [Windows 검증 기록](WINDOWS_VALIDATION.md)을 기준으로 한다. 1차 대상은 기존 macOS 14 이상과 Windows 11 x64다. Windows ARM64와 WSL 연동은 별도 검증 단계로 둔다.
@@ -29,16 +32,16 @@ Windows의 기본 알림 영역 API는 아이콘·툴팁·알림을 제공한다
 
 | 현재 파일 | 확인한 의존성 또는 역할 | 구현 시 처리 |
 | --- | --- | --- |
-| [Package.swift](../macos/Package.swift) | macOS 14, SwiftUI 실행 파일 | macOS 패키지로 유지 |
-| [App.swift](../macos/Sources/QuotaBar/App.swift), [Views.swift](../macos/Sources/QuotaBar/Views.swift) | AppKit·SwiftUI 화면, NSStatusItem | macOS 유지, Windows 화면 신규 작성 |
-| [MonitorStore.swift](../macos/Sources/QuotaBar/MonitorStore.swift) | 조회·계정·상태와 UI·전원 이벤트가 함께 있음 | 조회 서비스와 화면 상태, OS 이벤트 처리를 분리 |
-| [DashboardBridge.swift](../macos/Sources/QuotaBar/DashboardBridge.swift), [DashboardProtocol.swift](../macos/Sources/UsageCore/DashboardProtocol.swift) | 필요 시 helper 실행, 익명 파이프, 최대 4MiB 프레임 | 프로세스 역할과 메시지 경계 재사용, Windows 전송 구현 추가 |
-| [CodexLogin.swift](../macos/Sources/UsageCore/CodexLogin.swift) | AppKit·Darwin, `/Applications`, `:` PATH, Unix 종료 신호 | 실행 파일 탐색·브라우저·프로세스 수명 어댑터 |
-| [SecretVault.swift](../macos/Sources/UsageCore/SecretVault.swift) | `openat`, `fchmod`, `renameat`, 소유자·링크 검사 | macOS 구현 유지, Windows 저장소 별도 구현 |
-| [CredentialMigration.swift](../macos/Sources/UsageCore/CredentialMigration.swift) | Security·LocalAuthentication, 이전 Keychain 이전 | macOS에만 배치 |
-| [ClaudeSubscriptionConnection.swift](../macos/Sources/UsageCore/Upstream/ClaudeSubscriptionConnection.swift), [ClaudeSubscriptionStatusLine.swift](../macos/Sources/UsageCore/Upstream/ClaudeSubscriptionStatusLine.swift) | `/` 절대경로 판정, `/bin/sh`, POSIX quoting | Windows 경로·셸·helper 연결 구현 |
-| [Account.swift](../macos/Sources/UsageCore/Account.swift), [ClaudeSubscriptionStore.swift](../macos/Sources/UsageCore/Upstream/ClaudeSubscriptionStore.swift) | 모델과 파일 저장 혼재, CryptoKit·POSIX 권한 | 모델·식별 규칙과 저장 어댑터 분리 |
-| [LocalUsage.swift](../macos/Sources/UsageCore/LocalUsage.swift), [SessionProjectionReader.swift](../macos/Sources/UsageCore/Upstream/SessionProjectionReader.swift) | 스트리밍 projection, 중복·분기 제거, inode 캐시 | 알고리즘·기대값 공유, Windows File ID 및 공유 읽기 구현 |
+| [Package.swift](https://github.com/zjxps2007/quotabar/blob/legacy/macos/Package.swift) | macOS 14, SwiftUI 실행 파일 | macOS 패키지로 유지 |
+| [App.swift](https://github.com/zjxps2007/quotabar/blob/legacy/macos/Sources/QuotaBar/App.swift), [Views.swift](https://github.com/zjxps2007/quotabar/blob/legacy/macos/Sources/QuotaBar/Views.swift) | AppKit·SwiftUI 화면, NSStatusItem | macOS 유지, Windows 화면 신규 작성 |
+| [MonitorStore.swift](https://github.com/zjxps2007/quotabar/blob/legacy/macos/Sources/QuotaBar/MonitorStore.swift) | 조회·계정·상태와 UI·전원 이벤트가 함께 있음 | 조회 서비스와 화면 상태, OS 이벤트 처리를 분리 |
+| [DashboardBridge.swift](https://github.com/zjxps2007/quotabar/blob/legacy/macos/Sources/QuotaBar/DashboardBridge.swift), [DashboardProtocol.swift](https://github.com/zjxps2007/quotabar/blob/legacy/macos/Sources/UsageCore/DashboardProtocol.swift) | 필요 시 helper 실행, 익명 파이프, 최대 4MiB 프레임 | 프로세스 역할과 메시지 경계 재사용, Windows 전송 구현 추가 |
+| [CodexLogin.swift](https://github.com/zjxps2007/quotabar/blob/legacy/macos/Sources/UsageCore/CodexLogin.swift) | AppKit·Darwin, `/Applications`, `:` PATH, Unix 종료 신호 | 실행 파일 탐색·브라우저·프로세스 수명 어댑터 |
+| [SecretVault.swift](https://github.com/zjxps2007/quotabar/blob/legacy/macos/Sources/UsageCore/SecretVault.swift) | `openat`, `fchmod`, `renameat`, 소유자·링크 검사 | macOS 구현 유지, Windows 저장소 별도 구현 |
+| [CredentialMigration.swift](https://github.com/zjxps2007/quotabar/blob/legacy/macos/Sources/UsageCore/CredentialMigration.swift) | Security·LocalAuthentication, 이전 Keychain 이전 | macOS에만 배치 |
+| [ClaudeSubscriptionConnection.swift](https://github.com/zjxps2007/quotabar/blob/legacy/macos/Sources/UsageCore/Upstream/ClaudeSubscriptionConnection.swift), [ClaudeSubscriptionStatusLine.swift](https://github.com/zjxps2007/quotabar/blob/legacy/macos/Sources/UsageCore/Upstream/ClaudeSubscriptionStatusLine.swift) | `/` 절대경로 판정, `/bin/sh`, POSIX quoting | Windows 경로·셸·helper 연결 구현 |
+| [Account.swift](https://github.com/zjxps2007/quotabar/blob/legacy/macos/Sources/UsageCore/Account.swift), [ClaudeSubscriptionStore.swift](https://github.com/zjxps2007/quotabar/blob/legacy/macos/Sources/UsageCore/Upstream/ClaudeSubscriptionStore.swift) | 모델과 파일 저장 혼재, CryptoKit·POSIX 권한 | 모델·식별 규칙과 저장 어댑터 분리 |
+| [LocalUsage.swift](https://github.com/zjxps2007/quotabar/blob/legacy/macos/Sources/UsageCore/LocalUsage.swift), [SessionProjectionReader.swift](https://github.com/zjxps2007/quotabar/blob/legacy/macos/Sources/UsageCore/Upstream/SessionProjectionReader.swift) | 스트리밍 projection, 중복·분기 제거, inode 캐시 | 알고리즘·기대값 공유, Windows File ID 및 공유 읽기 구현 |
 | [scripts](../scripts) | Xcode, Bash, codesign, ICNS, libproc 측정 | macOS 스크립트와 Windows PowerShell 스크립트 분리 |
 
 현재 Dashboard는 로컬 로그를 직접 집계하고 모니터는 계정·quota·저장을 소유한다. 새 브라우저 로그인은 Dashboard에서 시작해 결과를 부모 파이프로 한 번 전달한다. Windows에서는 모니터가 로그인 프로세스도 소유하고 화면에는 진행 상태만 전달하도록 한다. Dashboard 종료/연결 단절 시 해당 화면에서 시작한 미완료 로그인은 취소한다.

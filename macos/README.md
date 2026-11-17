@@ -112,7 +112,7 @@ bash scripts/test.sh
 
 격리된 임시 폴더와 합성 로그인 데이터로 계정 식별, 캐시 격리, quota 변환, 로그 집계, Claude status line 설치·복구를 검증합니다. 실제 계정 로그인과 서비스 응답은 사용자의 계정 연결 후 확인해야 합니다. 빌드·테스트·실행 측정 결과는 [검증 기록](../docs/VALIDATION.md)을 참고하세요.
 
-테스트에는 Swift Testing이 포함된 Swift 6 이상 도구 체인을 사용합니다. 패키징된 Claude callback은 `python3 scripts/check-statusline.py`로 따로 검증할 수 있습니다. `bash macos/scripts/package.sh`는 Release 앱을 빌드하고 서명·버전을 확인한 뒤 현재 아키텍처의 ZIP과 소스 커밋·SHA-256을 기록한 `artifacts/macos-build-info.json`을 생성합니다.
+main의 단위 검사는 Rust 도구 체인을 사용합니다. Swift 비교 검사는 legacy에서 가져온 별도 작업 폴더에서만 실행하며 Swift 6 이상 도구 체인을 사용합니다. [빌드·검증 구조](../docs/RUST_NATIVE_VALIDATION.md)를 참고하세요. 패키징된 Claude callback은 `python3 scripts/check-statusline.py`로 따로 검증할 수 있습니다. `bash macos/scripts/package.sh`는 Release 앱을 빌드하고 서명·버전을 확인한 뒤 현재 아키텍처의 ZIP과 소스 커밋·SHA-256을 기록한 `artifacts/macos-build-info.json`을 생성합니다.
 
 `bash scripts/benchmark-local-usage.sh`는 실제 계정·로그에 접근하지 않고 합성 로그로 최초 스캔과 캐시 재조회를 각각 3회 측정합니다. 2026-10-17 최적화에서는 약 28 MB·25개 파일의 최초 스캔 중앙값이 3.22초에서 1.30초, 캐시 재조회는 20.97 ms에서 11.95 ms로 줄었으며 전체 집계 결과의 해시는 동일했습니다. 이 Mac의 샘플 측정이며 실제 로그 크기와 기기에 따라 달라집니다.
 

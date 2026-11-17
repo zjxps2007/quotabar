@@ -43,9 +43,8 @@ cat > "$app/Contents/Info.plist" <<PLIST
 <key>NSHighResolutionCapable</key><true/>
 </dict></plist>
 PLIST
-swift scripts/make-icon.swift "$artifacts/AppIcon.iconset" "$PWD/../shared/assets/AppMark.svg"
-iconutil -c icns "$artifacts/AppIcon.iconset" -o "$app/Contents/Resources/AppIcon-4.icns"
-cp "$artifacts/AppIcon.iconset/icon_256x256@2x.png" "$app/Contents/Resources/AppDockIcon.png"
+cp assets/AppIcon-4.icns "$app/Contents/Resources/AppIcon-4.icns"
+cp assets/AppDockIcon.png "$app/Contents/Resources/AppDockIcon.png"
 rm -f "$app/Contents/Resources/AppIcon.icns"
 if [[ "$configuration" == "release" ]]; then strip -x "$app/Contents/MacOS/QuotaBar"; fi
 helper="$app/Contents/Helpers/QuotaBar Dashboard.app"

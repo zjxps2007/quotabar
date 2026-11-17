@@ -1,5 +1,8 @@
 # Windows 시제품 구현 및 검증
 
+> 이 문서는 기존 Swift/WPF 구현의 기록입니다. 해당 소스는 [legacy](https://github.com/zjxps2007/quotabar/tree/legacy)에 보존하며, 현재 main의 빌드·검증 방법은 [Rust 네이티브 검증](RUST_NATIVE_VALIDATION.md)을 참고하세요.
+
+
 검증일: 2026-10-18. 환경: Windows x64 build 26200, .NET SDK 10.0.402 / 런타임 10.0.13. Windows 코드 빌드와 합성 통합 검사, 배포본 실행을 완료했다. 실제 서비스 계정으로 OAuth 로그인·quota 조회를 완료한 결과는 아니다.
 
 ## 구현 구조

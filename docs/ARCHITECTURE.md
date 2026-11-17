@@ -1,8 +1,8 @@
 # 경량화 설계
 
-`codex/rust-native`의 제품 실행 파일은 `native/`의 Cargo workspace에서 빌드합니다. Windows x64와 Apple Silicon macOS의 모니터·Dashboard·Claude callback이 모두 Rust 프로그램이며, UI는 Win32·DirectWrite·AppKit 등의 운영체제 API를 사용합니다. 기존 C#/WPF와 Swift/SwiftUI 소스는 원본과의 회귀 비교에 사용합니다. 현재 구조와 검증 기준은 [Rust 네이티브 검증](RUST_NATIVE_VALIDATION.md)을 참고하세요.
+`main`의 제품 실행 파일은 `native/`의 Cargo workspace에서 빌드합니다. Windows x64와 Apple Silicon macOS의 모니터·Dashboard·Claude callback이 모두 Rust 프로그램이며, UI는 Win32·DirectWrite·AppKit 등의 운영체제 API를 사용합니다. 기존 C#/WPF와 Swift/SwiftUI 코드는 legacy 브랜치의 rust-validation/에 보관하며, 비교 검증은 별도 작업 폴더에서 실행합니다. 현재 구조와 검증 기준은 [Rust 네이티브 검증](RUST_NATIVE_VALIDATION.md)을 참고하세요.
 
-아래 항목은 기존 macOS 동작의 설계 배경을 설명합니다. Windows 구조와 이전 검증은 [Windows 검증 기록](WINDOWS_VALIDATION.md), 공통 목표는 [플랫폼 계획](PLATFORM_PLAN.md)에 있습니다. 모니터·Dashboard·Claude callback은 별도 실행 파일이며 익명 파이프와 현재 사용자 전용 저장소로 연결합니다.
+아래 항목은 legacy에 보존한 기존 macOS 구현의 설계 배경을 설명하는 과거 기록입니다. Windows 구조와 이전 검증은 [Windows 검증 기록](WINDOWS_VALIDATION.md), 공통 목표는 [플랫폼 계획](PLATFORM_PLAN.md)에 있습니다. 모니터·Dashboard·Claude callback은 별도 실행 파일이며 익명 파이프와 현재 사용자 전용 저장소로 연결합니다.
 
 기준: sylearn/AIUsage `e3502ea77b79c2ef5b88f33e36231f156243a86b`, 2026-10-16 확인.
 

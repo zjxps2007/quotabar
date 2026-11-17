@@ -106,7 +106,7 @@ if (-not ('QuotaBarSmoke.Window' -as [type])) {
 }
 $launcher = $null
 if ($VerifyForeground) {
-    if (-not ('QuotaBarSmoke.ForegroundLauncher' -as [type])) { Add-Type -Path "$PSScriptRoot/ForegroundLauncher.cs" }
+    if (-not ('QuotaBarSmoke.ForegroundLauncher' -as [type])) { Add-Type -Path (Join-Path (Get-LegacyValidationRoot) 'windows/scripts/ForegroundLauncher.cs') }
     $focus = [ordered]@{ monitorSHA256 = (Get-FileHash $exe -Algorithm SHA256).Hash; phases = [ordered]@{} }
 }
 function Assert-WindowFocus($Phase, [IntPtr]$ExpectedWindow) {

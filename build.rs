@@ -9,7 +9,7 @@ fn main() {
     for watched in [
         "shared/version.json",
         "windows/assets/QuotaBar.ico",
-        "windows/src/QuotaBar.Monitor/app.manifest",
+        "windows/assets/QuotaBar.manifest",
     ] {
         println!("cargo:rerun-if-changed={}", root.join(watched).display());
     }
@@ -75,7 +75,7 @@ fn main() {
                 .unwrap();
             resource
                 .set("OriginalFilename", "QuotaBar.Monitor.exe")
-                .set_manifest_file("windows/src/QuotaBar.Monitor/app.manifest")
+                .set_manifest_file("windows/assets/QuotaBar.manifest")
                 .compile_for("quotabar-monitor")
                 .unwrap();
         }

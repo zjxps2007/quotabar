@@ -60,7 +60,7 @@ macOS와 같은 흑백 테마, 앱·서비스 로고, 서비스별 색상, 둥�
 
 ## 소스에서 빌드
 
-앱 실행 파일은 Rust MSVC 툴체인으로 빌드합니다. Windows 빌드 스크립트는 PowerShell 7을 사용합니다. 원본과의 회귀 테스트와 기존 업데이터가 읽는 버전 메타데이터 생성에는 .NET 10 SDK를 사용합니다. .NET SDK 버전은 `windows/global.json`을 따릅니다. 빌드 스크립트는 `.tools/dotnet`과 `.tools/rust`에 설치된 도구를 우선 사용하며, 각 도구가 없으면 PATH에서 찾습니다.
+앱 실행 파일은 Rust MSVC 툴체인으로 빌드합니다. Windows 빌드 스크립트는 PowerShell 7을 사용합니다. 비교용 C# 소스는 legacy에 보관하며 회귀 검사는 별도 작업 폴더로 불러옵니다. 기존 업데이터가 읽는 실행 코드 없는 버전 메타데이터 생성과 이 비교 검사에는 .NET 10 SDK를 사용합니다. [검증 구조](../docs/RUST_NATIVE_VALIDATION.md)를 참고하세요. .NET SDK 버전은 `windows/global.json`을 따릅니다. 빌드 스크립트는 `.tools/dotnet`과 `.tools/rust`에 설치된 도구를 우선 사용하며, 각 도구가 없으면 PATH에서 찾습니다.
 
 ```powershell
 .\windows\scripts\build.ps1

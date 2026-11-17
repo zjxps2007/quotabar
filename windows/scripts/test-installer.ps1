@@ -14,7 +14,7 @@ if (-not [IO.Path]::GetFullPath($destination).StartsWith($artifactRoot, [StringC
 New-Item -ItemType Directory -Path $testRoot | Out-Null
 $group = 'QuotaBar Installer Test ' + [Guid]::NewGuid().ToString('N')
 $shortcutPath = Join-Path ([Environment]::GetFolderPath('Programs')) ($group + '\QuotaBar.lnk')
-if (-not ('ShortcutReader' -as [type])) { Add-Type -Path (Join-Path $PSScriptRoot 'ShortcutReader.cs') }
+if (-not ('ShortcutReader' -as [type])) { Add-Type -Path (Join-Path (Get-LegacyValidationRoot) 'windows/scripts/ShortcutReader.cs') }
 $payload = Get-Content -LiteralPath (Join-Path $repo 'artifacts\windows\installer-payload-path.txt') -Raw
 $files = @(Get-ChildItem -LiteralPath $payload -Recurse -File | ForEach-Object {
     [pscustomobject]@{ Relative = [IO.Path]::GetRelativePath($payload, $_.FullName); Hash = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash }

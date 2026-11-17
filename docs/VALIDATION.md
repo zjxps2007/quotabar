@@ -1,5 +1,8 @@
 # 검증 기록
 
+> 이 문서는 기존 Swift/WPF 구현의 기록입니다. 해당 소스는 [legacy](https://github.com/zjxps2007/quotabar/tree/legacy)에 보존하며, 현재 main의 빌드·검증 방법은 [Rust 네이티브 검증](RUST_NATIVE_VALIDATION.md)을 참고하세요.
+
+
 확인일: 2026-10-16, 후속 검증 2026-10-17 (Asia/Seoul). Apple Silicon, macOS 27.0.1, Apple Swift 6.4 / Command Line Tools 환경입니다. 최신 산출물은 QuotaBar 0.2.2 arm64이며 최소 배포 대상은 macOS 14입니다. 과거 기록의 AIUsage Lite는 이 앱의 이전 이름입니다. `artifacts/` 경로는 검증 당시의 로컬 기록이며 Git 저장소에는 포함하지 않습니다.
 
 ## 자동 새로고침 및 로그인 시 실행 (2026-11-02)

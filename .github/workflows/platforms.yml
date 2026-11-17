@@ -7,65 +7,77 @@ permissions:
   contents: read
 jobs:
   windows-updater:
-    if: github.ref != 'refs/heads/codex/rust-native' || !contains(github.event.head_commit.message, '[macos-only]')
     runs-on: windows-2025
-    timeout-minutes: 25
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
+          fetch-depth: 0
       - uses: actions/setup-dotnet@v6
         with:
           global-json-file: windows/global.json
+      - name: Prepare isolated legacy validation
+        id: validation
+        run: python scripts/prepare_legacy_validation.py
       - name: Automatic install, restart and rollback with a disposable signing key
         shell: pwsh
+        working-directory: ${{ steps.validation.outputs.root }}
         run: ./windows/scripts/test-updater.ps1
   macos:
     runs-on: macos-15
-    timeout-minutes: 35
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v7
         id: source
         with:
           persist-credentials: false
           fetch-depth: 0
-      - name: Existing Swift suites and shared contract
+      - name: Prepare isolated legacy validation
+        id: validation
+        run: python3 scripts/prepare_legacy_validation.py
+      - name: Archived Swift suites and shared contract
+        working-directory: ${{ steps.validation.outputs.root }}
         run: bash scripts/test.sh
       - name: Native Rust contracts
+        working-directory: ${{ steps.validation.outputs.root }}
         run: cargo test --locked --workspace --all-targets
       - name: Signed update release tooling
         run: python3 -m unittest discover -s scripts/tests -v
       - name: Build and package application and Dashboard helper
         id: package
         if: ${{ !cancelled() && steps.source.outcome == 'success' }}
+        working-directory: ${{ steps.validation.outputs.root }}
         run: bash macos/scripts/package.sh
       - name: Packaged Claude callback
         if: ${{ !cancelled() && steps.package.outcome == 'success' }}
+        working-directory: ${{ steps.validation.outputs.root }}
         run: python3 scripts/check-statusline.py
       - name: Packaged Rust dashboard on AppKit
         if: ${{ !cancelled() && steps.package.outcome == 'success' }}
+        working-directory: ${{ steps.validation.outputs.root }}
         run: python3 macos/scripts/check-dashboard.py
       - uses: actions/upload-artifact@v7
         with:
           name: macos-release
           path: |
-            artifacts/QuotaBar-*-macOS-*.zip
-            artifacts/macos-build-info.json
+            ${{ steps.validation.outputs.root }}/artifacts/QuotaBar-*-macOS-*.zip
+            ${{ steps.validation.outputs.root }}/artifacts/macos-build-info.json
           if-no-files-found: error
       - name: Compare original SwiftUI and Rust windows, popovers and actions
         if: ${{ !cancelled() && steps.package.outcome == 'success' }}
+        working-directory: ${{ steps.validation.outputs.root }}
         run: python3 macos/scripts/compare-dashboard.py --allow-raster-differences
       - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: macos-validation
           path: |
-            artifacts/tests.log
-            artifacts/macos-dashboard/
+            ${{ steps.validation.outputs.root }}/artifacts/tests.log
+            ${{ steps.validation.outputs.root }}/artifacts/macos-dashboard/
   windows:
-    if: github.ref != 'refs/heads/codex/rust-native' || !contains(github.event.head_commit.message, '[macos-only]')
     runs-on: windows-2025
-    timeout-minutes: 35
+    timeout-minutes: 45
     defaults:
       run:
         shell: pwsh
@@ -77,49 +89,60 @@ jobs:
       - uses: actions/setup-dotnet@v6
         with:
           global-json-file: windows/global.json
+      - name: Prepare isolated legacy validation
+        id: validation
+        run: python scripts/prepare_legacy_validation.py
       - name: Build and synthetic integration tests
+        working-directory: ${{ steps.validation.outputs.root }}
         run: ./windows/scripts/test.ps1
       - name: Native Rust contracts
+        working-directory: ${{ steps.validation.outputs.root }}
         run: cargo test --locked --workspace --all-targets
       - name: Self-contained x64 package
         id: package
+        working-directory: ${{ steps.validation.outputs.root }}
         run: ./windows/scripts/package.ps1
       - name: Packaged callback on PowerShell and Git Bash
+        working-directory: ${{ steps.validation.outputs.root }}
         run: |
           $env:QUOTABAR_TEST_HELPER = Join-Path $PWD 'artifacts/QuotaBar-Windows-x64/StatusLine/QuotaBar.StatusLine.exe'
           ./windows/scripts/test.ps1 -NoBuild
       - name: Packaged Dashboard lifetime, foreground relaunch and parent crash cleanup
+        working-directory: ${{ steps.validation.outputs.root }}
         run: ./windows/scripts/smoke.ps1 -VerifyForeground
       - name: Per-user Windows EXE installer
         id: installer
         if: ${{ !cancelled() && steps.package.outcome == 'success' }}
+        working-directory: ${{ steps.validation.outputs.root }}
         run: ./windows/scripts/package-installer.ps1
       - name: Install, reinstall, launch and uninstall
         if: ${{ !cancelled() && steps.installer.outcome == 'success' }}
+        working-directory: ${{ steps.validation.outputs.root }}
         run: ./windows/scripts/test-installer.ps1
       - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: windows-validation-logs
           path: |
-            artifacts/windows/tests.log
-            artifacts/windows/foreground.json
-            artifacts/windows/installer-test-*/*.log
+            ${{ steps.validation.outputs.root }}/artifacts/windows/tests.log
+            ${{ steps.validation.outputs.root }}/artifacts/windows/foreground.json
+            ${{ steps.validation.outputs.root }}/artifacts/windows/installer-test-*/*.log
           if-no-files-found: warn
       - uses: actions/upload-artifact@v7
         with:
           name: windows-x64-release
           path: |
-            artifacts/QuotaBar-*-Windows-x64.zip
-            artifacts/QuotaBar-*-Windows-x64-Setup.exe
-            artifacts/windows/installer-build-info.json
-            artifacts/windows/installer-validation.json
-            artifacts/windows/packaged-probe.json
-            artifacts/windows/*-light.png
-            artifacts/windows/*-dark.png
+            ${{ steps.validation.outputs.root }}/artifacts/QuotaBar-*-Windows-x64.zip
+            ${{ steps.validation.outputs.root }}/artifacts/QuotaBar-*-Windows-x64-Setup.exe
+            ${{ steps.validation.outputs.root }}/artifacts/windows/installer-build-info.json
+            ${{ steps.validation.outputs.root }}/artifacts/windows/installer-validation.json
+            ${{ steps.validation.outputs.root }}/artifacts/windows/packaged-probe.json
+            ${{ steps.validation.outputs.root }}/artifacts/windows/*-light.png
+            ${{ steps.validation.outputs.root }}/artifacts/windows/*-dark.png
           if-no-files-found: error
       - name: Compare original Windows dashboard and tray with the Rust package
         if: ${{ !cancelled() && steps.package.outcome == 'success' }}
+        working-directory: ${{ steps.validation.outputs.root }}
         run: |
           $reference = Join-Path $env:RUNNER_TEMP 'quotabar-reference'
           git worktree add --detach $reference b5b9de048062e50e9ab4973ca48b75d9bf0d0e53
@@ -181,5 +204,5 @@ jobs:
         if: always()
         with:
           name: windows-dashboard-comparison
-          path: artifacts/windows/dashboard-comparison
+          path: ${{ steps.validation.outputs.root }}/artifacts/windows/dashboard-comparison
           if-no-files-found: warn

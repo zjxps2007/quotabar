@@ -38,7 +38,7 @@ macOS ZIP을 풀고 `QuotaBar.app`을 응용 프로그램 폴더에 복사합니
 
 0.1.1부터 **설정 → 앱 업데이트**에서 자동 업데이트를 켜거나 끌 수 있습니다. 새 정식 버전을 확인하고 서명된 파일을 자동으로 내려받으며, Dashboard를 닫으면 설치 후 다시 시작합니다. 자동 업데이트를 끈 상태에서도 수동 확인·설치가 가능합니다. [동작과 배포 절차](docs/AUTOMATIC_UPDATES.md)를 참고하세요.
 
-`codex/rust-native` 브랜치의 macOS·Windows 상주 프로세스, 대시보드와 Claude 콜백은 모두 Rust 실행 파일로 빌드됩니다. 이 브랜치의 패키지는 [Native platforms CI](https://github.com/zjxps2007/quotabar/actions/workflows/platforms.yml)에서 받을 수 있으며, 위의 정식 v0.1.4 다운로드와 구분됩니다. [구조와 호환성 검증](docs/RUST_NATIVE_VALIDATION.md)을 참고하세요.
+`main` 브랜치의 macOS·Windows 상주 프로세스, 대시보드와 Claude 콜백은 모두 Rust 실행 파일로 빌드됩니다. main의 패키지는 [Native platforms CI](https://github.com/zjxps2007/quotabar/actions/workflows/platforms.yml)에서 받을 수 있으며, 위의 정식 v0.1.4 다운로드와 구분됩니다. [구조와 호환성 검증](docs/RUST_NATIVE_VALIDATION.md)을 참고하세요.
 
 Windows에서는 관리자 권한 없이 현재 사용자에게 설치되며, 시작 메뉴에서 **QuotaBar**를 실행할 수 있습니다. Windows ARM64와 WSL 계정은 아직 지원하지 않습니다.
 
@@ -66,6 +66,7 @@ Windows에서는 트레이 아이콘을 **우클릭**하면 사용량과 **Dashb
 - [macOS 실행·계정 연결·설정](macos/README.md)
 - [플랫폼 구조와 구현 계획](docs/PLATFORM_PLAN.md)
 - [Windows 검증 기록](docs/WINDOWS_VALIDATION.md) · [macOS 검증 기록](docs/VALIDATION.md)
+- [Rust 빌드·레거시 비교 검증](docs/RUST_NATIVE_VALIDATION.md)
 
 ## 라이선스와 출처
 
