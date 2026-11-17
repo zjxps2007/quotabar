@@ -1160,17 +1160,21 @@ pub fn hyperlink(
         let face = if underline {
             Face::Underlined
         } else {
-            Face::Regular
+            Face::Preferred(PreferredFont::Body)
         };
         let run = renderer.run(ui.ctx(), title, size, face, color)?;
-        let height = system_line_height(ui, f64::from(size)).max(run.size.y);
+        let body = PreferredFont::metrics(&PreferredFont::Body.base(), ui);
+        let height = if underline {
+            system_line_height(ui, f64::from(size)).max(run.size.y)
+        } else {
+            body.height.max(run.metrics.height)
+        };
         let (rect, response) = ui.allocate_exact_size(vec2(run.size.x, height), Sense::click());
         let scale = ui.pixels_per_point();
         let shape = if underline {
             run.centered_shape(rect.left_center(), scale, color)
         } else {
-            let top = pos2(rect.left(), rect.center().y - run.size.y * 0.5);
-            run.shape(top, scale, color)
+            run.preferred_shape(rect.min, body.ascent, scale, color)
         };
         ui.painter().add(shape);
         Some(response)

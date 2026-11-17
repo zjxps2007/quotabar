@@ -56,13 +56,34 @@ struct Tile {
     stroke: u32,
     pen: Color32,
     fill: Color32,
-    window_fill: bool,
+    window_target: bool,
 }
 
 #[derive(Clone, Copy)]
 struct EdgeRamp {
     center: f32,
-    width: f32,
+    slope: f32,
+}
+
+impl EdgeRamp {
+    fn width(self) -> f32 {
+        1. + self.slope.abs()
+    }
+
+    fn separated_from(self, next: Self) -> bool {
+        // WPF tests both ends of the row. Its fixed-point rasterizer bounds
+        // the expansion of each sloped edge in whole eighths of a pixel.
+        let expansion = |slope: f32| {
+            let delta = 4. * slope.abs();
+            if slope.fract() == 0. {
+                delta
+            } else {
+                delta.floor() + 1.
+            }
+        };
+        let distance = next.center - self.center - (next.slope - self.slope).abs() * 0.5;
+        distance * 8. >= 8. + expansion(self.slope) + expansion(next.slope)
+    }
 }
 
 struct Coverage {
@@ -73,14 +94,14 @@ struct Coverage {
 }
 
 impl Coverage {
-    fn new(rect: Rect, radius: f32, height: usize, window_fill: bool) -> Self {
+    fn new(rect: Rect, radius: f32, height: usize, window_target: bool) -> Self {
         let fixed = |p: Pos2| (p * 16. + Vec2::splat(0.5)).floor();
         let first = |x: f32| (x * 0.5).ceil() as i32;
         let min = fixed(rect.min);
         let max = fixed(rect.max);
         let mut mask = Self {
             samples: vec![[0, 0]; height * 8],
-            ramps: if window_fill {
+            ramps: if window_target {
                 vec![[None; 2]; height]
             } else {
                 Vec::new()
@@ -162,21 +183,37 @@ impl Coverage {
             let center_y = (y as f32 + 0.5) * 16.;
             self.ramps[y][side] = Some(EdgeRamp {
                 center: (lo.x + (center_y - lo.y) * slope) / 16.,
-                width: 1. + slope.abs(),
+                slope,
             });
         }
     }
 
     fn window_fraction(&self, x: usize, y: usize) -> f32 {
         if let [Some(left), Some(right)] = self.ramps[y]
-            && left.center + left.width * 0.5 <= right.center - right.width * 0.5
+            && left.separated_from(right)
         {
             let center = x as f32 + 0.5;
-            let from_left = 0.5 + (center - left.center) / left.width;
-            let from_right = 0.5 + (right.center - center) / right.width;
+            let from_left = 0.5 + (center - left.center) / left.width();
+            let from_right = 0.5 + (right.center - center) / right.width();
             return from_left.min(from_right).clamp(0., 1.);
         }
         self.pixel(x, y) as f32 / 64.
+    }
+
+    fn can_interpolate_stroke(&self, inner: &Self, y: usize) -> bool {
+        let [Some(left), Some(right)] = self.ramps[y] else {
+            return false;
+        };
+        match inner.ramps[y] {
+            [Some(a), Some(b)] => {
+                left.separated_from(a) && a.separated_from(b) && b.separated_from(right)
+            }
+            [None, None] => {
+                left.separated_from(right)
+                    && inner.samples[y * 8..y * 8 + 8].iter().all(|&[a, b]| a == b)
+            }
+            _ => false,
+        }
     }
 
     fn pixel(&self, x: usize, y: usize) -> u32 {
@@ -199,14 +236,38 @@ impl Tile {
         let stroke = f32::from_bits(self.stroke);
         let inner = outer.shrink(stroke);
         let radius = f32::from_bits(self.radius);
-        let pen_coverage = Coverage::new(outer, radius + 0.5 * stroke, height, self.window_fill);
-        let fill_coverage =
-            (stroke > 0.).then(|| Coverage::new(inner, radius - 0.5 * stroke, height, false));
+        let pen_coverage = Coverage::new(outer, radius + 0.5 * stroke, height, self.window_target);
+        let fill_coverage = (stroke > 0.)
+            .then(|| Coverage::new(inner, radius - 0.5 * stroke, height, self.window_target));
         let mut pixels = Vec::with_capacity(width * height);
         for y in 0..height {
+            let interpolate_stroke = self.window_target
+                && fill_coverage
+                    .as_ref()
+                    .is_some_and(|inner| pen_coverage.can_interpolate_stroke(inner, y));
             for x in 0..width {
-                if self.window_fill {
-                    pixels.push(self.fill.gamma_multiply(pen_coverage.window_fraction(x, y)));
+                if self.window_target {
+                    let Some(inner) = &fill_coverage else {
+                        pixels.push(self.fill.gamma_multiply(pen_coverage.window_fraction(x, y)));
+                        continue;
+                    };
+                    let fill = inner.window_fraction(x, y);
+                    // The pen is a hollow path. Overlapping edge ramps make
+                    // the whole pen row use samples, including its straight parts.
+                    let stroke = if interpolate_stroke {
+                        (pen_coverage.window_fraction(x, y) - fill).max(0.)
+                    } else {
+                        pen_coverage.pixel(x, y).saturating_sub(inner.pixel(x, y)) as f32 / 64.
+                    };
+                    let pen = stroke * (1. - fill * f32::from(self.fill.a()) / 255.);
+                    let mix =
+                        |a: u8, b: u8| (f32::from(a) * pen + f32::from(b) * fill).round() as u8;
+                    pixels.push(Color32::from_rgba_premultiplied(
+                        mix(self.pen.r(), self.fill.r()),
+                        mix(self.pen.g(), self.fill.g()),
+                        mix(self.pen.b(), self.fill.b()),
+                        mix(self.pen.a(), self.fill.a()),
+                    ));
                     continue;
                 }
                 let outside = pen_coverage.pixel(x, y);
@@ -248,6 +309,56 @@ mod tests {
             let mask = Coverage::new(Rect::from_min_size(origin, size), 2., 17, true);
             assert_eq!((255. * mask.window_fraction(x, y)).round() as u32, window);
             assert_eq!((255 * mask.pixel(x, y) + 32) / 64, bitmap);
+        }
+    }
+
+    #[test]
+    fn outlined_window_controls_interpolate_only_separated_edges() {
+        // WPF uses trapezoids along the straight sides of a one-pixel pen and
+        // falls back to samples where the inner and outer corner ramps overlap.
+        for (origin, size, radius, x, y, expected) in [
+            (
+                pos2(2. / 64., 38. / 64.),
+                vec2(17. + 19. / 26., 16.),
+                2.0_f32,
+                0,
+                5,
+                239_u8,
+            ),
+            (
+                pos2(1. / 64., 19. / 64.),
+                vec2(60.6875, 40.25),
+                16.,
+                7,
+                3,
+                216,
+            ),
+            (
+                pos2(1. / 64., 19. / 64.),
+                vec2(60.6875, 40.25),
+                16.,
+                4,
+                6,
+                215,
+            ),
+        ] {
+            let end = origin + size;
+            let tile = Tile {
+                size: [end.x.ceil() as usize, end.y.ceil() as usize],
+                inset: [
+                    origin.x,
+                    origin.y,
+                    end.x.ceil() - end.x,
+                    end.y.ceil() - end.y,
+                ]
+                .map(f32::to_bits),
+                radius: radius.to_bits(),
+                stroke: 1.0_f32.to_bits(),
+                pen: Color32::WHITE,
+                fill: Color32::from_gray(128),
+                window_target: true,
+            };
+            assert!(tile.image()[(x, y)].r().abs_diff(expected) <= 1);
         }
     }
 
@@ -345,7 +456,7 @@ impl BorderRenderer {
             stroke: s.to_bits(),
             pen: stroke.color,
             fill,
-            window_fill: self.window_target && s == 0.,
+            window_target: self.window_target,
         };
         let texture = match self.tiles.entry(tile) {
             std::collections::hash_map::Entry::Occupied(entry) => entry.into_mut(),

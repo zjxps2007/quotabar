@@ -419,15 +419,24 @@ pub fn popup_choice(
     (index < labels.len() && index != selected).then_some(index)
 }
 
+pub enum ButtonLayout {
+    Intrinsic(NSControlSize),
+    TitleLine,
+}
+
 pub fn standard_button(
     ui: &mut Ui,
     title: &str,
     symbol: Option<&str>,
-    control_size: NSControlSize,
+    layout: ButtonLayout,
     font_size: Option<f32>,
     focus: Color32,
 ) -> Option<Response> {
-    let size = if symbol.is_some() || control_size != NSControlSize::Regular {
+    let control_size = match layout {
+        ButtonLayout::Intrinsic(size) => size,
+        ButtonLayout::TitleLine => NSControlSize::Regular,
+    };
+    let size = if matches!(layout, ButtonLayout::Intrinsic(_)) {
         let main = MainThreadMarker::new()?;
         let key = Id::new((
             "AppKit button alignment size",
@@ -448,6 +457,8 @@ pub fn standard_button(
                         + 8.
                         + button.attributedTitle().size().width.ceil()
                         + 16.;
+                } else if symbol.is_none() && control_size == NSControlSize::Regular {
+                    size.width = button.attributedTitle().size().width.ceil() + 16.;
                 }
                 vec2(size.width as f32, size.height as f32)
             })

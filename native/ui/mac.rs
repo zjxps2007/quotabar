@@ -26,7 +26,9 @@ use std::{
 };
 
 mod buttons;
-pub use buttons::{draw_checkbox, draw_segments, draw_switch, popup_choice, standard_button};
+pub use buttons::{
+    ButtonLayout, draw_checkbox, draw_segments, draw_switch, popup_choice, standard_button,
+};
 mod banner;
 pub use banner::BannerLabel;
 mod selectable_text;

@@ -726,7 +726,7 @@ impl Dashboard {
                 ui.add_space(12.);
                 if ui.add_enabled_ui(!self.state.demo, |ui| {
                     crate::mac::standard_button(ui, "데이터 폴더 열기", None,
-                        objc2_app_kit::NSControlSize::Regular, Some(12.), p.focus_ring)
+                        crate::mac::ButtonLayout::TitleLine, Some(12.), p.focus_ring)
                         .unwrap_or_else(|| action(ui, "데이터 폴더 열기", false, p))
                 }).inner.clicked() {
                     crate::mac::open_data();
@@ -811,7 +811,7 @@ impl Dashboard {
             {
                 if startup == "requiresApproval" {
                     ui.add_space(14.);
-                    if sheet_button(ui, "로그인 항목 설정 열기", p).clicked() {
+                    if settings_button(ui, "로그인 항목 설정 열기", p).clicked() {
                         self.wire.action("startup-settings", Value::Null);
                     }
                 }
@@ -873,13 +873,13 @@ impl Dashboard {
             ui.add_space(if MAC { 14. } else { 16. });
             ui.horizontal(|ui| {
                 if ui.add_enabled_ui(!busy && (MAC || !self.state.demo), |ui| {
-                    sheet_button(ui, "업데이트 확인", p)
+                    settings_button(ui, "업데이트 확인", p)
                 }).inner.clicked() {
                     self.wire.action("check-app-update", Value::Null);
                 }
                 if matches!(phase, "available" | "ready") {
                     let enabled = !self.state.demo && (MAC || self.state.raw["loggingIn"] != true);
-                    if ui.add_enabled_ui(enabled, |ui| sheet_button(ui, "설치 후 다시 시작", p)).inner.clicked() {
+                    if ui.add_enabled_ui(enabled, |ui| settings_button(ui, "설치 후 다시 시작", p)).inner.clicked() {
                         self.wire.action("install-app-update", Value::Null);
                     }
                 }
@@ -892,6 +892,21 @@ impl Dashboard {
         });
     }
 }
+fn settings_button(ui: &mut Ui, title: &str, p: Palette) -> Response {
+    #[cfg(target_os = "macos")]
+    if let Some(button) = crate::mac::standard_button(
+        ui,
+        title,
+        None,
+        crate::mac::ButtonLayout::Intrinsic(objc2_app_kit::NSControlSize::Regular),
+        None,
+        p.focus_ring,
+    ) {
+        return button;
+    }
+    action(ui, title, false, p)
+}
+
 fn settings_title(ui: &mut Ui, text: &str, _symbol: &str, p: Palette) {
     #[cfg(target_os = "macos")]
     ui.horizontal(|ui| {

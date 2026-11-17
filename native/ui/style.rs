@@ -936,7 +936,7 @@ pub fn action_on(ui: &mut Ui, s: &str, primary: bool, p: Palette, backdrop: Colo
             ui,
             text,
             symbol,
-            objc2_app_kit::NSControlSize::Regular,
+            crate::mac::ButtonLayout::Intrinsic(objc2_app_kit::NSControlSize::Regular),
             None,
             p.focus_ring,
         )
@@ -1043,7 +1043,7 @@ pub fn sheet_button(ui: &mut Ui, title: &str, p: Palette) -> Response {
         ui,
         title,
         None,
-        objc2_app_kit::NSControlSize::Regular,
+        crate::mac::ButtonLayout::TitleLine,
         None,
         p.focus_ring,
     ) {
@@ -1058,7 +1058,7 @@ pub fn small_button(ui: &mut Ui, title: &str, p: Palette) -> Response {
         ui,
         title,
         None,
-        objc2_app_kit::NSControlSize::Small,
+        crate::mac::ButtonLayout::Intrinsic(objc2_app_kit::NSControlSize::Small),
         None,
         p.focus_ring,
     )
