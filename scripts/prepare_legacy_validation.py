@@ -80,6 +80,7 @@ def prepare(destination=None):
     revision = git("rev-parse", "HEAD").decode().strip()
     files = production_files()
     digest = hashlib.sha256()
+    digest.update(Path(__file__).read_bytes())
     hashes = {}
     for name in files:
         value = hashlib.sha256((ROOT / name).read_bytes()).hexdigest()
@@ -142,6 +143,15 @@ def prepare(destination=None):
         target = inside(destination, destination / name)
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(ROOT / name, target)
+    # NOTICE changes when implementation paths and shipped dependencies change.
+    # Give both renderers the current document, keeping all UI assertions intact.
+    comparison = destination / "macos/scripts/compare-dashboard.py"
+    text = comparison.read_text(encoding="utf-8")
+    anchor = '    src = work / "macos/Sources/QuotaBar"'
+    if text.count(anchor) != 1:
+        raise ValueError("Unexpected archived reference builder")
+    text = text.replace(anchor, '    (work / "NOTICE").write_bytes((dashboard.ROOT / "NOTICE").read_bytes())\n' + anchor)
+    comparison.write_text(text, encoding="utf-8")
     # The resource symlink above may have been materialized before replacing shared/.
     if os.name == "nt":
         resources = destination / "macos/Sources/QuotaBar/Resources"

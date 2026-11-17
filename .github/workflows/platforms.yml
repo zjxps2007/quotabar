@@ -144,6 +144,8 @@ jobs:
           $reference = Join-Path $env:RUNNER_TEMP 'quotabar-reference'
           git worktree add --detach $reference b5b9de048062e50e9ab4973ca48b75d9bf0d0e53
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          # Compare the same current legal text in both unchanged UI renderers.
+          Copy-Item -LiteralPath (Join-Path $env:GITHUB_WORKSPACE 'NOTICE') -Destination (Join-Path $reference 'NOTICE') -Force
           # Give the original demo provider the same reset timestamps as the Rust menu probe.
           $demo = Join-Path $reference 'windows/src/QuotaBar.Core/Demo.cs'
           $source = [IO.File]::ReadAllText($demo)
