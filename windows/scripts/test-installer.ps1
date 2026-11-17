@@ -1,4 +1,5 @@
 param([string]$InstallerPath)
+. "$PSScriptRoot\common.ps1"
 $ErrorActionPreference = 'Stop'
 $repo = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..'))
 $metadata = Get-Content -LiteralPath (Join-Path $repo 'artifacts\windows\installer-build-info.json') -Raw | ConvertFrom-Json

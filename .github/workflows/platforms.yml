@@ -7,6 +7,7 @@ permissions:
   contents: read
 jobs:
   windows-updater:
+    if: github.ref == 'refs/heads/main' || !contains(github.event.head_commit.message, '[windows-installer-test-only]')
     runs-on: windows-2025
     timeout-minutes: 45
     steps:
@@ -25,6 +26,7 @@ jobs:
         working-directory: ${{ steps.validation.outputs.root }}
         run: ./windows/scripts/test-updater.ps1
   macos:
+    if: github.ref == 'refs/heads/main' || !contains(github.event.head_commit.message, '[windows-installer-test-only]')
     runs-on: macos-15
     timeout-minutes: 45
     steps:
