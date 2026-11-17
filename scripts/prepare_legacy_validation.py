@@ -16,7 +16,7 @@ import tarfile
 ROOT = Path(__file__).resolve().parents[1]
 DIRECTORIES = ("native/", "vendor/", "shared/", "windows/assets/", "windows/installer/", "macos/assets/")
 FILES = {
-    "Cargo.toml", "Cargo.lock", "build.rs", "LICENSE", "NOTICE",
+    "Cargo.toml", "Cargo.lock", ".cargo/config.toml", "build.rs", "LICENSE", "NOTICE",
     "macos/scripts/build.sh", "macos/scripts/build-native.sh", "macos/scripts/package.sh",
     "windows/scripts/build-native.ps1", "windows/scripts/package.ps1",
     "windows/scripts/package-installer.ps1", "windows/scripts/write-update-version.ps1",
@@ -63,6 +63,7 @@ def extract_snapshot(data, destination):
     for path, name in links:
         target = inside(destination, path.parent / name)
         inside(destination, path.parent)
+        path.parent.mkdir(parents=True, exist_ok=True)
         if path.is_symlink() or path.is_file():
             path.unlink()
         if path.exists():

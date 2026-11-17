@@ -48,7 +48,7 @@ python3 macos/scripts/compare-dashboard.py --allow-raster-differences
 ./windows/scripts/smoke.ps1 -VerifyForeground
 ```
 
-prepare_legacy_validation.py는 shared/legacy-validation.json에 고정한 legacy 커밋과 트리 해시를 확인하고 target/legacy-validation 아래에 별도 Git 복제본을 만듭니다. 레거시 검사 코드를 복원한 다음 현재 체크아웃의 Rust 소스·공유 데이터·운영체제 리소스·제품 빌드 스크립트를 덮어쓰고 모든 파일의 SHA-256을 대조합니다. main 작업 트리에 Swift·C# 파일을 복원하지 않습니다.
+prepare_legacy_validation.py는 shared/legacy-validation.json에 고정한 legacy 커밋과 트리 해시를 확인하고 Git에서 제외한 target/legacy-validation 아래에 별도 Git 복제본을 만듭니다. 레거시 검사 코드를 복원한 다음 현재 체크아웃의 Rust 소스·Cargo 설정·공유 데이터·운영체제 리소스·제품 빌드 스크립트를 덮어쓰고 모든 파일의 SHA-256을 대조합니다. Swift·C# 소스를 main의 추적 파일로 복원하지 않습니다.
 
 CI도 이 별도 폴더에서 기존 Swift 109개 검사, Windows 통합 검사, 실제 창·팝오버·입력·트레이 비교, 설치·제거와 업데이트·복구 검사를 실행합니다. 제품 빌드는 현재 Rust 소스를 사용하고 비교용 파일은 고정한 legacy 자료를 사용합니다. 코드 제거를 이유로 기능·화면 검사 항목을 생략하지 않습니다.
 
