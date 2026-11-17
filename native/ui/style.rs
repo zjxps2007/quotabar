@@ -1012,21 +1012,27 @@ pub fn action_on(ui: &mut Ui, s: &str, primary: bool, p: Palette, backdrop: Colo
 #[cfg(not(target_os = "macos"))]
 pub fn action_on(ui: &mut Ui, s: &str, primary: bool, p: Palette, backdrop: Color32) -> Response {
     let ink = if primary { p.on } else { p.ink };
+    let fill = if primary { p.accent } else { p.card };
+    let stroke = Stroke::new(1_f32, if primary { p.accent } else { p.line });
     button_feedback(ui, backdrop, ink, vec2(10., 5.), |ui| {
         #[cfg(windows)]
-        let minimum = crate::windows_text::natural_size(ui, s, 12., false)
-            .map_or(vec2(0., 31.), |size| size + vec2(26., 16.));
-        #[cfg(not(windows))]
-        let minimum = vec2(0., 31.);
+        if let Some(text) = crate::windows_text::MeasuredLabel::natural(ui, s, 12., false) {
+            // WPF's ContentPresenter centers the measured TextBlock inside
+            // a one-DIP border and 12-by-7 DIP padding.
+            let (rect, response) =
+                ui.allocate_exact_size(text.size + vec2(26., 16.), Sense::click());
+            ui.painter().rect(rect, 8, fill, stroke, StrokeKind::Inside);
+            let top = rect.center() - text.size * 0.5;
+            text.paint(ui.painter(), top, ink);
+            response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, ui.is_enabled(), s));
+            return response;
+        }
         ui.add(
             Button::new(rich(s, 12., false, ink))
-                .fill(if primary { p.accent } else { p.card })
-                .stroke(Stroke::new(
-                    1.0_f32,
-                    if primary { p.accent } else { p.line },
-                ))
+                .fill(fill)
+                .stroke(stroke)
                 .corner_radius(8)
-                .min_size(minimum),
+                .min_size(vec2(0., 31.)),
         )
     })
     .on_hover_cursor(CursorIcon::PointingHand)

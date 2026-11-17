@@ -13,7 +13,7 @@ use core_graphics::{
 };
 use core_text::{
     font::{CTFont, CTFontRef},
-    line::CTLine,
+    line::{CTLine, CTLineRef},
     string_attributes::{
         kCTFontAttributeName, kCTForegroundColorFromContextAttributeName, kCTKernAttributeName,
         kCTUnderlineStyleAttributeName,
@@ -166,8 +166,34 @@ struct Key {
     scale: u32,
     face: Face,
     tracking: u32,
+    truncation: Truncation,
     light_ink: bool,
     ink_alpha: u8,
+}
+
+#[derive(Clone, Copy, Default, Hash, Eq, PartialEq)]
+enum Truncation {
+    #[default]
+    None,
+    End(u32),
+    Middle(u32),
+}
+
+#[repr(u32)]
+enum CTLineTruncationType {
+    End = 1,
+    Middle = 2,
+}
+
+// core-text 20 exposes CTLine but does not bind its truncation operation.
+#[link(name = "CoreText", kind = "framework")]
+unsafe extern "C" {
+    fn CTLineCreateTruncatedLine(
+        line: CTLineRef,
+        width: f64,
+        kind: CTLineTruncationType,
+        token: CTLineRef,
+    ) -> CTLineRef;
 }
 
 fn attributed(value: &str, size: f64, face: Face, tracking: f32) -> CFMutableAttributedString {
@@ -231,6 +257,7 @@ fn attributed(value: &str, size: f64, face: Face, tracking: f32) -> CFMutableAtt
     text
 }
 
+#[derive(Clone, Copy)]
 struct LineMetrics {
     height: f32,
     ascent: f32,
@@ -240,8 +267,37 @@ fn raster(key: &Key, limit: usize) -> Option<(ColorImage, Vec2, LineMetrics)> {
     let size = f64::from(f32::from_bits(key.size));
     let scale = f64::from(f32::from_bits(key.scale));
     let make_line = |face| {
-        let text = attributed(&key.text, size, face, f32::from_bits(key.tracking));
-        CTLine::new_with_attributed_string(text.as_concrete_TypeRef())
+        let line_for = |text: &str| {
+            let text = attributed(text, size, face, f32::from_bits(key.tracking));
+            CTLine::new_with_attributed_string(text.as_concrete_TypeRef())
+        };
+        let line = line_for(&key.text);
+        let (width, kind) = match key.truncation {
+            Truncation::None => return line,
+            Truncation::End(bits) => (f64::from(f32::from_bits(bits)), CTLineTruncationType::End),
+            Truncation::Middle(bits) => (
+                f64::from(f32::from_bits(bits)),
+                CTLineTruncationType::Middle,
+            ),
+        };
+        if line.get_typographic_bounds().width <= width {
+            return line;
+        }
+        let token = line_for("…");
+        let result = unsafe {
+            CTLineCreateTruncatedLine(
+                line.as_concrete_TypeRef(),
+                width,
+                kind,
+                token.as_concrete_TypeRef(),
+            )
+        };
+        if result.is_null() {
+            // Core Text returns null when even the ellipsis will not fit.
+            line_for("")
+        } else {
+            unsafe { CTLine::wrap_under_create_rule(result) }
+        }
     };
     let line = make_line(key.face);
     let bounds = line.get_typographic_bounds();
@@ -326,6 +382,7 @@ fn raster(key: &Key, limit: usize) -> Option<(ColorImage, Vec2, LineMetrics)> {
     ))
 }
 
+#[derive(Clone)]
 struct Run {
     texture: TextureHandle,
     size: Vec2,
@@ -348,7 +405,7 @@ impl Renderer {
         face: Face,
         color: Color32,
     ) -> Option<&Run> {
-        self.tracked_run(ctx, text, size, face, color, 0.)
+        self.tracked_run(ctx, text, size, face, color, 0., Truncation::None)
     }
 
     fn tracked_run(
@@ -359,6 +416,7 @@ impl Renderer {
         face: Face,
         color: Color32,
         tracking: f32,
+        truncation: Truncation,
     ) -> Option<&Run> {
         let [r, g, b, _] = color.to_srgba_unmultiplied();
         let ink = Color32::from_rgb(r, g, b).intensity();
@@ -368,6 +426,7 @@ impl Renderer {
             scale: ctx.pixels_per_point().to_bits(),
             face,
             tracking: tracking.to_bits(),
+            truncation,
             light_ink: ink > ctx.style().visuals.panel_fill.intensity(),
             ink_alpha: if color.is_additive() { 255 } else { color.a() },
         };
@@ -427,6 +486,7 @@ impl Renderer {
                 face,
                 color,
                 format.extra_letter_spacing,
+                Truncation::None,
             )?;
             let origin = text.pos + row.pos.to_vec2();
             let scale = ctx.pixels_per_point();
@@ -601,7 +661,25 @@ pub fn dashboard_heading(ui: &mut Ui, text: &str, color: Color32) -> Option<Resp
 }
 
 pub fn stat_value(ui: &mut Ui, text: &str, color: Color32) -> Option<Response> {
-    draw_label(ui, text, 28., Face::RoundedDigits, color, LineBox::Stack)
+    draw_label(
+        ui,
+        text,
+        28.,
+        Face::RoundedDigits,
+        color,
+        LineBox::CenteredStack,
+    )
+}
+
+pub fn section_heading(ui: &mut Ui, text: &str, color: Color32) -> Option<Response> {
+    draw_label(
+        ui,
+        text,
+        15.,
+        Face::Emphasized,
+        color,
+        LineBox::CenteredStack,
+    )
 }
 
 pub fn stacked_label(
@@ -679,6 +757,89 @@ pub fn tabular_label(
         LineBox::Glyphs,
     )
     .unwrap_or_else(|| crate::style::label(ui, text, size, weight == DigitWeight::Semibold, color))
+}
+
+pub fn activity_model_row(
+    ui: &mut Ui,
+    model: &str,
+    detail: &str,
+    total: &str,
+    tint: Color32,
+    palette: crate::style::Palette,
+) -> Option<()> {
+    let handle = ui.ctx().plugin_opt::<Renderer>()?;
+    let mut renderer = handle.lock();
+    let width = ui.available_width();
+    let scale = ui.pixels_per_point();
+    let amount = renderer
+        .run(
+            ui.ctx(),
+            total,
+            10.,
+            Face::TabularDigits(DigitWeight::Medium),
+            palette.ink,
+        )?
+        .clone();
+    let amount_width = (amount.size.x * scale).ceil() / scale;
+    // The HStack has a six-point dot, three six-point gaps and a Spacer
+    // with a six-point minimum between the two text columns.
+    let limit = (width - 30. - amount_width).max(0.).to_bits();
+    let title = renderer
+        .tracked_run(
+            ui.ctx(),
+            model,
+            10.5,
+            Face::Medium,
+            palette.ink,
+            0.,
+            Truncation::Middle(limit),
+        )?
+        .clone();
+    let counts = renderer
+        .tracked_run(
+            ui.ctx(),
+            detail,
+            8.5,
+            Face::TabularDigits(DigitWeight::Regular),
+            palette.muted,
+            0.,
+            Truncation::End(limit),
+        )?
+        .clone();
+    drop(renderer);
+
+    // SwiftUI aligns the circle's bottom, the model's first text baseline
+    // and the total's baseline. Its second line belongs to the model column.
+    let baseline = title.metrics.ascent.max(amount.metrics.ascent).max(6.);
+    let title_y = baseline - title.metrics.ascent;
+    let counts_y = title_y + title.size.y + 1.;
+    let amount_y = baseline - amount.metrics.ascent;
+    let height = (counts_y + counts.size.y).max(amount_y + amount.size.y);
+    let (row, response) = ui.allocate_exact_size(vec2(width, height), Sense::hover());
+    ui.painter()
+        .circle_filled(row.min + vec2(3., baseline - 3.), 3., tint);
+    for (key, run, text, x, y, color) in [
+        ("model", title, model, 12., title_y, palette.ink),
+        ("counts", counts, detail, 12., counts_y, palette.muted),
+        (
+            "total",
+            amount,
+            total,
+            width - amount_width,
+            amount_y,
+            palette.ink,
+        ),
+    ] {
+        let pos = row.min + vec2(x, y);
+        ui.painter().add(run.shape(pos, scale, color));
+        let label = ui.interact(
+            Rect::from_min_size(pos, run.size),
+            response.id.with(key),
+            Sense::hover(),
+        );
+        label.widget_info(|| WidgetInfo::labeled(WidgetType::Label, ui.is_enabled(), text));
+    }
+    Some(())
 }
 
 pub fn symbol_label(ui: &mut Ui, name: &str, text: &str, style: PreferredFont, color: Color32) {
@@ -808,6 +969,7 @@ enum LineBox {
     System,
     CenteredSystem,
     Stack,
+    CenteredStack,
     Preferred { height: f32, ascent: f32 },
 }
 
@@ -841,7 +1003,7 @@ fn draw_label(
         }
         LineBox::Control => system_line_height(ui, f64::from(size)),
         LineBox::Preferred { height, .. } => height.max(run.metrics.height),
-        LineBox::Stack => run
+        LineBox::Stack | LineBox::CenteredStack => run
             .metrics
             .height
             .max(system_line_height(ui, f64::from(size))),
@@ -850,12 +1012,8 @@ fn draw_label(
     let scale = ui.ctx().pixels_per_point();
     let shape = match line_box {
         LineBox::Preferred { ascent, .. } => run.preferred_shape(rect.min, ascent, scale, color),
-        // The tile's number keeps its intrinsic line height. Center the actual
-        // rounded-digit bitmap, whose separately rounded descent can add a pixel.
-        LineBox::Stack if face == Face::RoundedDigits => {
-            run.centered_shape(rect.left_center(), scale, color)
-        }
-        LineBox::Centered | LineBox::CenteredSystem => {
+        // A fallback face can leave an odd backing pixel in the system stack.
+        LineBox::Centered | LineBox::CenteredSystem | LineBox::CenteredStack => {
             run.centered_shape(rect.left_center(), scale, color)
         }
         LineBox::Control => {
@@ -1022,6 +1180,40 @@ mod tests {
     use super::*;
 
     #[test]
+    fn middle_truncation_preserves_both_ends_inside_the_proposed_width() {
+        for scale in [1.0_f32, 2.] {
+            let image = |start: &str, end: &str, width: Truncation| {
+                let text = format!(
+                    "{start} 모델 {} {} {end}",
+                    "Extended ".repeat(8),
+                    "Context ".repeat(8)
+                );
+                let key = Key {
+                    text,
+                    size: 10.5_f32.to_bits(),
+                    scale: scale.to_bits(),
+                    face: Face::Medium,
+                    tracking: 0,
+                    truncation: width,
+                    light_ink: false,
+                    ink_alpha: 216,
+                };
+                raster(&key, 4096).unwrap().0
+            };
+            let limit = Truncation::Middle(155_f32.to_bits());
+            let sample = image("Atlas", "North", limit);
+            assert!(sample.size[0] <= (155. * scale) as usize);
+            assert!(sample.pixels.iter().any(|pixel| pixel.a() > 128));
+            assert_ne!(sample.pixels, image("Orion", "North", limit).pixels);
+            assert_ne!(sample.pixels, image("Atlas", "South", limit).pixels);
+            assert_eq!(
+                image("Atlas", "North", Truncation::End(155_f32.to_bits())).pixels,
+                image("Atlas", "South", Truncation::End(155_f32.to_bits())).pixels
+            );
+        }
+    }
+
+    #[test]
     fn segmented_picker_labels_share_the_system_font_baseline() {
         for scale in [1.0_f32, 2.] {
             let ctx = Context::default();
@@ -1078,6 +1270,7 @@ mod tests {
             scale: 1.0_f32.to_bits(),
             face: Face::Regular,
             tracking: 0,
+            truncation: Truncation::None,
             light_ink: false,
             ink_alpha: 255,
         };
@@ -1119,6 +1312,7 @@ mod tests {
                     scale: scale.to_bits(),
                     face: Face::label(heavy),
                     tracking: 0,
+                    truncation: Truncation::None,
                     light_ink,
                     ink_alpha: 255,
                 };

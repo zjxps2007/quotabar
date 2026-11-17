@@ -401,6 +401,28 @@ static NSDictionary *visibleText(NSURL *frame, NSString *operation) {
         }
         return @{@"model": @NO, @"recognized": body};
     }
+    if ([operation isEqual:@"activityLongModel"]) {
+        CGRect prefix = CGRectNull;
+        for (VNRecognizedTextObservation *line in request.results) {
+            for (VNRecognizedText *candidate in [line topCandidates:3])
+                if ([candidate.string.lowercaseString containsString:@"atlas"]) prefix = line.boundingBox;
+        }
+        BOOL suffix = NO, middle = NO, total = NO;
+        if (!CGRectIsNull(prefix)) {
+            // Vision may split a single displayed row into several observations.
+            for (VNRecognizedTextObservation *line in request.results) {
+                if (fabs(CGRectGetMidY(line.boundingBox) - CGRectGetMidY(prefix)) > 0.65 * CGRectGetHeight(prefix)
+                    || CGRectGetMaxX(line.boundingBox) < CGRectGetMinX(prefix)) continue;
+                for (VNRecognizedText *candidate in [line topCandidates:3]) {
+                    NSString *value = candidate.string.lowercaseString;
+                    if ([value containsString:@"north"]) suffix = YES;
+                    if ([value containsString:@"centeronly"]) middle = YES;
+                    if ([value containsString:@"320"]) total = YES;
+                }
+            }
+        }
+        return @{@"modelEnds": @(suffix && !middle), @"rowTotal": @(total), @"recognized": body};
+    }
     if ([operation isEqual:@"activityTotals"]) {
         BOOL claude = [letters containsString:@"560tokens"], codex = [letters containsString:@"810tokens"];
         if (claude && codex) return @{@"claude": @YES, @"codex": @YES};
@@ -723,7 +745,7 @@ static NSDictionary *perform(NSDictionary *request) {
     if ([op isEqual:@"scrollContent"]) return scrollContent(window);
     if ([op isEqual:@"scrollerPosition"] || [op isEqual:@"pageSettings"])
         return settingsScroller(window, [op isEqual:@"pageSettings"]);
-    if ([op isEqual:@"document"] || [op isEqual:@"activityTotals"] || [op isEqual:@"activityDetail"]) {
+    if ([@[@"document", @"activityTotals", @"activityDetail", @"activityLongModel"] containsObject:op]) {
         NSURL *dir = [NSURL fileURLWithFileSystemRepresentation:getenv("QUOTABAR_TEST_UI_DIRECTORY") isDirectory:YES relativeToURL:nil];
         return visibleText([dir URLByAppendingPathComponent:@"frame.png"], op);
     }

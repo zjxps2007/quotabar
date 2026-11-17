@@ -938,7 +938,7 @@ impl Dashboard {
 pub fn section_title(ui: &mut Ui, title: &str, subtitle: &str, p: Palette) {
     #[cfg(target_os = "macos")]
     {
-        if crate::mac_text::stacked_label(ui, title, 15., true, p.ink).is_none() {
+        if crate::mac_text::section_heading(ui, title, p.ink).is_none() {
             system_label(ui, title, 15., true, p.ink);
         }
         ui.add_space(4.);

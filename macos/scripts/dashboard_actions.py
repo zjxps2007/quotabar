@@ -385,6 +385,16 @@ def scroll_activity_to_bottom(controls):
         time.sleep(0.30)
 
 
+def long_activity_fixture(state, day):
+    state = deepcopy(state)
+    long_name = "Atlas Prime " + "Extended Context " * 6 + "CenterOnly " + "Extended Context " * 6 + "Final North"
+    for name, total in [(long_name, 320), ("Second Model", 130), ("Third Model", 75),
+                        ("Fourth Model", 45), ("Fifth Model", 20)]:
+        state["demoReport"]["days"].append({"day": day.isoformat(), "provider": "claude", "model": name,
+                                           "counts": {"input": total - 5, "output": 5, "cached": 2}})
+    return state
+
+
 def quota_status_fixture(fixture):
     state = deepcopy(fixture)
     paused = state["settings"]["accounts"][0]
@@ -606,6 +616,17 @@ def capture_windows(dashboard, program, folder, library, fixture, output, theme,
                         observed["activityDayAfterReturn"] = controls.request("activityDetail")
                     except (TimeoutError, ValueError) as error:
                         observed["activityDayError"] = str(error)
+                    try:
+                        day = today - timedelta(days=1)
+                        show("accounts")
+                        dashboard.send(app.stdin, {"state": {"_0": long_activity_fixture(state, day)}})
+                        show("dashboard")
+                        scroll_activity_to_bottom(controls)
+                        controls.request("press", f"Claude {day}, 830 tokens")
+                        capture("activity-long-model")
+                        observed["activityLongModel"] = controls.request("activityLongModel")
+                    except (TimeoutError, ValueError) as error:
+                        observed["activityLongModelError"] = str(error)
             observed["providerSwitches"] = {}
             observed["accessibleProviderSwitches"] = {}
             observed["providerSwitchEvents"] = {}
@@ -737,7 +758,7 @@ def compare_windows(dashboard, work, original, library):
         for route in (*dashboard.ROUTES, "remove", "message", "message-selected", "message-wrapped", "account-name-selected", "account-email-selected", "popover-sample", "popover-empty", "popover-overflow",
                       "source-path-selected", "settings-path-selected", "settings-bottom", "licenses-notice",
                       "licenses-apache", "empty", "quota-status", "activity-empty", "activity", "activity-detail",
-                      "activity-escape", "activity-return",
+                      "activity-escape", "activity-return", "activity-long-model",
                       *(f"switch-{provider}-{state}" for provider in PROVIDERS for state in ("on", "off"))):
             name = f"{route}-{theme}"
             lhs, rhs = (dest / side / f"{name}.png" for side in ("original", "rust"))
@@ -825,11 +846,15 @@ def compare_windows(dashboard, work, original, library):
                              and results[side][theme].get("activityDayReturnScroll") == "bottom"
                              and results[side][theme].get("activityDayAfterReturn", {}).get("model") is False
                              for side in ("original", "rust") for theme in dashboard.THEMES))
+    long_model_matches = all(results[side][theme].get("activityLongModel", {}).get(key) is True
+                             for side in ("original", "rust") for theme in dashboard.THEMES
+                             for key in ("modelEnds", "rowTotal"))
+    results["longActivityModelIdentical"] = long_model_matches
     results["activityDetailIdentical"] = day_detail_matches
     (dest / "comparison.json").write_text(json.dumps(results, ensure_ascii=False, indent=2))
     return (app_mark_matches and message_matches and copied_accounts and documents_match and scroll_matches
             and activity_matches and switch_matches and frames_match and refresh_matches and manage_matches and reopen_matches
-            and quota_error_matches and day_detail_matches
+            and quota_error_matches and day_detail_matches and long_model_matches
             and all(row["identical"] for row in results["comparisons"].values()))
 
 

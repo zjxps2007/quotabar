@@ -835,6 +835,16 @@ fn mac_tooltip(ui: &mut Ui, date: NaiveDate, calendar: &Calendar, tint: Color32,
         label(ui, format!("모델 {}", models.len()), 9., true, p.muted);
         for (model, counts) in sorted(models).into_iter().take(4) {
             ui.add_space(6.);
+            let detail = format!(
+                "입력 {} · 출력 {} · 캐시 {}",
+                number(counts.input),
+                number(counts.output),
+                number(counts.cached)
+            );
+            let total = number(counts.total());
+            if crate::mac_text::activity_model_row(ui, model, &detail, &total, tint, p).is_some() {
+                continue;
+            }
             ui.horizontal_top(|ui| {
                 ui.spacing_mut().item_spacing.x = 6.;
                 let (dot, _) = ui.allocate_exact_size(vec2(6., 12.), Sense::hover());
@@ -843,16 +853,10 @@ fn mac_tooltip(ui: &mut Ui, date: NaiveDate, calendar: &Calendar, tint: Color32,
                     ui.spacing_mut().item_spacing.y = 1.;
                     crate::mac_text::medium_label(ui, model, 10.5, p.ink)
                         .unwrap_or_else(|| label(ui, model, 10.5, false, p.ink));
-                    let detail = format!(
-                        "입력 {} · 출력 {} · 캐시 {}",
-                        number(counts.input),
-                        number(counts.output),
-                        number(counts.cached)
-                    );
                     tabular_label(ui, &detail, 8.5, DigitWeight::Regular, p.muted);
                 });
                 ui.with_layout(Layout::right_to_left(Align::Min), |ui| {
-                    tabular_label(ui, &number(counts.total()), 10., DigitWeight::Medium, p.ink)
+                    tabular_label(ui, &total, 10., DigitWeight::Medium, p.ink)
                 });
             });
         }
