@@ -458,6 +458,10 @@ impl Dashboard {
             ),
         ];
         let w = (ui.available_width() - 36.) / 4.;
+        #[cfg(target_os = "macos")]
+        let row_id = ui.make_persistent_id("dashboard statistics");
+        #[cfg(target_os = "macos")]
+        let stat_ids = stats.each_ref().map(|stat| row_id.with(stat.3));
         let tiles = |ui: &mut Ui| {
             ui.spacing_mut().item_spacing.x = 12.;
             let card = p.frame(20);
@@ -532,24 +536,13 @@ impl Dashboard {
                     })
                 };
                 #[cfg(target_os = "macos")]
-                {
-                    // A SwiftUI HStack centers each complete card, including its
-                    // background. Give the grid its intrinsic height before painting.
-                    let id = ui.make_persistent_id(("stat tile height", symbol));
-                    card.show_centered_in_grid(ui, id, w, content);
-                }
+                card.show_centered(ui, row_id.with(symbol), w, content);
                 #[cfg(windows)]
                 card.show(ui, content);
             }
         };
         #[cfg(target_os = "macos")]
-        Grid::new("dashboard-statistics")
-            .num_columns(4)
-            .spacing(vec2(12., 0.))
-            .min_col_width(w)
-            .max_col_width(w)
-            .min_row_height(0.)
-            .show(ui, tiles);
+        centered_card_row(ui, stat_ids, tiles);
         #[cfg(windows)]
         ui.horizontal_top(tiles);
         ui.add_space(24.);
@@ -627,6 +620,8 @@ impl Dashboard {
         let columns = columns(ui.available_width(), 290., 14.);
         let w = cell_width(ui.available_width(), columns, 14.);
         let accounts = self.state.accounts.clone();
+        #[cfg(target_os = "macos")]
+        let height_id = ui.make_persistent_id("quota card height");
         for chunk in accounts.chunks(columns) {
             let cards = |ui: &mut Ui| {
                 ui.spacing_mut().item_spacing.x = 14.;
@@ -642,12 +637,7 @@ impl Dashboard {
                     #[cfg(windows)]
                     card.show(ui, content);
                     #[cfg(target_os = "macos")]
-                    let drawn = card.show_centered_in_grid(
-                        ui,
-                        ui.make_persistent_id(("quota card height", &a.id)),
-                        w,
-                        content,
-                    );
+                    let drawn = card.show_centered(ui, height_id.with(&a.id), w, content);
                     #[cfg(target_os = "macos")]
                     if !a.enabled {
                         // SwiftUI applies opacity to the entire card after compositing
@@ -662,13 +652,7 @@ impl Dashboard {
                 }
             };
             #[cfg(target_os = "macos")]
-            Grid::new(("dashboard account row", &chunk[0].id))
-                .num_columns(columns)
-                .spacing(vec2(14., 0.))
-                .min_col_width(w)
-                .max_col_width(w)
-                .min_row_height(0.)
-                .show(ui, cards);
+            centered_card_row(ui, chunk.iter().map(|a| height_id.with(&a.id)), cards);
             #[cfg(windows)]
             ui.horizontal_top(cards);
             ui.add_space(14.);

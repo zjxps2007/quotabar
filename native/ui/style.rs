@@ -127,7 +127,7 @@ impl CardSurface {
     }
 
     #[cfg(target_os = "macos")]
-    pub fn show_centered_in_grid<R>(
+    pub fn show_centered<R>(
         self,
         ui: &mut Ui,
         id: Id,
@@ -168,6 +168,27 @@ impl CardSurface {
         }
         result
     }
+}
+
+#[cfg(any(target_os = "macos", test))]
+pub fn centered_card_row(
+    ui: &mut Ui,
+    card_ids: impl IntoIterator<Item = Id>,
+    body: impl FnOnce(&mut Ui),
+) {
+    let height = ui.data(|data| {
+        card_ids
+            .into_iter()
+            .filter_map(|id| data.get_temp::<f32>(id))
+            .fold(0., f32::max)
+    });
+    // SwiftUI's HStack centers each complete card in the tallest card's height.
+    // Position each card using the current viewport width, including during resize.
+    ui.allocate_ui_with_layout(
+        vec2(ui.available_width(), height),
+        Layout::left_to_right(Align::Center),
+        body,
+    );
 }
 
 impl Palette {
@@ -738,6 +759,7 @@ fn legacy_scroller_reserves_its_full_width_on_the_first_painted_frame() {
     let ctx = Context::default();
     let viewport = |screen_width, content_height| {
         let mut content_width = 0.;
+        let mut cards = Vec::new();
         let input = RawInput {
             screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(screen_width, 130.))),
             time: Some(1.),
@@ -746,11 +768,35 @@ fn legacy_scroller_reserves_its_full_width_on_the_first_painted_frame() {
         let _ = ctx.run(input, |ctx| {
             CentralPanel::default().frame(Frame::NONE).show(ctx, |ui| {
                 let area = show_with_legacy_scroller(ui, ScrollArea::vertical(), 15., |ui| {
+                    let heights = [20., 26., 32., 24.];
+                    let ids = heights.map(|height: f32| Id::new(height.to_bits()));
+                    ui.data_mut(|data| {
+                        for (id, height) in ids.into_iter().zip(heights) {
+                            data.insert_temp(id, height);
+                        }
+                    });
+                    let width = (ui.available_width() - 36.) / 4.;
+                    cards.clear();
+                    centered_card_row(ui, ids, |ui| {
+                        ui.spacing_mut().item_spacing.x = 12.;
+                        for height in heights {
+                            cards.push(
+                                ui.allocate_exact_size(vec2(width, height), Sense::hover())
+                                    .0,
+                            );
+                        }
+                    });
                     ui.allocate_space(vec2(ui.available_width(), content_height));
                 });
                 content_width = area.inner_rect.width();
             });
         });
+        assert_eq!(cards.last().unwrap().right(), content_width);
+        assert!(
+            cards
+                .iter()
+                .all(|card| card.center().y == cards[0].center().y)
+        );
         content_width
     };
     assert_eq!(viewport(280., 300.), 265.);
