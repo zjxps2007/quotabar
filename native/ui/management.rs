@@ -248,7 +248,7 @@ impl Dashboard {
                         .unwrap_or_else(|| label(ui, a.provider, 13., true, p.ink));
                 }
                 #[cfg(windows)]
-                label(ui, a.provider, 13., true, p.ink);
+                crate::windows_text::TextStack::inline(ui).label(ui, a.provider, 13., true, p.ink);
                 ui.add_space(4.);
                 #[cfg(windows)]
                 ui.scope(|ui| {

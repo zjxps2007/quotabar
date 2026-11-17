@@ -1600,8 +1600,19 @@ impl Assets {
         response.widget_info(|| WidgetInfo::labeled(WidgetType::Image, ui.is_enabled(), p));
         let artwork =
             Rect::from_center_size(r.center(), Vec2::splat(size * PROVIDER_MARKS[index].2));
+        if !ui.is_rect_visible(artwork) {
+            return;
+        }
         #[cfg(windows)]
-        let texture = self.bitmaps.texture(ui, index, texture, artwork.width());
+        let (texture, artwork) = if p == "Claude" {
+            windows_bitmaps::claude_vector(ui, response.id, artwork)
+                .unwrap_or_else(|| (texture.clone(), artwork))
+        } else {
+            (
+                self.bitmaps.texture(ui, index, texture, artwork.width()),
+                artwork,
+            )
+        };
         #[cfg(target_os = "macos")]
         let native = crate::mac::provider_logo(ui.ctx(), p, artwork.width());
         #[cfg(target_os = "macos")]
