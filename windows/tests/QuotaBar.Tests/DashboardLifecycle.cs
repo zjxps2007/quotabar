@@ -134,8 +134,8 @@ internal static class DashboardLifecycle
                             capturesValid &= cells >= 13;
                         }
                     }
-                    if (folder == "original" && !HasPaintedContent(path))
-                        throw new InvalidDataException($"The original dashboard produced an empty render target for {s.Name}.");
+                    if (!HasPaintedContent(path))
+                        throw new InvalidDataException($"The {folder} dashboard produced an empty render target for {s.Name}.");
                     if (folder == "candidate")
                         results[s.Name] = ComparePixels(Path.Combine(directory, "original", s.Name + ".png"), path);
                 }
@@ -144,7 +144,13 @@ internal static class DashboardLifecycle
         }
         File.WriteAllBytes(Path.Combine(directory, "result.json"), Json.Bytes(results));
         foreach (var (name, result) in results) Console.WriteLine($"{name}: {result.ChangedPixels:N0} different pixels, {result.Width}×{result.Height}");
-        return capturesValid && results.Count == scenarios.Count && results.Values.All(result => result.Identical);
+        File.WriteAllBytes(Path.Combine(directory, "capture-check.json"), Json.Bytes(new {
+            passed = capturesValid && results.Count == scenarios.Count,
+            expectedScenes = scenarios.Count, capturedScenes = results.Count
+        }));
+        if (!capturesValid || results.Count != scenarios.Count)
+            throw new InvalidDataException("Dashboard client dimensions or activity grid validation failed.");
+        return results.Values.All(result => result.Identical);
     }
     private static int MostColoredCellsInRow(Bitmap image)
     {

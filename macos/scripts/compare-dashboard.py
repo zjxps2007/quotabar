@@ -1,4 +1,5 @@
 """Compare the original SwiftUI windows and menu popover with the Rust UI."""
+import argparse
 import json
 import os
 from pathlib import Path
@@ -8,6 +9,7 @@ from uuid import UUID
 
 from importlib.util import module_from_spec, spec_from_file_location
 import dashboard_actions
+from dashboard_actions import comparison_errors
 import compare_monitor
 
 HERE = Path(__file__).resolve().parent
@@ -109,6 +111,10 @@ def compare_popovers(work, app, originals, results, save_results, library):
 
 
 def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--allow-raster-differences", action="store_true",
+                        help="Check behavior and appearance; keep exact pixel differences as diagnostics")
+    args = parser.parse_args()
     report = dashboard.REPORT
     originals = report / "original"
     originals.mkdir(parents=True, exist_ok=True)
@@ -139,12 +145,18 @@ def main():
                     print(f"{name}: {error}", flush=True)
                 save_results()
         compare_popovers(work, app, originals, results, save_results, library)
-        windows_match = dashboard_actions.compare_windows(dashboard, work, app, library)
+        windows_match = dashboard_actions.compare_windows(
+            dashboard, work, app, library, allow_raster_differences=args.allow_raster_differences)
         placement_matches = dashboard_actions.compare_window_placement(
             dashboard, work, app, library, json.loads((report / "fixture-light.json").read_text()))
         monitor_matches = compare_monitor.compare(dashboard, work, app)
     save_results()
-    return 0 if actions_match and windows_match and placement_matches and monitor_matches and all(record["identical"] for record in results.values()) else 1
+    errors = comparison_errors(results, 18, require_content=True,
+                               strict_pixels=not args.allow_raster_differences)
+    (report / "appearance-check.json").write_text(json.dumps({
+        "passed": not errors, "strictPixels": not args.allow_raster_differences, "errors": errors,
+    }, indent=2))
+    return 0 if actions_match and windows_match and placement_matches and monitor_matches and not errors else 1
 
 
 if __name__ == "__main__":

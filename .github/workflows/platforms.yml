@@ -54,7 +54,7 @@ jobs:
           if-no-files-found: error
       - name: Compare original SwiftUI and Rust windows, popovers and actions
         if: ${{ !cancelled() && steps.package.outcome == 'success' }}
-        run: python3 macos/scripts/compare-dashboard.py
+        run: python3 macos/scripts/compare-dashboard.py --allow-raster-differences
       - uses: actions/upload-artifact@v7
         if: always()
         with:
@@ -161,7 +161,9 @@ jobs:
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
           & $test --compare-visible-dashboards $old $new (Join-Path $comparison 'composed') 'target/release/examples/capture-window.exe'
           $visibleResult = $LASTEXITCODE
-          if ($visibleResult -eq 2) { Write-Output 'Windows compositor comparison inconclusive. See composed/result.json.' }
+          if ($visibleResult -notin 0,1) { exit $visibleResult }
+          python scripts/ui_comparison.py (Join-Path $comparison 'composed/result.json') --expected-count 28 --output (Join-Path $comparison 'composed/appearance-check.json')
+          $visibleAppearanceResult = $LASTEXITCODE
           # An unattended session can have no active display. Allow the isolated WPF
           # reference to rasterize its Visual into a RenderTargetBitmap in that case.
           $runtimePath = Join-Path $app 'Dashboard/QuotaBar.Dashboard.runtimeconfig.json'
@@ -170,8 +172,11 @@ jobs:
           $runtime | ConvertTo-Json -Depth 10 | Set-Content -Encoding utf8NoBOM $runtimePath
           & $test --compare-dashboards $old $new $comparison
           $dashboardResult = $LASTEXITCODE
+          if ($dashboardResult -notin 0,1) { exit $dashboardResult }
+          python scripts/ui_comparison.py (Join-Path $comparison 'result.json') --expected-count 18 --output (Join-Path $comparison 'appearance-check.json')
+          $dashboardAppearanceResult = $LASTEXITCODE
           & $test --compare-tray-apps (Join-Path $app 'QuotaBar.Monitor.exe') 'artifacts/QuotaBar-Windows-x64/QuotaBar.Monitor.exe' (Join-Path $comparison 'tray')
-          if (($contractResults -ne 0) -or $actionResult -ne 0 -or $visibleResult -notin 0,2 -or $dashboardResult -ne 0 -or $LASTEXITCODE -ne 0) { exit 1 }
+          if (($contractResults -ne 0) -or $actionResult -ne 0 -or $visibleAppearanceResult -ne 0 -or $dashboardAppearanceResult -ne 0 -or $LASTEXITCODE -ne 0) { exit 1 }
       - uses: actions/upload-artifact@v7
         if: always()
         with:

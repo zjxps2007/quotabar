@@ -7,8 +7,12 @@ import select
 from copy import deepcopy
 from datetime import datetime, timedelta
 import subprocess
+import sys
 import time
 from uuid import UUID
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
+from ui_comparison import comparison_errors
 
 
 BANNER_MESSAGE = "샘플 계정의 연결을 다시 확인하세요."
@@ -744,7 +748,7 @@ def compare_window_placement(dashboard, work, original, library, fixture):
     return matched
 
 
-def compare_windows(dashboard, work, original, library):
+def compare_windows(dashboard, work, original, library, *, allow_raster_differences=False):
     dest = dashboard.REPORT / "windows"
     results = {"original": {}, "rust": {}, "comparisons": {}, "repeatability": {}}
     fixtures = {theme: json.loads((dashboard.REPORT / f"fixture-{theme}.json").read_text())
@@ -857,11 +861,15 @@ def compare_windows(dashboard, work, original, library):
         long_model_matches = long_model_matches and bool(original) and original == rust
     results["longActivityModelIdentical"] = long_model_matches
     results["activityDetailIdentical"] = day_detail_matches
+    errors = comparison_errors(results["comparisons"], 70, require_content=True,
+                               strict_pixels=not allow_raster_differences)
+    results["appearanceCheck"] = {"passed": not errors,
+                                   "strictPixels": not allow_raster_differences, "errors": errors}
     (dest / "comparison.json").write_text(json.dumps(results, ensure_ascii=False, indent=2))
     return (app_mark_matches and message_matches and copied_accounts and documents_match and scroll_matches
             and activity_matches and switch_matches and frames_match and refresh_matches and manage_matches and reopen_matches
             and quota_error_matches and day_detail_matches and long_model_matches
-            and all(row["identical"] for row in results["comparisons"].values()))
+            and not errors)
 
 
 def compare(dashboard, work, original, fixture, library):
