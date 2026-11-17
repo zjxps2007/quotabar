@@ -220,11 +220,22 @@ def main():
                 for route in ROUTES:
                     path = REPORT / f"{route}-{theme}.png"
                     sizes[path.name] = capture(child, route, path)
-                    movement[path.name] = controls.request("windowMovement", expected={
-                        "movable": False, "backgroundMovable": False,
-                    })
+                    movement[path.name] = controls.request("windowMovement")
+                    if not route.startswith("connect"):
+                        assert movement[path.name]["movable"], movement[path.name]
                     if route == "dashboard" and theme == THEMES[0]:
                         check_resize(child, controls, path, sizes[path.name])
+            send(child.stdin, {"show": {"route": "settings"}})
+            assert wait_for(child.stdout, "route") == {"_0": "settings"}
+            controls.request("scrollerPosition", expected={"position": "top"})
+            controls.request("dragContent", expected={"dragged": True})
+            time.sleep(0.6)
+            controls.request("scrollerPosition", expected={"position": "top"})
+            for _ in range(3):
+                controls.request("scrollContent")
+                time.sleep(0.3)
+            controls.request("scrollerPosition", expected={"position": "bottom"})
+            (REPORT / "scroll-input.json").write_text(json.dumps({"contentDragScrolls": False, "mouseWheelScrolls": True}))
             send(child.stdin, {"close": {}})
             assert child.wait(timeout=7) == 0
         finally:

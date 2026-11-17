@@ -4,11 +4,11 @@ Windows 10/11 x64용 네이티브 트레이 앱입니다. macOS 앱과 별도 �
 
 ## 설치와 실행
 
-[Windows 설치 EXE](https://github.com/zjxps2007/quotabar/releases/download/v0.2.1/QuotaBar-0.2.1-Windows-x64-Setup.exe)를 실행한 뒤 시작 메뉴에서 **QuotaBar**를 엽니다. 한국어·영어 설치 마법사를 제공하며 관리자 권한을 요청하지 않습니다. 기본 설치 위치는 `%LOCALAPPDATA%\Programs\QuotaBar`이고, 계정·설정 데이터는 별도 `%LOCALAPPDATA%\QuotaBar`에 저장합니다. 이 브랜치에서 빌드한 Windows 앱은 Rust 실행 파일 세 개로 동작하며 별도의 런타임 설치가 필요 없습니다.
+[Windows 설치 EXE](https://github.com/zjxps2007/quotabar/releases/download/v0.2.3/QuotaBar-0.2.3-Windows-x64-Setup.exe)를 실행한 뒤 시작 메뉴에서 **QuotaBar**를 엽니다. 한국어·영어 설치 마법사를 제공하며 관리자 권한을 요청하지 않습니다. 기본 설치 위치는 `%LOCALAPPDATA%\Programs\QuotaBar`이고, 계정·설정 데이터는 별도 `%LOCALAPPDATA%\QuotaBar`에 저장합니다. 이 브랜치에서 빌드한 Windows 앱은 Rust 실행 파일 세 개로 동작하며 별도의 런타임 설치가 필요 없습니다.
 
 같은 설치 파일을 다시 실행해 재설치할 수 있습니다. 업데이트나 제거 전에는 트레이에서 앱을 종료하세요. **Windows 설정 → 앱 → 설치된 앱 → QuotaBar → 제거**로 삭제할 수 있으며 계정·설정 데이터는 남습니다. Claude를 연결했다면 제거 전에 앱에서 연결을 해제하세요.
 
-[포터블 ZIP](https://github.com/zjxps2007/quotabar/releases/download/v0.2.1/QuotaBar-0.2.1-Windows-x64.zip)도 제공합니다. ZIP 전체를 고정된 폴더에 풀고 `QuotaBar.Monitor.exe`를 실행합니다. 파일 하나만 옮기지 마세요.
+[포터블 ZIP](https://github.com/zjxps2007/quotabar/releases/download/v0.2.3/QuotaBar-0.2.3-Windows-x64.zip)도 제공합니다. ZIP 전체를 고정된 폴더에 풀고 `QuotaBar.Monitor.exe`를 실행합니다. 파일 하나만 옮기지 마세요.
 
 `Dashboard/`에는 Rust 대시보드가, `StatusLine/`에는 Claude 콜백이 들어 있습니다. 업데이트가 각 구성 요소의 버전을 확인할 수 있도록 폴더 구조를 유지하세요.
 

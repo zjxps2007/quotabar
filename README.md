@@ -4,7 +4,7 @@
 
 QuotaBar는 계정별 잔여 한도와 초기화 시간을 메뉴바와 트레이에 표시하는 데스크톱 앱입니다. 상세 사용량, 계정 관리와 로컬 사용 활동은 Dashboard에서 확인할 수 있습니다.
 
-**[Windows 다운로드](https://github.com/zjxps2007/quotabar/releases/download/v0.2.1/QuotaBar-0.2.1-Windows-x64-Setup.exe)** · **[Apple Silicon Mac 다운로드](https://github.com/zjxps2007/quotabar/releases/download/v0.2.1/QuotaBar-0.2.1-macOS-arm64.zip)** · [릴리즈 노트](https://github.com/zjxps2007/quotabar/releases/tag/v0.2.1)
+**[Windows 다운로드](https://github.com/zjxps2007/quotabar/releases/download/v0.2.3/QuotaBar-0.2.3-Windows-x64-Setup.exe)** · **[Apple Silicon Mac 다운로드](https://github.com/zjxps2007/quotabar/releases/download/v0.2.3/QuotaBar-0.2.3-macOS-arm64.zip)** · [릴리즈 노트](https://github.com/zjxps2007/quotabar/releases/tag/v0.2.3)
 
 ![QuotaBar Dashboard](docs/images/windows-dashboard.png)
 
@@ -23,10 +23,10 @@ QuotaBar는 계정별 잔여 한도와 초기화 시간을 메뉴바와 트레�
 
 | 플랫폼 | 다운로드 |
 | --- | --- |
-| Windows 10/11 x64 | [설치 EXE](https://github.com/zjxps2007/quotabar/releases/download/v0.2.1/QuotaBar-0.2.1-Windows-x64-Setup.exe) · [포터블 ZIP](https://github.com/zjxps2007/quotabar/releases/download/v0.2.1/QuotaBar-0.2.1-Windows-x64.zip) |
-| macOS 14 이상 · Apple Silicon | [앱 ZIP](https://github.com/zjxps2007/quotabar/releases/download/v0.2.1/QuotaBar-0.2.1-macOS-arm64.zip) |
+| Windows 10/11 x64 | [설치 EXE](https://github.com/zjxps2007/quotabar/releases/download/v0.2.3/QuotaBar-0.2.3-Windows-x64-Setup.exe) · [포터블 ZIP](https://github.com/zjxps2007/quotabar/releases/download/v0.2.3/QuotaBar-0.2.3-Windows-x64.zip) |
+| macOS 14 이상 · Apple Silicon | [앱 ZIP](https://github.com/zjxps2007/quotabar/releases/download/v0.2.3/QuotaBar-0.2.3-macOS-arm64.zip) |
 
-0.2.0 이하 또는 0.2.2 프리뷰 사용자는 0.2.1을 한 번 직접 설치하세요. 이후에는 자동 업데이트를 사용할 수 있습니다.
+0.2.0 이하 또는 0.2.2 프리뷰 사용자는 0.2.3을 한 번 직접 설치하세요. 이후에는 자동 업데이트를 사용할 수 있습니다.
 
 Windows는 설치 EXE를 실행한 뒤 시작 메뉴에서 **QuotaBar**를 엽니다. Mac은 ZIP을 풀고 **QuotaBar.app**을 응용 프로그램 폴더로 옮겨 실행합니다.
 

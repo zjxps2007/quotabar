@@ -444,7 +444,9 @@ impl Dashboard {
                             .max(160.);
                         #[cfg(windows)]
                         let limit = super::client_size(frame, ctx, [590., 720.]).y;
-                        let scroll = ScrollArea::vertical().auto_shrink([false, true]);
+                        let scroll = ScrollArea::vertical()
+                            .scroll_source(DESKTOP_SCROLL)
+                            .auto_shrink([false, true]);
                         // The Windows dialog sizes itself to the controls. A fractional
                         // pixel at its natural height must not reserve scrollbar space.
                         #[cfg(windows)]
@@ -592,6 +594,7 @@ impl Dashboard {
                                 .inner_margin(if MAC { 16 } else { 14 })
                                 .show(ui, |ui| {
                                     ScrollArea::vertical()
+                                        .scroll_source(DESKTOP_SCROLL)
                                         .id_salt(*selected)
                                         .max_height(height - 34.)
                                         .auto_shrink([false, false])

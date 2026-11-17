@@ -268,6 +268,27 @@ static void postClick(NSWindow *window, NSPoint point) {
     }
 }
 
+static NSDictionary *dragContent(NSWindow *window) {
+    NSView *view = window.contentView;
+    NSPoint start = [view convertPoint:NSMakePoint(NSMaxX(view.bounds) - 35, NSHeight(view.bounds) * 0.35) toView:nil];
+    void (^post)(NSEventType, CGFloat) = ^(NSEventType type, CGFloat distance) {
+        NSEvent *event = [NSEvent mouseEventWithType:type
+            location:NSMakePoint(start.x, start.y + distance) modifierFlags:0
+            timestamp:NSProcessInfo.processInfo.systemUptime windowNumber:window.windowNumber context:nil
+            eventNumber:0 clickCount:1 pressure:type == NSEventTypeLeftMouseUp ? 0 : 1];
+        [NSApp postEvent:event atStart:NO];
+    };
+    post(NSEventTypeMouseMoved, 0);
+    post(NSEventTypeLeftMouseDown, 0);
+    for (int step = 1; step <= 3; ++step) {
+        NSTimer *timer = [NSTimer timerWithTimeInterval:0.07 * step repeats:NO block:^(NSTimer *unused) {
+            post(step == 3 ? NSEventTypeLeftMouseUp : NSEventTypeLeftMouseDragged, step == 1 ? 70 : 140);
+        }];
+        [NSRunLoop.mainRunLoop addTimer:timer forMode:NSRunLoopCommonModes];
+    }
+    return @{@"dragged": @YES};
+}
+
 // A SwiftUI hosting view can expose only its AppKit-backed controls without an
 // active system accessibility client. Click the visible control in that window.
 // Points are in the original reference layout, relative to its content edges.
@@ -830,6 +851,7 @@ static NSDictionary *perform(NSDictionary *request) {
         NSString *value = [fixturePasteboard(nil, NULL) stringForType:NSPasteboardTypeString];
         return value ? @{@"text": value} : @{@"pending": @"copied text"};
     }
+    if ([op isEqual:@"dragContent"]) return dragContent(window);
     if ([op isEqual:@"scrollContent"]) return scrollContent(window);
     if ([op isEqual:@"scrollerPosition"] || [op isEqual:@"pageSettings"])
         return settingsScroller(window, [op isEqual:@"pageSettings"]);

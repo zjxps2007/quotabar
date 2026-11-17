@@ -4,6 +4,16 @@ use font_kit::{family_name::FamilyName, handle::Handle, properties::Properties};
 use font_kit::{properties::Weight, source::SystemSource};
 use std::sync::Arc;
 
+pub const DESKTOP_SCROLL: scroll_area::ScrollSource = scroll_area::ScrollSource {
+    scroll_bar: true,
+    drag: false,
+    mouse_wheel: true,
+};
+
+#[cfg(test)]
+#[path = "style/scroll_tests.rs"]
+mod scroll_tests;
+
 #[cfg(windows)]
 mod windows_bitmaps;
 
@@ -663,6 +673,7 @@ pub fn mac_scroll(
 ) {
     use objc2::MainThreadMarker;
     use objc2_app_kit::{NSScroller, NSScrollerStyle};
+    let scroll = scroll.scroll_source(DESKTOP_SCROLL);
     let content_style = ui.style().clone();
     ui.scope(|ui| {
         let style = ui.style_mut();

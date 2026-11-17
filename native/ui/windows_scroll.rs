@@ -1,5 +1,5 @@
 //! The dashboard's ScrollViewer pages on a track press and drags from the grabbed point.
-use crate::style::Palette;
+use crate::style::{DESKTOP_SCROLL, Palette};
 use eframe::egui::{scroll_area::ScrollSource, *};
 use std::time::Duration;
 use windows_sys::Win32::UI::{
@@ -45,7 +45,7 @@ pub fn show(ui: &mut Ui, scroll: ScrollArea, palette: Palette, body: impl FnOnce
         style.bar_width =
             (width as f32 / factor - style.bar_inner_margin - style.bar_outer_margin).max(0.);
     }
-    // Keep egui's content measurement, scroll-to-widget, touch and mouse wheel.
+    // Keep egui's content measurement, scroll-to-widget and mouse wheel.
     // The track retains its allocated width even while we draw its inset thumb.
     let visuals = ui.visuals_mut();
     visuals.extreme_bg_color = Color32::TRANSPARENT;
@@ -56,7 +56,7 @@ pub fn show(ui: &mut Ui, scroll: ScrollArea, palette: Palette, body: impl FnOnce
         .animated(false)
         .scroll_source(ScrollSource {
             scroll_bar: false,
-            ..Default::default()
+            ..DESKTOP_SCROLL
         })
         .show_viewport(ui, |ui, viewport| {
             *ui.visuals_mut() = original.clone();
@@ -226,7 +226,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn track_press_pages_and_thumb_drag_keeps_its_grab_point() {
+    fn content_drag_is_ignored_while_wheel_track_and_thumb_scrolling_work() {
         let ctx = Context::default();
         let palette = Palette::new(&ctx, "light");
         palette.apply(&ctx);
@@ -265,6 +265,18 @@ mod tests {
         };
         frame(0., vec![]);
         frame(0.5, vec![]);
+        let start = pos2(70., 150.);
+        let end = pos2(70., 40.);
+        let content_button = |pos, pressed| Event::PointerButton {
+            pos,
+            button: PointerButton::Primary,
+            pressed,
+            modifiers: Modifiers::NONE,
+        };
+        frame(0.6, vec![Event::PointerMoved(start)]);
+        frame(0.61, vec![content_button(start, true)]);
+        assert_eq!(frame(0.7, vec![Event::PointerMoved(end)]), 0.);
+        assert_eq!(frame(0.71, vec![content_button(end, false)]), 0.);
         frame(1., vec![Event::PointerMoved(point(175.))]);
         assert_eq!(frame(1.01, vec![button(175., true)]), 200.);
         assert_eq!(frame(1.03, vec![button(175., false)]), 200.);
@@ -275,5 +287,17 @@ mod tests {
         frame(1.3, vec![Event::PointerMoved(point(10.))]);
         assert_eq!(frame(1.31, vec![button(10., true)]), 100.);
         assert_eq!(frame(2.5, vec![]), 0.);
+        frame(2.6, vec![content_button(point(10.), false)]);
+        frame(2.7, vec![Event::PointerMoved(start)]);
+        assert!(
+            frame(
+                2.8,
+                vec![Event::MouseWheel {
+                    unit: MouseWheelUnit::Point,
+                    delta: vec2(0., -80.),
+                    modifiers: Modifiers::NONE,
+                }]
+            ) > 0.
+        );
     }
 }
