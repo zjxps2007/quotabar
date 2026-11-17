@@ -4,7 +4,7 @@ macOS 14 이상에서 실행하는 메뉴바 사용량 추적기입니다. 아�
 
 ## macOS 실행
 
-[0.1.4 Apple Silicon 앱 ZIP](https://github.com/zjxps2007/quotabar/releases/download/v0.1.4/QuotaBar-0.1.4-macOS-arm64.zip)을 풀고 `QuotaBar.app`을 응용 프로그램 폴더에 복사한 뒤 실행합니다. macOS 14 이상이 필요하며, 기존 앱이 실행 중이면 먼저 종료하세요. 배포 앱은 ad-hoc 서명이며 Apple 공증을 받지 않았습니다. 0.1.0 사용자는 최신 버전을 한 번 직접 설치해야 하며, 0.1.1부터 자동 업데이트를 지원합니다. [자동 업데이트 안내](../docs/AUTOMATIC_UPDATES.md)
+[0.2.0 Apple Silicon 앱 ZIP](https://github.com/zjxps2007/quotabar/releases/download/v0.2.0/QuotaBar-0.2.0-macOS-arm64.zip)을 풀고 `QuotaBar.app`을 응용 프로그램 폴더에 복사한 뒤 실행합니다. macOS 14 이상이 필요하며, 기존 앱이 실행 중이면 먼저 종료하세요. 배포 앱은 ad-hoc 서명이며 Apple 공증을 받지 않았습니다. 0.1.0 사용자는 최신 버전을 한 번 직접 설치해야 하며, 0.1.1부터 자동 업데이트를 지원합니다. [자동 업데이트 안내](../docs/AUTOMATIC_UPDATES.md)
 
 소스에서 빌드하려면 다음 명령을 사용합니다.
 
@@ -15,7 +15,7 @@ bash scripts/build.sh
 open "artifacts/QuotaBar.app"
 ```
 
-Xcode Command Line Tools의 Swift 5.9 이상과 Rust 툴체인이 필요합니다. 현재 Mac의 아키텍처로 빌드합니다. 빌드한 앱을 원하는 위치에 둔 뒤 계정을 연결하세요. 서명은 로컬 실행용 ad-hoc 서명이며 공증된 배포 앱은 아닙니다.
+Xcode Command Line Tools와 Rust 툴체인이 필요합니다. 현재 Mac의 아키텍처로 빌드합니다. 빌드한 앱을 원하는 위치에 둔 뒤 계정을 연결하세요. 서명은 로컬 실행용 ad-hoc 서명이며 공증된 배포 앱은 아닙니다.
 
 계정에 접근하지 않는 미리보기:
 

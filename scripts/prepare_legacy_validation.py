@@ -150,7 +150,7 @@ def prepare(destination=None):
     anchor = '    src = work / "macos/Sources/QuotaBar"'
     if text.count(anchor) != 1:
         raise ValueError("Unexpected archived reference builder")
-    text = text.replace(anchor, '    (work / "NOTICE").write_bytes((dashboard.ROOT / "NOTICE").read_bytes())\n' + anchor)
+    text = text.replace(anchor, '    (work / "NOTICE").write_bytes((dashboard.ROOT / "NOTICE").read_bytes())\n    (work / "shared/version.json").write_bytes((dashboard.ROOT / "shared/version.json").read_bytes())\n' + anchor)
     comparison.write_text(text, encoding="utf-8")
     # The resource symlink above may have been materialized before replacing shared/.
     if os.name == "nt":
