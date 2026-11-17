@@ -1779,7 +1779,18 @@ pub fn system_symbol_name(name: &str) -> &'static str {
         _ => "chart.bar",
     }
 }
-pub fn glyph(painter: &Painter, r: Rect, name: &str, c: Color32, _selected: bool) {
+pub fn glyph(ui: &Ui, r: Rect, name: &str, c: Color32, _selected: bool) {
+    let painter = ui.painter();
+    #[cfg(windows)]
+    if let Some((texture, bounds)) = windows_bitmaps::glyph_vector(ui, name, r) {
+        painter.image(
+            texture.id(),
+            bounds,
+            Rect::from_min_max(Pos2::ZERO, pos2(1., 1.)),
+            c,
+        );
+        return;
+    }
     #[cfg(target_os = "macos")]
     {
         if crate::mac::symbol(painter, r, system_symbol_name(name), 13., _selected, c) {

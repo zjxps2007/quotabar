@@ -671,12 +671,18 @@ pub fn stat_value(ui: &mut Ui, text: &str, color: Color32) -> Option<Response> {
     )
 }
 
-pub fn section_heading(ui: &mut Ui, text: &str, color: Color32) -> Option<Response> {
+pub fn centered_stack_label(
+    ui: &mut Ui,
+    text: &str,
+    size: f32,
+    heavy: bool,
+    color: Color32,
+) -> Option<Response> {
     draw_label(
         ui,
         text,
-        15.,
-        Face::Emphasized,
+        size,
+        Face::label(heavy),
         color,
         LineBox::CenteredStack,
     )
@@ -757,6 +763,43 @@ pub fn tabular_label(
         LineBox::Glyphs,
     )
     .unwrap_or_else(|| crate::style::label(ui, text, size, weight == DigitWeight::Semibold, color))
+}
+
+pub fn activity_token_total(
+    ui: &mut Ui,
+    total: &str,
+    palette: crate::style::Palette,
+) -> Option<()> {
+    let handle = ui.ctx().plugin_opt::<Renderer>()?;
+    let mut renderer = handle.lock();
+    let caption = renderer
+        .run(ui.ctx(), "Tokens", 8.5, Face::Regular, palette.muted)?
+        .clone();
+    let amount = renderer
+        .run(
+            ui.ctx(),
+            total,
+            13.5,
+            Face::TabularDigits(DigitWeight::Semibold),
+            palette.ink,
+        )?
+        .clone();
+    drop(renderer);
+    let scale = ui.pixels_per_point();
+    let system_height = (font_line_height(8.5) * f64::from(scale)).round() as f32 / scale;
+    let caption_height = caption.size.y.max(system_height);
+    // SwiftUI proposes whole backing pixels to both trailing-aligned Text views.
+    for (run, height, text, color) in [
+        (&caption, caption_height, "Tokens", palette.muted),
+        (&amount, amount.size.y, total, palette.ink),
+    ] {
+        let width = (run.size.x * scale).ceil() / scale;
+        let (rect, response) = ui.allocate_exact_size(vec2(width, height), Sense::hover());
+        ui.painter()
+            .add(run.centered_shape(rect.left_center(), scale, color));
+        response.widget_info(|| WidgetInfo::labeled(WidgetType::Label, ui.is_enabled(), text));
+    }
+    Some(())
 }
 
 pub fn activity_model_row(

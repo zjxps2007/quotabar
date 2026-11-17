@@ -189,7 +189,7 @@ impl Dashboard {
                             selected,
                             fg,
                         ) {
-                            glyph(ui.painter(), icon, key, fg, selected);
+                            glyph(ui, icon, key, fg, selected);
                         }
                         crate::mac_text::navigation_title(
                             ui,
@@ -205,7 +205,7 @@ impl Dashboard {
                             r.left_center() + vec2(20., 0.),
                             Vec2::splat(16.),
                         );
-                        glyph(ui.painter(), icon, key, fg, selected);
+                        glyph(ui, icon, key, fg, selected);
                         ui.painter().text(
                             r.left_center() + vec2(38., 0.),
                             Align2::LEFT_CENTER,
@@ -488,7 +488,7 @@ impl Dashboard {
                         }
                         ui.horizontal(|ui| {
                             #[cfg(target_os = "macos")]
-                            crate::mac_text::stacked_label(ui, title, 11., false, p.muted)
+                            crate::mac_text::centered_stack_label(ui, title, 11., false, p.muted)
                                 .unwrap_or_else(|| system_label(ui, title, 11., false, p.muted));
                             #[cfg(windows)]
                             system_label(ui, title, 11., false, p.muted);
@@ -505,7 +505,7 @@ impl Dashboard {
                                 }
                                 let (r, _) =
                                     ui.allocate_exact_size(Vec2::splat(14.), Sense::hover());
-                                glyph(ui.painter(), r, symbol, color, false);
+                                glyph(ui, r, symbol, color, false);
                             });
                         });
                         ui.add_space(12.);
@@ -525,7 +525,7 @@ impl Dashboard {
                             } else {
                                 10.
                             };
-                            if crate::mac_text::stacked_label(ui, &sub, size, false, p.tertiary)
+                            if crate::mac_text::centered_stack_label(ui, &sub, size, false, p.tertiary)
                                 .is_none()
                             {
                                 ui.add(Label::new(rich(sub, size, false, p.tertiary)).truncate());
@@ -938,7 +938,7 @@ impl Dashboard {
 pub fn section_title(ui: &mut Ui, title: &str, subtitle: &str, p: Palette) {
     #[cfg(target_os = "macos")]
     {
-        if crate::mac_text::section_heading(ui, title, p.ink).is_none() {
+        if crate::mac_text::centered_stack_label(ui, title, 15., true, p.ink).is_none() {
             system_label(ui, title, 15., true, p.ink);
         }
         ui.add_space(4.);

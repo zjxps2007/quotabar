@@ -45,21 +45,64 @@ impl Cache {
 }
 
 pub(super) fn claude_vector(ui: &Ui, id: Id, artwork: Rect) -> Option<(TextureHandle, Rect)> {
+    cached_vector(
+        ui,
+        id.with("Claude SVG"),
+        artwork,
+        24.,
+        include_bytes!("../../../shared/assets/ClaudeLogo.svg"),
+    )
+}
+
+pub(super) fn glyph_vector(ui: &Ui, name: &str, bounds: Rect) -> Option<(TextureHandle, Rect)> {
+    // WPF places the stroked path in a 20-by-20 Viewbox. Its line caps are
+    // flat, the joins are round, and all six symbols share the same stroke.
+    macro_rules! glyph {
+        ($path:literal) => {
+            concat!(
+                r#"<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 20 20">"#,
+                r##"<path fill="none" stroke="#fff" stroke-width="1.3" stroke-linejoin="round" d=""##,
+                $path,
+                r#""/></svg>"#
+            ).as_bytes()
+        }
+    }
+    let data = match name {
+        "dashboard" => glyph!("M2 2H8V8H2Z M12 2H18V8H12Z M2 12H8V18H2Z M12 12H18V18H12Z"),
+        "accounts" => glyph!(
+            "M10 7A3 3 0 1 0 4 7A3 3 0 1 0 10 7 M1 18V16C1 10 13 10 13 16V18 M14 4A3 3 0 0 1 14 10 M15 13C19 13 19 15 19 18"
+        ),
+        "settings" => glyph!(
+            "M2 5H7 M11 5H18 M2 10H12 M16 10H18 M2 15H4 M8 15H18 M7 3H11V7H7Z M12 8H16V12H12Z M4 13H8V17H4Z"
+        ),
+        "attention" => glyph!("M10 2A8 8 0 1 1 9.99 2 M10 6V11 M10 14V15"),
+        "bolt" => glyph!("M11 1L4 11H9L8 19L16 8H11Z"),
+        _ => glyph!("M3 18V11H6V18 M9 18V6H12V18 M15 18V2H18V18"),
+    };
+    cached_vector(ui, ui.id().with(("Windows glyph", name)), bounds, 20., data)
+}
+
+fn cached_vector(
+    ui: &Ui,
+    id: Id,
+    artwork: Rect,
+    side: f32,
+    data: &'static [u8],
+) -> Option<(TextureHandle, Rect)> {
     let scale = ui.pixels_per_point();
     let device = artwork * scale;
     let bounds = Rect::from_min_max(device.min.floor(), device.max.ceil());
     let local = device.translate(-bounds.min.to_vec2());
     // Keep the fractional placement in the drawing. Snapping only the finished
     // texture stops the GPU from filtering the same vector edges a second time.
-    let id = id.with("Claude SVG");
     let cached = ui.data(|data| data.get_temp::<(Rect, Option<TextureHandle>)>(id));
     let texture = match cached {
         Some((previous, texture)) if previous == local => texture,
         _ => {
-            let image = render_claude(local).ok();
+            let image = render_vector(local, side, data).ok();
             let texture = image.map(|image| {
                 ui.ctx()
-                    .load_texture("Claude SVG", image, TextureOptions::NEAREST)
+                    .load_texture("Windows vector artwork", image, TextureOptions::NEAREST)
             });
             ui.data_mut(|data| data.insert_temp(id, (local, texture.clone())));
             texture
@@ -68,7 +111,7 @@ pub(super) fn claude_vector(ui: &Ui, id: Id, artwork: Rect) -> Option<(TextureHa
     Some((texture, bounds / scale))
 }
 
-fn render_claude(artwork: Rect) -> Result<ColorImage> {
+fn render_vector(artwork: Rect, side: f32, data: &'static [u8]) -> Result<ColorImage> {
     let (width, height) = (
         artwork.right().ceil() as u32,
         artwork.bottom().ceil() as u32,
@@ -98,10 +141,10 @@ fn render_claude(artwork: Rect) -> Result<ColorImage> {
         )?;
         let context: ID2D1DeviceContext5 = target.cast()?;
         let stream = images.CreateStream()?;
-        stream.InitializeFromMemory(include_bytes!("../../../shared/assets/ClaudeLogo.svg"))?;
+        stream.InitializeFromMemory(data)?;
         let viewport = D2D_SIZE_F {
-            width: 24.,
-            height: 24.,
+            width: side,
+            height: side,
         };
         let svg = context.CreateSvgDocument(&stream, viewport)?;
         context.SetTransform(&windows_numerics::Matrix3x2 {
@@ -180,7 +223,13 @@ mod tests {
             .ok()
             .unwrap();
         let first = Rect::from_min_size(pos2(0.25, 0.25), vec2(27., 27.));
-        let images = [first, first.translate(vec2(0., 0.5))].map(super::render_claude);
+        let images = [first, first.translate(vec2(0., 0.5))].map(|r| {
+            super::render_vector(
+                r,
+                24.,
+                include_bytes!("../../../shared/assets/ClaudeLogo.svg"),
+            )
+        });
         unsafe { CoUninitialize() };
         let [a, b] = images.map(Result::unwrap);
         assert_eq!(a.size, [28, 28]);

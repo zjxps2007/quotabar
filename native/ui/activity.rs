@@ -811,15 +811,13 @@ fn mac_tooltip(ui: &mut Ui, date: NaiveDate, calendar: &Calendar, tint: Color32,
             } else {
                 ui.with_layout(Layout::top_down(Align::Max), |ui| {
                     ui.spacing_mut().item_spacing.y = 1.;
-                    system_label(ui, "Tokens", 8.5, false, p.muted);
                     let total = calendar.totals.get(&date).copied().unwrap_or(0);
-                    tabular_label(
-                        ui,
-                        &crate::platform::grouped(total),
-                        13.5,
-                        DigitWeight::Semibold,
-                        p.ink,
-                    );
+                    let total = crate::platform::grouped(total);
+                    if crate::mac_text::activity_token_total(ui, &total, p).is_some() {
+                        return;
+                    }
+                    system_label(ui, "Tokens", 8.5, false, p.muted);
+                    tabular_label(ui, &total, 13.5, DigitWeight::Semibold, p.ink);
                 });
             }
         });
