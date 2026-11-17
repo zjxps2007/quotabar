@@ -1,0 +1,23 @@
+.build/
+.swiftpm/
+.DS_Store
+artifacts/
+.tools/
+/target/
+**/bin/
+**/obj/
+.vs/
+*.xcuserstate
+__pycache__/
+
+# Local configuration, credentials and signing material
+.env
+.env.*
+!.env.example
+.codex/
+auth.json
+oauth_creds.json
+Credentials/
+*.key
+*.p12
+*.mobileprovision

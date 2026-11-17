@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><OutputType>Exe</OutputType></PropertyGroup>
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.WindowsDesktop.App.WindowsForms" />
+    <FrameworkReference Include="Microsoft.WindowsDesktop.App.WPF" />
+    <ProjectReference Include="../../src/QuotaBar.Core/QuotaBar.Core.csproj" />
+    <ProjectReference Include="../../src/QuotaBar.Windows/QuotaBar.Windows.csproj" />
+    <ProjectReference Include="../../src/QuotaBar.Protocol/QuotaBar.Protocol.csproj" />
+  </ItemGroup>
+</Project>

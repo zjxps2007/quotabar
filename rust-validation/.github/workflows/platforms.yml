@@ -1,0 +1,185 @@
+name: Native platforms
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  windows-updater:
+    if: github.ref != 'refs/heads/codex/rust-native' || !contains(github.event.head_commit.message, '[macos-only]')
+    runs-on: windows-2025
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@v6
+        with:
+          global-json-file: windows/global.json
+      - name: Automatic install, restart and rollback with a disposable signing key
+        shell: pwsh
+        run: ./windows/scripts/test-updater.ps1
+  macos:
+    runs-on: macos-15
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v7
+        id: source
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Existing Swift suites and shared contract
+        run: bash scripts/test.sh
+      - name: Native Rust contracts
+        run: cargo test --locked --workspace --all-targets
+      - name: Signed update release tooling
+        run: python3 -m unittest discover -s scripts/tests -v
+      - name: Build and package application and Dashboard helper
+        id: package
+        if: ${{ !cancelled() && steps.source.outcome == 'success' }}
+        run: bash macos/scripts/package.sh
+      - name: Packaged Claude callback
+        if: ${{ !cancelled() && steps.package.outcome == 'success' }}
+        run: python3 scripts/check-statusline.py
+      - name: Packaged Rust dashboard on AppKit
+        if: ${{ !cancelled() && steps.package.outcome == 'success' }}
+        run: python3 macos/scripts/check-dashboard.py
+      - uses: actions/upload-artifact@v7
+        with:
+          name: macos-release
+          path: |
+            artifacts/QuotaBar-*-macOS-*.zip
+            artifacts/macos-build-info.json
+          if-no-files-found: error
+      - name: Compare original SwiftUI and Rust windows, popovers and actions
+        if: ${{ !cancelled() && steps.package.outcome == 'success' }}
+        run: python3 macos/scripts/compare-dashboard.py --allow-raster-differences
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: macos-validation
+          path: |
+            artifacts/tests.log
+            artifacts/macos-dashboard/
+  windows:
+    if: github.ref != 'refs/heads/codex/rust-native' || !contains(github.event.head_commit.message, '[macos-only]')
+    runs-on: windows-2025
+    timeout-minutes: 35
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-dotnet@v6
+        with:
+          global-json-file: windows/global.json
+      - name: Build and synthetic integration tests
+        run: ./windows/scripts/test.ps1
+      - name: Native Rust contracts
+        run: cargo test --locked --workspace --all-targets
+      - name: Self-contained x64 package
+        id: package
+        run: ./windows/scripts/package.ps1
+      - name: Packaged callback on PowerShell and Git Bash
+        run: |
+          $env:QUOTABAR_TEST_HELPER = Join-Path $PWD 'artifacts/QuotaBar-Windows-x64/StatusLine/QuotaBar.StatusLine.exe'
+          ./windows/scripts/test.ps1 -NoBuild
+      - name: Packaged Dashboard lifetime, foreground relaunch and parent crash cleanup
+        run: ./windows/scripts/smoke.ps1 -VerifyForeground
+      - name: Per-user Windows EXE installer
+        id: installer
+        if: ${{ !cancelled() && steps.package.outcome == 'success' }}
+        run: ./windows/scripts/package-installer.ps1
+      - name: Install, reinstall, launch and uninstall
+        if: ${{ !cancelled() && steps.installer.outcome == 'success' }}
+        run: ./windows/scripts/test-installer.ps1
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: windows-validation-logs
+          path: |
+            artifacts/windows/tests.log
+            artifacts/windows/foreground.json
+            artifacts/windows/installer-test-*/*.log
+          if-no-files-found: warn
+      - uses: actions/upload-artifact@v7
+        with:
+          name: windows-x64-release
+          path: |
+            artifacts/QuotaBar-*-Windows-x64.zip
+            artifacts/QuotaBar-*-Windows-x64-Setup.exe
+            artifacts/windows/installer-build-info.json
+            artifacts/windows/installer-validation.json
+            artifacts/windows/packaged-probe.json
+            artifacts/windows/*-light.png
+            artifacts/windows/*-dark.png
+          if-no-files-found: error
+      - name: Compare original Windows dashboard and tray with the Rust package
+        if: ${{ !cancelled() && steps.package.outcome == 'success' }}
+        run: |
+          $reference = Join-Path $env:RUNNER_TEMP 'quotabar-reference'
+          git worktree add --detach $reference b5b9de048062e50e9ab4973ca48b75d9bf0d0e53
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          # Give the original demo provider the same reset timestamps as the Rust menu probe.
+          $demo = Join-Path $reference 'windows/src/QuotaBar.Core/Demo.cs'
+          $source = [IO.File]::ReadAllText($demo)
+          if (-not $source.Contains('DateTimeOffset.UtcNow.AddHours(3)')) { throw 'Reference demo clock changed.' }
+          [IO.File]::WriteAllText($demo, $source.Replace('DateTimeOffset.UtcNow', 'new DateTimeOffset(2099, 1, 15, 12, 0, 0, TimeSpan.Zero)'))
+          $app = Join-Path $env:RUNNER_TEMP 'reference-app'
+          dotnet publish "$reference/windows/src/QuotaBar.Monitor" -c Release -r win-x64 --self-contained true -o $app
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          dotnet publish "$reference/windows/src/QuotaBar.Dashboard" -c Release -r win-x64 --self-contained true -o (Join-Path $app Dashboard)
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          $comparison = 'artifacts/windows/dashboard-comparison'
+          New-Item -Type Directory -Force $comparison | Out-Null
+          $test = 'windows/tests/QuotaBar.Tests/bin/Release/net10.0-windows/QuotaBar.Tests.exe'
+          cargo build --locked --release --example windows-resident-contract
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          $env:QUOTABAR_TEST_ROOT = $env:RUNNER_TEMP
+          & target/release/examples/windows-resident-contract.exe $app 'artifacts/QuotaBar-Windows-x64' (Join-Path $comparison 'resident.json')
+          $contractResults = @($LASTEXITCODE)
+          & $test --compare-claude $app
+          $contractResults += $LASTEXITCODE
+          & $test --compare-settings $app
+          $contractResults += $LASTEXITCODE
+          & $test --compare-updates $app
+          $contractResults += $LASTEXITCODE
+          & $test --compare-providers $app
+          $contractResults += $LASTEXITCODE
+          $old = Join-Path $app 'Dashboard/QuotaBar.Dashboard.exe'
+          $new = 'artifacts/QuotaBar-Windows-x64/Dashboard/QuotaBar.Dashboard.exe'
+          & $test --compare-dashboard-actions $old $new
+          $actionResult = $LASTEXITCODE
+          if ($actionResult) {
+            & $test --compare-dashboard-commands $old $new
+          }
+          cargo build --locked --release -p quotabar-ui --example capture-window
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          & $test --compare-visible-dashboards $old $new (Join-Path $comparison 'composed') 'target/release/examples/capture-window.exe'
+          $visibleResult = $LASTEXITCODE
+          if ($visibleResult -notin 0,1) { exit $visibleResult }
+          python scripts/ui_comparison.py (Join-Path $comparison 'composed/result.json') --expected-count 28 --output (Join-Path $comparison 'composed/appearance-check.json')
+          $visibleAppearanceResult = $LASTEXITCODE
+          # An unattended session can have no active display. Allow the isolated WPF
+          # reference to rasterize its Visual into a RenderTargetBitmap in that case.
+          $runtimePath = Join-Path $app 'Dashboard/QuotaBar.Dashboard.runtimeconfig.json'
+          $runtime = Get-Content -Raw $runtimePath | ConvertFrom-Json -AsHashtable
+          $runtime.runtimeOptions.configProperties['Switch.System.Windows.Media.ShouldRenderEvenWhenNoDisplayDevicesAreAvailable'] = $true
+          $runtime | ConvertTo-Json -Depth 10 | Set-Content -Encoding utf8NoBOM $runtimePath
+          & $test --compare-dashboards $old $new $comparison
+          $dashboardResult = $LASTEXITCODE
+          if ($dashboardResult -notin 0,1) { exit $dashboardResult }
+          python scripts/ui_comparison.py (Join-Path $comparison 'result.json') --expected-count 18 --output (Join-Path $comparison 'appearance-check.json')
+          $dashboardAppearanceResult = $LASTEXITCODE
+          & $test --compare-tray-apps (Join-Path $app 'QuotaBar.Monitor.exe') 'artifacts/QuotaBar-Windows-x64/QuotaBar.Monitor.exe' (Join-Path $comparison 'tray')
+          if (($contractResults -ne 0) -or $actionResult -ne 0 -or $visibleAppearanceResult -ne 0 -or $dashboardAppearanceResult -ne 0 -or $LASTEXITCODE -ne 0) { exit 1 }
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: windows-dashboard-comparison
+          path: artifacts/windows/dashboard-comparison
+          if-no-files-found: warn

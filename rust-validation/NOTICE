@@ -1,0 +1,59 @@
+QuotaBar
+Copyright 2026 QuotaBar contributors
+Previously distributed as AIUsage Lite, copyright 2026 AIUsage Lite contributors.
+
+This product includes software derived from AIUsage by sylearn and contributors.
+Original project: https://github.com/sylearn/AIUsage
+Source revision: e3502ea77b79c2ef5b88f33e36231f156243a86b
+Original license: Apache License, Version 2.0 (included in LICENSE).
+
+The files in macos/Sources/UsageCore/Upstream and the selected ClaudeSubscriptionTests
+derive from AIUsage. Modifications include removing proxy/server and OAuth refresh
+code, adding memory-only read-only quota fetches, isolating storage paths, extracting
+shared data types, and extending the streaming JSON projection for Codex usage.
+The QuotaBar projection skips unused conversation and tool metadata while preserving
+numeric usage fields, and daily aggregation avoids per-event string formatting.
+New application UI, scheduling, keychain integration, and local usage aggregation
+are provided as part of this independent lightweight adaptation.
+The activity cards in macos/Sources/QuotaBar/ActivityView.swift adapt the upstream
+DashboardView+Heatmap.swift layout, calendar grid, and tooltip presentation.
+Colors and provider symbols use QuotaBar's shared application theme.
+CodexLogo.png, ClaudeLogo.svg, and GeminiLogo.png are the unmodified provider
+logos from the upstream assets.
+The data adapter uses QuotaBar's bounded local token reports without proxy ledgers.
+Codex browser sign-in now delegates to the locally installed official Codex CLI
+in an isolated temporary home. App-owned OAuth refresh and rotation persistence
+are implemented separately, using the public Codex client parameters also present
+in the upstream Codex provider. Imported CLI files remain read-only.
+
+No CLIProxyAPI, Sparkle, browser runtime, or upstream sponsor assets are bundled.
+
+Windows provider parsing, subscription status line preservation and local usage
+aggregation in windows/src/QuotaBar.Core and windows/src/QuotaBar.Windows port the
+corresponding QuotaBar/AIUsage rules. Windows DPAPI/ACL storage, native tray and WPF
+processes are new platform implementations. Shared synthetic fixtures exercise
+both native implementations. shared/assets retains the existing logo originals.
+Windows self-contained builds include Microsoft's .NET runtime with its license
+and notices under licenses/.
+The Windows menu scroll arrows in windows/assets/MenuScrollArrows.png are
+the ScrollButtonUp and ScrollButtonDown images from .NET Windows Forms.
+Copyright (c) .NET Foundation and Contributors. They are distributed under the
+MIT license included in licenses/Windows Forms/LICENSE in the Windows distribution.
+The Rust dashboard uses AccessKit. The vendored accesskit_consumer 0.31.0 is
+copyright 2021 The AccessKit Authors and distributed under Apache License 2.0.
+QuotaBar enables writable scrollbars in its accessibility state mapping.
+The vendored AccessKit Windows adapter 0.29.2 exposes expandable controls to
+UI Automation. Its licenses and Chromium notice are in licenses/AccessKit/.
+The native Rust Claude callback adapts the same AIUsage subscription snapshot,
+profile and command forwarding rules for the original Windows and macOS formats.
+The Rust macOS connection also adapts AIUsage's subscription installation,
+reconnection, command backup and field-level restoration rules.
+The Rust usage scanner ports the existing streaming projection, session fork
+accounting and Claude message aggregation for both platforms.
+The Rust quota adapters and status summaries preserve QuotaBar's platform-specific
+display rules. The Windows notification icon uses GDI+ and the shared AppMark.
+The Rust credential parser and OAuth rotation retain QuotaBar and AIUsage's
+workspace identity rules and the existing platform-specific import formats.
+The Windows native provider transport uses libcurl and Schannel for explicitly
+configured proxies. The libcurl, curl-rust, schannel and zlib notices are
+included in licenses/libcurl/LICENSE in the Windows distribution.

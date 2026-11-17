@@ -1,0 +1,4 @@
+[env]
+# libcurl 8.22 requires this opt-in in addition to curl-sys compiling its
+# NTLM sources. Windows proxies may challenge the native client with NTLM.
+CFLAGS_x86_64_pc_windows_msvc = "-DCURL_ENABLE_NTLM"

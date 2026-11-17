@@ -1,0 +1,4 @@
+module CQuotaBar {
+    header "QuotaBar.h"
+    export *
+}

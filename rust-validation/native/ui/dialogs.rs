@@ -1,0 +1,1214 @@
+#[cfg(target_os = "macos")]
+use crate::style::label as form_text;
+#[cfg(windows)]
+use crate::windows_text::text_block as form_text;
+use crate::{Dashboard, management::segments, model::*, style::*};
+use eframe::egui::*;
+#[cfg(windows)]
+use serde_json::Value;
+use serde_json::json;
+use std::time::{Duration, Instant};
+
+#[cfg(target_os = "macos")]
+fn sheet_field_caption(ui: &mut Ui, title: &str, p: Palette) {
+    let caption = label(ui, title, 10., true, p.ink);
+    // The small form row reserves a full line around its smaller caption ink.
+    let control_size = objc2_app_kit::NSFont::smallSystemFontSize() as f32;
+    let line = crate::mac_text::natural_size(ui, title, control_size, true)
+        .map_or(caption.rect.height(), |size| size.y);
+    ui.add_space(8. + (line - caption.rect.height()).max(0.));
+}
+
+fn sheet_picker_label(ui: &mut Ui, title: &str, p: Palette) {
+    #[cfg(target_os = "macos")]
+    if let Some(size) = crate::mac_text::natural_size(ui, title, 13., false) {
+        let scale = ui.ctx().pixels_per_point();
+        let width = (size.x * scale).ceil() / scale;
+        ui.allocate_ui_with_layout(
+            vec2(width, 22.),
+            Layout::left_to_right(Align::Center),
+            |ui| {
+                crate::mac_text::picker_label(ui, title, p.ink)
+                    .unwrap_or_else(|| label(ui, title, 13., false, p.ink));
+            },
+        );
+        return;
+    }
+    label(ui, title, 13., false, p.ink);
+}
+
+#[cfg(windows)]
+fn gap_after_single_line(ui: &mut Ui, drawn_height: f32, vertical_padding: f32, gap: f32) {
+    // WPF stacks the natural line boxes before rounding the final window to pixels.
+    // The selector and editor have already rounded their own font layout.
+    let correction = crate::windows_text::TextStack::line_height(13.)
+        .map_or(0., |line| line + vertical_padding - drawn_height);
+    ui.add_space(gap + correction);
+}
+
+#[cfg(windows)]
+fn rename_content_height() -> f32 {
+    let title = crate::windows_text::line_height(20.).unwrap_or(27.);
+    let text = crate::windows_text::line_height(13.).unwrap_or(17.);
+    // Two 18-DIP gaps, window margins, text field and button padding.
+    142. + title + text * 2.
+}
+
+#[cfg(windows)]
+fn auto_size_edge_color(last_row: f32, background: Color32, content_only: bool) -> Color32 {
+    // WPF snaps the fractional edge to 1/16 pixel, then uses eight vertical samples.
+    let samples = ((last_row * 16.).round() as u32).div_ceil(2).min(8);
+    let alpha = (255 * samples + 4) / 8;
+    let channel = |component: u8| {
+        let first = (u32::from(component) * samples + 4) / 8;
+        if content_only {
+            first as u8
+        } else {
+            // A displayed HWND also has the Window brush behind its ScrollViewer.
+            (first + (first * (255 - alpha) + 127) / 255) as u8
+        }
+    };
+    Color32::from_rgba_premultiplied(
+        channel(background.r()),
+        channel(background.g()),
+        channel(background.b()),
+        if content_only { alpha as u8 } else { 255 },
+    )
+}
+
+#[cfg(windows)]
+fn auto_size_background(
+    ctx: &Context,
+    natural_height: f32,
+    background: Color32,
+    content_only: bool,
+) -> Mesh {
+    let scale = ctx.pixels_per_point();
+    let client = ctx.content_rect();
+    let pixels = natural_height * scale;
+    let height = (client.height() * scale).round();
+    let mut mesh = Mesh::default();
+    if height == pixels.ceil() && height > 0. {
+        let edge = client.bottom() - 1. / scale;
+        if content_only {
+            mesh.add_colored_rect(
+                Rect::from_min_max(client.min, pos2(client.right(), edge)),
+                background,
+            );
+        }
+        let strip = Rect::from_min_max(pos2(client.left(), edge), client.max);
+        let color = auto_size_edge_color(pixels - height + 1., background, content_only);
+        if content_only || color != background {
+            mesh.add_colored_rect(strip, color);
+        }
+    } else if content_only {
+        mesh.add_colored_rect(client, background);
+    }
+    mesh
+}
+
+#[cfg(all(windows, test))]
+#[test]
+fn fractional_dialog_edge_matches_wpf_background_layers() {
+    // Two equal brushes drawn by WPF's RenderTargetBitmap, in both app themes.
+    let light = [0, 58, 107, 149, 184, 211, 230, 241, 245];
+    let dark = [0, 4, 7, 8, 10, 12, 14, 14, 14];
+    for (n, (&light, &dark)) in light.iter().zip(&dark).enumerate() {
+        let coverage = n as f32 / 8.;
+        for (background, expected) in [(245, light), (14, dark)] {
+            assert_eq!(
+                auto_size_edge_color(coverage, Color32::from_gray(background), false),
+                Color32::from_gray(expected),
+            );
+        }
+    }
+    // These are the measured client edges at 100% and 175% in the rename dialog.
+    for (coverage, expected) in [(0.18, 107), (0.565, 211)] {
+        assert_eq!(
+            auto_size_edge_color(coverage, Color32::from_gray(245), false).r(),
+            expected
+        );
+    }
+    for (background, expected) in [(245, [244, 244, 244, 223]), (14, [13, 13, 13, 223])] {
+        let content = auto_size_edge_color(0.875, Color32::from_gray(background), true);
+        assert_eq!(
+            crate::windows_viewport_capture::png_rgba(&content),
+            expected
+        );
+    }
+}
+
+fn full_button(ui: &mut Ui, title: &str, primary: bool, p: Palette, _top: Option<f32>) -> bool {
+    let fill = if primary { p.accent } else { p.card };
+    let ink = if primary { p.on } else { p.ink };
+    let stroke = Stroke::new(1.0_f32, if primary { p.accent } else { p.line });
+    button_feedback(ui, p.bg, ink, vec2(10., 5.), |ui| {
+        #[cfg(windows)]
+        if let Some(top) = _top {
+            let font = FontId::proportional(13.);
+            let label = ui.painter().layout_no_wrap(title.into(), font, ink);
+            let content =
+                crate::windows_text::natural_size(ui, title, 13., false).unwrap_or(label.size());
+            let size = vec2(ui.available_width(), content.y + 16.);
+            let (allocated, response) = ui.allocate_exact_size(size, Sense::click());
+            // The dialog's right inset is a whole number of DIPs measured from
+            // the physical client edge, which can fall between egui grid positions.
+            let scale = ui.ctx().pixels_per_point();
+            let client_right = (ui.ctx().content_rect().right() * scale).round() / scale;
+            let right = client_right - (client_right - allocated.right()).round();
+            let rect = Rect::from_min_max(pos2(allocated.left(), top), pos2(right, top + size.y));
+            ui.painter().rect(rect, 8, fill, stroke, StrokeKind::Inside);
+            ui.painter()
+                .galley(rect.center() - content * 0.5, label, ink);
+            response
+                .widget_info(|| WidgetInfo::labeled(WidgetType::Button, ui.is_enabled(), title));
+            return response;
+        }
+        #[cfg(windows)]
+        let height = crate::windows_text::line_height(13.).unwrap_or(17.) + 16.;
+        #[cfg(target_os = "macos")]
+        let height = 32.;
+        ui.add_sized(
+            [ui.available_width(), height],
+            Button::new(rich(title, if MAC { 12. } else { 13. }, false, ink))
+                .corner_radius(if MAC { 7 } else { 8 })
+                .fill(fill)
+                .stroke(stroke),
+        )
+    })
+    .clicked()
+}
+
+pub struct Connect {
+    pub provider: &'static str,
+    pub path: String,
+    pub alias: String,
+    pub replacing: Option<String>,
+    pub consent: bool,
+    pub browser: bool,
+    pub pending: Option<(String, Instant)>,
+    pub error: Option<String>,
+    #[cfg(target_os = "macos")]
+    error_text: Option<crate::mac::SelectableText>,
+    #[cfg(target_os = "macos")]
+    inputs: Option<crate::mac::ConnectionFields>,
+    #[cfg(target_os = "macos")]
+    pub login: Option<quotabar::mac_login::Attempt>,
+    #[cfg(target_os = "macos")]
+    pub login_url: Option<String>,
+    #[cfg(target_os = "macos")]
+    focus_alias: bool,
+    content_height: Option<f32>,
+}
+pub enum Dialog {
+    Connect(Box<Connect>),
+    Rename(Account, String),
+    Remove {
+        account: Account,
+        decision: Option<std::sync::mpsc::Receiver<bool>>,
+    },
+    Licenses {
+        docs: Vec<(String, String)>,
+        selected: usize,
+        #[cfg(target_os = "macos")]
+        reader: Option<crate::mac::DocumentReader>,
+    },
+}
+impl Dialog {
+    pub fn remove(account: Account) -> Self {
+        Self::Remove {
+            account,
+            decision: None,
+        }
+    }
+
+    pub fn licenses() -> Self {
+        let docs = vec![
+            (
+                "저작권 및 변경 고지".into(),
+                include_str!("../../NOTICE").into(),
+            ),
+            (
+                "Apache License 2.0 전문".into(),
+                include_str!("../../LICENSE").into(),
+            ),
+        ];
+        #[cfg(windows)]
+        let mut docs = docs;
+        #[cfg(windows)]
+        if let Some(dir) = std::env::current_exe()
+            .ok()
+            .and_then(|exe| exe.parent()?.parent().map(|p| p.join("licenses")))
+            && let Ok(frameworks) = std::fs::read_dir(dir)
+        {
+            let mut files = vec![];
+            for framework in frameworks.flatten() {
+                if let Ok(entries) = std::fs::read_dir(framework.path()) {
+                    for f in entries.flatten() {
+                        let name = f.file_name().to_string_lossy().to_uppercase();
+                        if name.starts_with("LICENSE")
+                            || name.contains("THIRD") && name.contains("NOTICE")
+                        {
+                            files.push((
+                                format!(
+                                    "{} · {}",
+                                    framework.file_name().to_string_lossy(),
+                                    f.file_name().to_string_lossy()
+                                ),
+                                f.path(),
+                            ));
+                        }
+                    }
+                }
+            }
+            files.sort_by_cached_key(|(title, _)| title.to_lowercase());
+            for (title, path) in files {
+                let mut content = std::fs::read_to_string(path).unwrap_or_else(|_| {
+                    "고지 파일을 읽을 수 없습니다. 앱을 다시 설치해 주세요.".into()
+                });
+                if content.starts_with('\u{feff}') {
+                    content.drain(..'\u{feff}'.len_utf8());
+                }
+                docs.push((title, content));
+            }
+        }
+        Self::Licenses {
+            docs,
+            selected: 0,
+            #[cfg(target_os = "macos")]
+            reader: None,
+        }
+    }
+}
+impl Dashboard {
+    pub fn open_connect(&mut self, p: &str, target: Option<&Account>) {
+        self.dialog = Some(Dialog::Connect(Box::new(Connect {
+            provider: provider(p),
+            path: self.state.defaults(p),
+            alias: target.map(|a| a.name.clone()).unwrap_or_default(),
+            replacing: target.map(|a| a.id.clone()),
+            consent: false,
+            browser: true,
+            pending: None,
+            error: None,
+            #[cfg(target_os = "macos")]
+            error_text: None,
+            #[cfg(target_os = "macos")]
+            inputs: None,
+            #[cfg(target_os = "macos")]
+            login: None,
+            #[cfg(target_os = "macos")]
+            login_url: None,
+            content_height: None,
+            #[cfg(target_os = "macos")]
+            focus_alias: true,
+        })));
+    }
+    pub fn finish_request(&mut self, id: &str, error: Option<String>) {
+        if let Some(Dialog::Connect(c)) = &mut self.dialog
+            && c.reply_time_left().is_some()
+            && c.pending
+                .as_ref()
+                .is_some_and(|(key, _)| id.eq_ignore_ascii_case(key))
+        {
+            c.pending = None;
+            if let Some(message) = error {
+                c.error = Some(c.request_error("connection", &message));
+            } else {
+                self.dialog = None;
+            }
+        }
+    }
+    pub fn show_dialog(&mut self, ctx: &Context, frame: &eframe::Frame, p: Palette) {
+        let Some(mut dialog) = self.dialog.take() else {
+            // A monitor reply can dismiss the sheet before this frame starts.
+            self.dialog_access.close();
+            super::platform::dialog_owner(frame, "QuotaBar", false);
+            return;
+        };
+        if let Dialog::Remove { account, decision } = &mut dialog {
+            let reply = decision.get_or_insert_with(|| {
+                let (send, receive) = std::sync::mpsc::channel();
+                let wake = ctx.clone();
+                super::platform::confirm_remove(frame, account, move |confirmed| {
+                    let _ = send.send(confirmed);
+                    wake.request_repaint();
+                });
+                receive
+            });
+            match reply.try_recv() {
+                Ok(true) => {
+                    self.wire.action("remove", json!(account.id));
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => self.dialog = Some(dialog),
+                _ => {}
+            }
+            return;
+        }
+        let dialog_width = if MAC {
+            550.
+        } else {
+            super::client_size(frame, ctx, [590., 500.]).x
+        };
+        let (title, width, height) = match &dialog {
+            Dialog::Connect(c) => (
+                "QuotaBar · 계정 연결",
+                dialog_width,
+                c.content_height.unwrap_or(if MAC { 496. } else { 460. }),
+            ),
+            Dialog::Rename(..) => {
+                #[cfg(windows)]
+                let height = {
+                    let scale = ctx.pixels_per_point();
+                    (rename_content_height() * scale).ceil() / scale
+                };
+                #[cfg(target_os = "macos")]
+                let height = 199.;
+                ("계정 이름", dialog_width, height)
+            }
+            Dialog::Remove { .. } => unreachable!(),
+            Dialog::Licenses { .. } => {
+                let size = if MAC {
+                    vec2(720., 580.)
+                } else {
+                    super::client_size(frame, ctx, [760., 620.])
+                };
+                ("오픈소스 라이선스", size.x, size.y)
+            }
+        };
+        let resizable = !MAC && matches!(dialog, Dialog::Licenses { .. });
+        let mut close = false;
+        let mut browse = false;
+        let mut capture = if self.capture_dialog {
+            self.capture.take()
+        } else {
+            None
+        };
+        let mut content = |ctx: &Context, capture: Option<&mut super::Capture>| {
+            self.dialog_access.install(ctx, frame, title);
+            ctx.send_viewport_cmd(ViewportCommand::Visible(true));
+            close |= ctx.input(|i| i.viewport().close_requested());
+            let had_popup = Popup::is_any_open(ctx);
+            #[cfg(target_os = "macos")]
+            if !had_popup && ctx.input_mut(|i| i.consume_key(Modifiers::NONE, Key::Escape)) {
+                close = true;
+            }
+            #[cfg(target_os = "macos")]
+            let background = if matches!(&dialog, Dialog::Licenses { .. }) {
+                p.window_background
+            } else {
+                p.card
+            };
+            #[cfg(windows)]
+            let background = p.bg;
+            #[cfg(windows)]
+            let painter = ctx.layer_painter(LayerId::background());
+            #[cfg(windows)]
+            let capture_slot = (capture.is_some()
+                && matches!(dialog, Dialog::Connect(_) | Dialog::Rename(..)))
+            .then(|| painter.add(Shape::Noop));
+            #[cfg(windows)]
+            let panel_fill = if capture_slot.is_some() {
+                Color32::TRANSPARENT
+            } else {
+                // ClearType determines the text backdrop from this opaque panel.
+                background
+            };
+            #[cfg(windows)]
+            let paint_background = |natural_height| {
+                let mesh =
+                    auto_size_background(ctx, natural_height, background, capture_slot.is_some());
+                if let Some(slot) = capture_slot {
+                    painter.set(slot, mesh);
+                } else if !mesh.is_empty() {
+                    painter.add(mesh);
+                }
+            };
+            #[cfg(target_os = "macos")]
+            let panel_fill = background;
+            CentralPanel::default()
+                .frame(Frame::new().fill(panel_fill).inner_margin(
+                    if matches!(&dialog, Dialog::Licenses { .. }) {
+                        24
+                    } else {
+                        28
+                    },
+                ))
+                .show(ctx, |ui| match &mut dialog {
+                    Dialog::Connect(c) => {
+                        #[cfg(target_os = "macos")]
+                        let limit = (ctx
+                            .input(|i| i.viewport().monitor_size.map(|size| size.y))
+                            .unwrap_or(f32::INFINITY)
+                            - 80.)
+                            .max(160.);
+                        #[cfg(windows)]
+                        let limit = super::client_size(frame, ctx, [590., 720.]).y;
+                        let scroll = ScrollArea::vertical().auto_shrink([false, true]);
+                        // The Windows dialog sizes itself to the controls. A fractional
+                        // pixel at its natural height must not reserve scrollbar space.
+                        #[cfg(windows)]
+                        let scroll = if c.content_height.is_none_or(|height| height < limit) {
+                            scroll.scroll_bar_visibility(
+                                scroll_area::ScrollBarVisibility::AlwaysHidden,
+                            )
+                        } else {
+                            scroll
+                        };
+                        let scroll = scroll.show(ui, |ui| {
+                            #[cfg(windows)]
+                            let top = ui.next_widget_position().y;
+                            #[cfg(windows)]
+                            let stack = crate::windows_text::TextStack::begin(ui);
+                            close |= self.connect_panel(
+                                ui,
+                                c,
+                                p,
+                                &mut browse,
+                                #[cfg(windows)]
+                                &stack,
+                            );
+                            #[cfg(windows)]
+                            {
+                                stack.top(ui.min_rect().bottom()) - top
+                            }
+                        });
+                        let scale = if MAC { 1. } else { ctx.pixels_per_point() };
+                        #[cfg(windows)]
+                        let natural_height = scroll.inner + 56.;
+                        #[cfg(target_os = "macos")]
+                        let natural_height = scroll.content_size.y + 56.;
+                        let pixels = natural_height * scale;
+                        #[cfg(windows)]
+                        paint_background(natural_height.min(limit));
+                        // SizeToContent reserves the full natural extent of the controls.
+                        let measured = (pixels.ceil() / scale).min(limit);
+                        if c.content_height != Some(measured) {
+                            c.content_height = Some(measured);
+                            ctx.send_viewport_cmd(ViewportCommand::InnerSize(vec2(
+                                width, measured,
+                            )));
+                            ctx.request_repaint_of(ViewportId::ROOT);
+                        }
+                    }
+                    Dialog::Rename(a, name) => {
+                        #[cfg(windows)]
+                        paint_background(rename_content_height());
+                        form_text(ui, "계정 이름", 20., true, p.ink);
+                        ui.add_space(18.);
+                        let field = ui.add(
+                            TextEdit::singleline(&mut crate::account_text::AccountField(name))
+                                .font(FontId::proportional(13.))
+                                .margin(Margin::symmetric(if MAC { 18 } else { 19 }, 17))
+                                .desired_width(f32::INFINITY),
+                        );
+                        crate::accessibility::text_value(ui, field, name, "계정 이름");
+                        ui.add_space(18.);
+                        if full_button(ui, "저장", true, p, None) && !name.trim().is_empty() {
+                            self.edit_account(a, name, a.enabled, a.tray);
+                            close = true;
+                        }
+                    }
+                    Dialog::Remove { .. } => unreachable!(),
+                    Dialog::Licenses {
+                        docs,
+                        selected,
+                        #[cfg(target_os = "macos")]
+                        reader,
+                    } => {
+                        #[cfg(windows)]
+                        ui.shrink_clip_rect(ui.max_rect());
+                        #[cfg(windows)]
+                        form_text(ui, "오픈소스 라이선스", 22., true, p.ink);
+                        #[cfg(target_os = "macos")]
+                        crate::mac_text::preferred_label(
+                            ui, "오픈소스 라이선스", crate::mac_text::PreferredFont::Title2Bold, p.ink,
+                        );
+                        ui.add_space(16.);
+                        #[cfg(target_os = "macos")]
+                        {
+                            let items = [
+                                ("notice", docs[0].0.as_str()),
+                                ("license", docs[1].0.as_str()),
+                            ];
+                            if let Some(key) =
+                                segments(ui, &items, items[*selected].0, p, f32::INFINITY)
+                            {
+                                *selected = usize::from(key == "license");
+                            }
+                        }
+                        #[cfg(windows)]
+                        if let Some(index) =
+                            crate::windows_choice::choose_document(ui, docs, *selected)
+                        {
+                            *selected = index;
+                        }
+                        ui.add_space(16.);
+                        #[cfg(target_os = "macos")]
+                        let attached = {
+                            let close_height = crate::mac::button_alignment_size(
+                                ui, "닫기", None, objc2_app_kit::NSControlSize::Regular, None,
+                            )
+                            .map_or_else(|| crate::mac_text::system_line_height(ui, 13.) + 6., |s| s.y);
+                            let size = vec2(
+                                ui.available_width(),
+                                (ui.available_height() - 16. - close_height).max(80.),
+                            );
+                            let rect = Rect::from_min_size(ui.next_widget_position(), size);
+                            let attached = crate::mac::DocumentReader::show(
+                                reader,
+                                ui.ctx(),
+                                rect,
+                                *selected,
+                                &docs[*selected],
+                            );
+                            if attached {
+                                let (rect, response) = ui.allocate_exact_size(size, Sense::hover());
+                                ui.painter().rect_filled(rect, 10., p.bg);
+                                ui.ctx().accesskit_node_builder(response.id, |node| {
+                                    node.set_role(eframe::egui::accesskit::Role::Document);
+                                    node.set_label(docs[*selected].0.as_str());
+                                    node.set_value(docs[*selected].1.as_str());
+                                    node.set_read_only();
+                                });
+                                close |= reader
+                                    .as_ref()
+                                    .is_some_and(crate::mac::DocumentReader::cancelled);
+                            }
+                            attached
+                        };
+                        #[cfg(windows)]
+                        let attached = false;
+                        if !attached {
+                            let height = (ui.available_height() - 48.).max(80.);
+                            Frame::new()
+                                .fill(if MAC { p.bg } else { p.card })
+                                .stroke(if MAC {
+                                    Stroke::NONE
+                                } else {
+                                    Stroke::new(1.0_f32, p.line)
+                                })
+                                .corner_radius(if MAC { 10 } else { 7 })
+                                .inner_margin(if MAC { 16 } else { 14 })
+                                .show(ui, |ui| {
+                                    ScrollArea::vertical()
+                                        .id_salt(*selected)
+                                        .max_height(height - 34.)
+                                        .auto_shrink([false, false])
+                                        .show(ui, |ui| {
+                                            #[cfg(target_os = "macos")]
+                                            let reader = ui.add(
+                                                Label::new(
+                                                    RichText::new(&docs[*selected].1)
+                                                        .monospace()
+                                                        .size(12.),
+                                                )
+                                                .selectable(true),
+                                            );
+                                            #[cfg(target_os = "macos")]
+                                            ui.ctx().accesskit_node_builder(reader.id, |node| {
+                                                node.set_label(docs[*selected].0.as_str())
+                                            });
+                                            #[cfg(windows)]
+                                            {
+                                                let mut text = docs[*selected].1.as_str();
+                                                let reader = ui.add(
+                                                    TextEdit::multiline(&mut text)
+                                                        .font(FontId::monospace(12.))
+                                                        .frame(false)
+                                                        .margin(0.)
+                                                        .id_salt(("license-text", *selected))
+                                                        .desired_width(f32::INFINITY),
+                                                );
+                                                ui.ctx().accesskit_node_builder(
+                                                    reader.id,
+                                                    |node| {
+                                                        node.set_label("라이선스 전문");
+                                                        node.set_read_only();
+                                                        node.set_value(text);
+                                                    },
+                                                );
+                                            }
+                                        });
+                                });
+                        }
+                        ui.add_space(if MAC { 16. } else { 12. });
+                        if ui
+                            .with_layout(Layout::right_to_left(Align::Min), |ui| {
+                                #[cfg(target_os = "macos")]
+                                if let Some(button) = crate::mac::standard_button(
+                                    ui, "닫기", None,
+                                    crate::mac::ButtonLayout::Intrinsic(objc2_app_kit::NSControlSize::Regular),
+                                    None, p.focus_ring,
+                                ) {
+                                    return button;
+                                }
+                                action_on(ui, "닫기", false, p, p.bg)
+                            })
+                            .inner
+                            .clicked()
+                        {
+                            close = true;
+                        }
+                    }
+                });
+            // Let a Windows selector consume the cancellation of its list first,
+            // including when the list was opened by a key in this same frame.
+            #[cfg(windows)]
+            if !had_popup
+                && !Popup::is_any_open(ctx)
+                && ctx.input_mut(|i| i.consume_key(Modifiers::NONE, Key::Escape))
+            {
+                close = true;
+            }
+            capture.and_then(|c| c.dialog_image(ctx, frame))
+        };
+        {
+            let id = crate::accessibility::viewport();
+            let center = ctx.input(|i| i.viewport().inner_rect.map(|r| r.center()));
+            let mut builder = ViewportBuilder::default()
+                .with_title(title)
+                .with_visible(false)
+                .with_inner_size([width, height])
+                .with_resizable(resizable)
+                .with_minimize_button(resizable)
+                .with_maximize_button(resizable)
+                .with_taskbar(false);
+            #[cfg(windows)]
+            if resizable {
+                builder = builder.with_min_inner_size(super::client_size(frame, ctx, [600., 420.]));
+            }
+            if let Some(c) = center {
+                builder = builder.with_position(c - vec2(width, height) * 0.5);
+            }
+            let pixels = ctx.show_viewport_immediate(id, builder, |dialog_ctx, _| {
+                content(dialog_ctx, capture.as_mut())
+            });
+            #[cfg(windows)]
+            let pixels = pixels.or_else(|| {
+                let state = frame.wgpu_render_state().filter(|_| self.capture_dialog)?;
+                crate::windows_viewport_capture::ViewportFrame::read(ctx, state).unwrap_or_else(
+                    |error| {
+                        super::record_probe_error(&error.to_string());
+                        None
+                    },
+                )
+            });
+            self.dialog_access.publish();
+            if self.capture_dialog {
+                self.capture = capture;
+                if let Some(image) = pixels {
+                    self.save_capture(image);
+                    close = true;
+                }
+            }
+        }
+        super::platform::dialog_owner(frame, title, !close);
+        if browse
+            && !close
+            && let Dialog::Connect(c) = &mut dialog
+        {
+            // A native picker runs a nested OS event loop. Enter it only after
+            // egui finished its child pass and published the accessibility tree.
+            if let Some(path) = crate::platform::choose_path(frame, c.provider, &c.path) {
+                c.path = path;
+            }
+            ctx.request_repaint();
+        }
+        if close {
+            self.dialog_access.close();
+        }
+        if !close {
+            self.dialog = Some(dialog);
+        }
+    }
+    fn connect_panel(
+        &self,
+        ui: &mut Ui,
+        c: &mut Connect,
+        p: Palette,
+        browse_requested: &mut bool,
+        #[cfg(windows)] stack: &crate::windows_text::TextStack,
+    ) -> bool {
+        if let Some(remaining) = c.reply_time_left() {
+            ui.ctx()
+                .request_repaint_after_for(remaining, ViewportId::ROOT);
+        }
+        #[cfg(target_os = "macos")]
+        c.poll(&self.wire, ui.ctx());
+        #[cfg(target_os = "macos")]
+        let field_command = {
+            if self.capture_dialog {
+                c.inputs = None;
+            } else if c.inputs.is_none()
+                && let Some(parent) = self.selectable_text.as_ref().and_then(|v| v.sheet_view())
+            {
+                c.inputs = Some(crate::mac::ConnectionFields::new(parent, ui.ctx()));
+                c.focus_alias = true;
+            }
+            c.inputs.as_ref().and_then(|fields| fields.command())
+        };
+        #[cfg(not(target_os = "macos"))]
+        let field_command: Option<Key> = None;
+        if field_command == Some(Key::Escape) {
+            return true;
+        }
+        let locked = c.pending.is_some() || c.logging();
+        let title = if c.replacing.is_some() {
+            "Codex 다시 로그인"
+        } else {
+            "계정 연결"
+        };
+        #[cfg(windows)]
+        let control_line = crate::windows_text::TextStack::line_height(13.).unwrap_or(17.);
+        #[cfg(windows)]
+        let form_text = |ui: &mut Ui, title: &str, size, semibold, color| {
+            stack.label(ui, title, size, semibold, color)
+        };
+        if MAC {
+            let dismissed = ui
+                .horizontal(|ui| {
+                    #[cfg(target_os = "macos")]
+                    crate::mac_text::centered_label(ui, title, 17., true, p.ink)
+                        .unwrap_or_else(|| label(ui, title, 17., true, p.ink));
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        let (_rect, mut close) =
+                            ui.allocate_exact_size(vec2(16., 16.), Sense::click());
+                        #[cfg(target_os = "macos")]
+                        crate::mac::symbol(ui.painter(), _rect, "xmark", 13., false, p.ink);
+                        button_pressed(ui, &mut close);
+                        close.widget_info(|| WidgetInfo::labeled(WidgetType::Button, true, "닫기"));
+                        close.on_hover_text("닫기").clicked()
+                    })
+                    .inner
+                })
+                .inner;
+            if dismissed {
+                return true;
+            }
+        } else {
+            form_text(ui, title, 24., true, p.ink);
+        }
+        ui.add_space(if MAC { 20. } else { 0. });
+        form_text(
+            ui,
+            if !MAC {
+                "구독 사용량을 확인할 서비스를 선택하세요."
+            } else if c.browser && c.provider == "Codex" {
+                "브라우저에서 로그인하면 계정 연결과 토큰 갱신을 앱이 관리합니다."
+            } else {
+                "CLI에 로그인한 계정을 가져와 모니터링합니다."
+            },
+            if MAC { 13. } else { 12. },
+            false,
+            p.muted,
+        );
+        ui.add_space(20.);
+        let prev = c.provider;
+        let _picker = ui.add_enabled_ui(!locked && c.replacing.is_none(), |ui| {
+            #[cfg(target_os = "macos")]
+            {
+                if let Some(s) = ui
+                    .horizontal(|ui| {
+                        sheet_picker_label(ui, "Provider", p);
+                        segments(
+                            ui,
+                            &[
+                                ("Codex", "Codex"),
+                                ("Claude", "Claude"),
+                                ("Gemini", "Gemini"),
+                            ],
+                            c.provider,
+                            p,
+                            f32::INFINITY,
+                        )
+                    })
+                    .inner
+                {
+                    c.provider = provider(s);
+                }
+            }
+            #[cfg(windows)]
+            {
+                ui.spacing_mut().button_padding = vec2(10., 7.);
+                let providers = ["Codex", "Claude", "Gemini"];
+                let selected = providers.iter().position(|s| *s == c.provider).unwrap_or(0);
+                if let Some(index) = crate::windows_choice::choose_in_stack(
+                    ui,
+                    stack,
+                    "연결 서비스",
+                    &providers,
+                    selected,
+                    13.,
+                ) {
+                    c.provider = providers[index];
+                }
+            }
+        });
+        if prev != c.provider {
+            c.path = self.state.defaults(c.provider);
+            c.consent = false;
+            c.error = None;
+            #[cfg(target_os = "macos")]
+            {
+                c.focus_alias = c.inputs.as_ref().map_or_else(
+                    || !ui.memory(|m| m.has_focus(Id::new("connect-path"))),
+                    |fields| fields.alias_was_editing(),
+                );
+            }
+        }
+        #[cfg(windows)]
+        {
+            stack.advance(control_line);
+            gap_after_single_line(ui, _picker.response.rect.height(), 14., 20.);
+        }
+        #[cfg(target_os = "macos")]
+        ui.add_space(20.);
+        if MAC && c.provider == "Codex" && c.replacing.is_none() {
+            ui.add_enabled_ui(!locked, |ui| {
+                if let Some(s) = ui
+                    .horizontal(|ui| {
+                        sheet_picker_label(ui, "연결 방법", p);
+                        segments(
+                            ui,
+                            &[("browser", "브라우저 로그인"), ("file", "파일 가져오기")],
+                            if c.browser { "browser" } else { "file" },
+                            p,
+                            f32::INFINITY,
+                        )
+                    })
+                    .inner
+                {
+                    c.browser = s == "browser";
+                    c.error = None;
+                }
+            });
+            ui.add_space(20.);
+        }
+        #[cfg(target_os = "macos")]
+        {
+            sheet_field_caption(ui, "계정 이름", p);
+            ui.add_enabled_ui(!locked, |ui| {
+                crate::mac::connection_input(
+                    c.inputs.as_mut(), ui, crate::mac::Input::Alias, &mut c.alias,
+                    ui.available_width(), std::mem::take(&mut c.focus_alias), p,
+                );
+            });
+            ui.add_space(20.);
+        }
+        let browser = MAC && c.provider == "Codex" && c.browser;
+        #[cfg(target_os = "macos")]
+        if browser && let Some(fields) = &c.inputs {
+            fields.hide_path();
+        }
+        let full = |ui: &mut Ui, s: &str, primary: bool| {
+            #[cfg(windows)]
+            let top = Some(stack.top(ui.next_widget_position().y));
+            #[cfg(target_os = "macos")]
+            let top = None;
+            #[cfg(windows)]
+            stack.advance(control_line);
+            full_button(ui, s, primary, p, top)
+        };
+        #[cfg(windows)]
+        if c.provider == "Codex" {
+            form_text(
+                ui,
+                "브라우저 로그인은 Codex CLI가 필요합니다. 앱 계정은 CLI의 현재 로그인과 별도로 유지됩니다.",
+                12.,
+                false,
+                p.muted,
+            );
+            ui.add_space(12.);
+            let busy = self.state.raw["loggingIn"] == true;
+            if ui
+                .add_enabled_ui(!busy, |ui| {
+                    full(
+                        ui,
+                        if busy {
+                            "로그인 진행 중"
+                        } else {
+                            "브라우저로 Codex 로그인"
+                        },
+                        true,
+                    )
+                })
+                .inner
+            {
+                self.wire.action("login", Value::Null);
+                return true;
+            }
+            ui.add_space(18.);
+        }
+        if !browser {
+            let description = if c.provider == "Claude" {
+                "Claude 설정 폴더"
+            } else if MAC {
+                "로그인 JSON 파일"
+            } else {
+                "또는 CLI 로그인 파일 연결"
+            };
+            #[cfg(target_os = "macos")]
+            sheet_field_caption(ui, description, p);
+            #[cfg(windows)]
+            {
+                form_text(ui, description, 11., false, p.muted);
+                ui.add_space(7.);
+            }
+            let browse = ui
+                .add_enabled_ui(MAC || !locked, |ui| {
+                    #[cfg(target_os = "macos")]
+                    {
+                        ui.horizontal(|ui| {
+                            let title = "찾아보기…";
+                            let button_width = crate::mac_text::natural_size(ui, title, 13., false)
+                                .map_or(73., |size| size.x.ceil() + 16.);
+                            let width =
+                                (ui.available_width() - button_width - ui.spacing().item_spacing.x)
+                                    .max(40.);
+                            crate::mac::connection_input(
+                                c.inputs.as_mut(), ui, crate::mac::Input::Path,
+                                &mut c.path, width, false, p,
+                            );
+                            sheet_button(ui, title, p).clicked()
+                        })
+                        .inner
+                    }
+                    #[cfg(windows)]
+                    {
+                        let editor = TextEdit::singleline(&mut c.path)
+                            .desired_width(f32::INFINITY)
+                            .font(FontId::proportional(13.))
+                            .margin(Margin::symmetric(19, 17));
+                        #[cfg(windows)]
+                        let editor = editor.min_size(vec2(0., control_line + 34.));
+                        let field = ui.add(editor);
+                        let height = field.rect.height();
+                        crate::accessibility::text_value(ui, field, &mut c.path, "경로");
+                        stack.advance(control_line);
+                        gap_after_single_line(ui, height, 34., 10.);
+                        full(ui, "찾아보기", false)
+                    }
+                })
+                .inner;
+            *browse_requested = browse;
+            ui.add_space(if MAC { 20. } else { 18. });
+        }
+        #[cfg(target_os = "macos")]
+        c.connection_help(ui, browser, p);
+        #[cfg(windows)]
+        if c.provider == "Claude" {
+            form_text(
+                ui,
+                "settings.json의 status line을 연결합니다. 기존 명령은 계속 실행되며, 연결을 해제하면 복원됩니다. Claude Code를 다시 시작하고 응답을 받아야 사용량이 표시됩니다.",
+                12.,
+                false,
+                p.muted,
+            );
+            // The TextBlock's bottom margin meets the CheckBox's own top margin.
+            ui.add_space(15.);
+            ui.scope(|ui| {
+                ui.spacing_mut().interact_size.y = 0.;
+                checkbox_in_row(
+                    ui,
+                    &mut c.consent,
+                    "기존 status line을 보존하는 연결에 동의합니다",
+                    13.,
+                    p,
+                    Some(stack.top(ui.next_widget_position().y)),
+                );
+                stack.advance(control_line);
+            });
+        } else {
+            let note = if c.provider == "Gemini" {
+                "Gemini Code Assist의 현재 지원 대상 조직 계정만 연결할 수 있습니다. 개인용 종료 및 서버 정책에 따라 조회가 거절될 수 있습니다."
+            } else {
+                "연결한 파일은 읽기만 합니다. 만료되면 CLI에서 다시 로그인하세요."
+            };
+            form_text(ui, note, 12., false, p.muted);
+        }
+        #[cfg(target_os = "macos")]
+        if c.error.is_none() || self.capture_dialog || Popup::is_any_open(ui.ctx()) {
+            c.error_text = None;
+        } else if c.error_text.is_none() {
+            c.error_text = self
+                .selectable_text
+                .as_ref()
+                .and_then(|fields| fields.attached_sheet());
+        }
+        if let Some(error) = &c.error {
+            ui.add_space(if MAC { 20. } else { 10. });
+            let color = if MAC {
+                if p.dark {
+                    Color32::from_rgb(255, 69, 58)
+                } else {
+                    Color32::from_rgb(255, 59, 48)
+                }
+            } else {
+                p.warning
+            };
+            #[cfg(target_os = "macos")]
+            if let Some(fields) = &mut c.error_text {
+                fields.show(ui, crate::mac::TextRole::ConnectionError, error);
+            } else {
+                ui.add(Label::new(rich(error, 12., false, color)).selectable(true));
+            }
+            #[cfg(windows)]
+            ui.add(Label::new(rich(error, 12., false, color)).selectable(true));
+        }
+        ui.add_space(if MAC { 20. } else { 22. });
+        let enabled = (!MAC || !self.state.demo)
+            && (c.provider != "Claude" || c.consent)
+            && (!MAC || browser || !c.path.is_empty())
+            && !locked;
+        let mut close = false;
+        let submit = if MAC {
+            #[cfg(target_os = "macos")]
+            let row_height = crate::mac_text::system_line_height(ui, 13.) + 12.;
+            #[cfg(windows)]
+            let row_height = 31.;
+            ui.allocate_ui_with_layout(
+                vec2(ui.available_width(), row_height),
+                Layout::right_to_left(Align::Center),
+                |ui| {
+                    let submit = ui
+                        .add_enabled_ui(enabled, |ui| {
+                            action(
+                                ui,
+                                if browser {
+                                    "ChatGPT로 로그인"
+                                } else {
+                                    "연결"
+                                },
+                                true,
+                                p,
+                            )
+                        })
+                        .inner
+                        .clicked();
+                    close = sheet_button(ui, "취소", p).clicked();
+                    submit
+                },
+            )
+            .inner
+                || enabled && (field_command == Some(Key::Enter)
+                    || ui.input_mut(|i| i.consume_key(Modifiers::NONE, Key::Enter)))
+        } else {
+            ui.add_enabled_ui(enabled, |ui| full(ui, "연결", true))
+                .inner
+        };
+        if !submit {
+            return close;
+        }
+        if browser {
+            #[cfg(target_os = "macos")]
+            c.start_login();
+        } else if MAC {
+            // The monitor may acknowledge the request before the next AppKit frame.
+            #[cfg(target_os = "macos")]
+            if let Some(fields) = &c.inputs {
+                fields.lock_alias();
+            }
+            let id = self.wire.action(
+                "connect",
+                json!({"provider":c.provider.to_ascii_lowercase(),"path":c.path,"alias":c.alias}),
+            );
+            c.wait_for_reply(id, ui.ctx());
+        } else {
+            if c.provider == "Claude" {
+                self.wire
+                    .action("claude", json!({"path":c.path,"consent":true}));
+            } else {
+                self.wire
+                    .action("import", json!({"provider":c.provider,"path":c.path}));
+            }
+            return true;
+        }
+        false
+    }
+}
+impl Connect {
+    fn request_error(&self, code: &str, message: &str) -> String {
+        // The file form displays localizedDescription. The browser flow displays
+        // ProviderError.message directly, including when the monitor fails to reply.
+        if MAC && !(self.provider == "Codex" && self.browser) {
+            format!("[{code}] {message}")
+        } else {
+            message.to_owned()
+        }
+    }
+
+    pub fn wait_for_reply(&mut self, id: String, ctx: &Context) {
+        self.pending = Some((id, Instant::now()));
+        ctx.request_repaint_of(ViewportId::ROOT);
+    }
+
+    fn reply_time_left(&mut self) -> Option<Duration> {
+        let (_, start) = self.pending.as_ref()?;
+        let remaining = Duration::from_secs(30).saturating_sub(start.elapsed());
+        if remaining.is_zero() {
+            self.pending = None;
+            self.error = Some(self.request_error(
+                "dashboard_timeout",
+                "연결 결과를 받지 못했습니다. 계정 목록을 확인한 뒤 다시 시도하세요.",
+            ));
+            None
+        } else {
+            Some(remaining)
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    fn connection_help(&mut self, ui: &mut Ui, browser: bool, p: Palette) {
+        Frame::new().inner_margin(15).corner_radius(10)
+            .fill(surface_fill(p.card, p.ink, 0.035))
+            .show(ui, |ui| {
+                ui.spacing_mut().item_spacing.y = 10.;
+                let note = |ui: &mut Ui, text: &str, color: Color32| {
+                    if crate::mac_text::paragraph(ui, text, 12., 3., color).is_none() {
+                        ui.label(rich(text, 12., false, color).line_height(Some(18.)));
+                    }
+                };
+                if browser {
+                    note(ui, "ChatGPT 계정으로 로그인하세요. 인증 정보는 이 Mac의 사용자 전용 파일에 저장하고, 만료 시 자동 갱신합니다.", p.ink);
+                    note(ui, "키체인 승인창은 사용하지 않습니다. 로그인 파일은 별도 암호화 없이 파일 접근 권한으로 보호됩니다.", p.muted);
+                    note(ui, "각 계정을 별도로 연결할 수 있습니다. 기존 Codex CLI의 로그인 상태는 그대로 유지됩니다.", p.muted);
+                    if self.replacing.is_some() {
+                        note(ui, "선택한 카드와 같은 계정·워크스페이스로 로그인하세요. 연결이 완료되면 자동 갱신으로 전환됩니다.", p.muted);
+                    }
+                    if self.login.is_some() {
+                        ui.horizontal(|ui| {
+                            ui.add(Spinner::new().size(13.));
+                            note(ui, if self.login_url.is_some() { "브라우저에서 로그인을 완료하세요." } else { "로그인을 시작하고 있습니다…" }, p.ink);
+                        });
+                        if let Some(url) = &self.login_url {
+                            ui.hyperlink_to("로그인 페이지 다시 열기", url);
+                        }
+                    }
+                } else if self.provider == "Claude" {
+                    note(ui, "공식 CLI의 statusLine에서 5시간·주간 한도를 받습니다. 연결 후 Claude에서 메시지를 보내면 표시됩니다. 계정마다 별도 설정 폴더를 사용하세요.", p.ink);
+                    checkbox(ui, &mut self.consent, "이 폴더의 statusLine 연결 허용 (기존 명령은 보존)", 12., p);
+                } else {
+                    note(ui, "로그인은 이 Mac의 사용자 전용 파일에 저장합니다. 파일 연결은 CLI가 갱신한 인증을 읽습니다. Codex 자동 갱신은 브라우저 로그인에서 사용할 수 있습니다.", p.ink);
+                    if self.provider == "Gemini" {
+                        let orange = if p.dark { Color32::from_rgb(255, 159, 10) } else { Color32::from_rgb(255, 149, 0) };
+                        note(ui, "Code Assist Standard · Enterprise 전용. 개인용 Google 로그인은 2026년 6월 18일에 종료되었습니다.", orange);
+                        crate::mac_text::hyperlink(ui, "Google 지원 범위 확인",
+                            "https://developers.google.com/gemini-code-assist/docs/deprecations/code-assist-individuals", 12., p.accent, true);
+                    }
+                    note(ui, if self.provider == "Codex" { "먼저 터미널에서 codex login을 실행하세요." } else { "먼저 Gemini CLI에서 지원되는 계정으로 로그인하세요." }, p.muted);
+                }
+            });
+    }
+
+    fn logging(&self) -> bool {
+        #[cfg(target_os = "macos")]
+        {
+            self.login.is_some()
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            false
+        }
+    }
+}

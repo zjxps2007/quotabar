@@ -1,0 +1,58 @@
+[package]
+name = "quotabar-ui"
+version = "0.1.4"
+edition = "2024"
+publish = false
+license = "Apache-2.0"
+build = "../../build.rs"
+
+[[bin]]
+name = "quotabar-dashboard"
+path = "main.rs"
+
+[[example]]
+name = "capture-window"
+path = "../../windows/tests/capture-window.rs"
+
+[dependencies]
+quotabar = { path = "../.." }
+eframe = { version = "0.33.3", default-features = false, features = ["accesskit", "default_fonts", "glow", "x11"] }
+image = { version = "0.25", default-features = false, features = ["png","ico"] }
+font-kit = "0.14"
+raw-window-handle = "0.6"
+chrono = "0.4"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+uuid = { version = "1", features = ["v4"] }
+zeroize = "1"
+
+[target.'cfg(windows)'.dependencies]
+indexmap = "2"
+eframe = { version = "0.33.3", default-features = false, features = ["wgpu"] }
+wgpu = { version = "27", default-features = false, features = ["dx12", "wgsl"] }
+rfd = { version = "0.15", default-features = false }
+accesskit_windows = "0.29.2"
+windows-numerics = "0.2"
+windows-core = { version = "0.61", default-features = false }
+windows = { version = "0.61", default-features = false, features = ["Win32_Foundation","Win32_Graphics_Direct2D_Common","Win32_Graphics_DirectWrite","Win32_Graphics_Dxgi_Common","Win32_Graphics_Imaging","Win32_System_Com","Graphics_Capture","Graphics_DirectX_Direct3D11","Win32_Graphics_Direct3D","Win32_Graphics_Direct3D11","Win32_Graphics_Dwm","Win32_Graphics_Dxgi","Win32_Graphics_Gdi","Win32_System_WinRT_Direct3D11","Win32_System_WinRT_Graphics_Capture","Win32_UI_HiDpi","Win32_UI_WindowsAndMessaging"] }
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Globalization", "Win32_System_Registry", "Win32_System_Threading", "Win32_UI_HiDpi", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+accesskit_macos = "0.22.2"
+core-foundation = "0.9"
+core-graphics = "0.23"
+core-text = "20.1"
+ttf-parser = "0.25"
+block2 = "0.6"
+base64 = "0.22"
+libc = "0.2"
+objc2 = "0.6"
+objc2-quartz-core = { version = "0.3", default-features = false, features = ["std","CALayer","objc2-core-foundation","objc2-core-graphics"] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["std","NSString","NSCharacterSet","NSFileManager","NSGeometry","NSDate","NSDateFormatter","NSFormatter","NSNumberFormatter","NSURL","NSValue"] }
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std","block2","objc2-core-graphics","NSAccessibility","NSAlert","NSApplication","NSAttributedString","NSBitmapImageRep","NSButton","NSColor","NSColorSpace","NSControl","NSFont","NSFontDescriptor","NSGraphics","NSGraphicsContext","NSImage","NSImageRep","NSLayoutConstraint","NSLayoutManager","NSOpenPanel","NSPanel","NSParagraphStyle","NSPopUpButton","NSSavePanel","NSScreen","NSScrollView","NSSegmentedControl","NSStringDrawing","NSSwitch","NSText","NSTextContainer","NSTextField","NSTextFieldCell","NSTextInputClient","NSTextStorage","NSTextView","NSUserInterfaceItemIdentification","NSUserInterfaceLayout","NSWindow","NSView","NSMenu","NSMenuItem","NSResponder","NSRunningApplication","NSWorkspace"] }
+
+[target.'cfg(windows)'.build-dependencies]
+winresource = "0.1"
+
+[build-dependencies]
+serde_json = "1"

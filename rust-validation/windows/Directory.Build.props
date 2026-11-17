@@ -1,0 +1,11 @@
+<Project>
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <Deterministic>true</Deterministic>
+    <Version>$([System.Text.RegularExpressions.Regex]::Match($([System.IO.File]::ReadAllText('$(MSBuildThisFileDirectory)../shared/version.json')), '&quot;version&quot;\s*:\s*&quot;([^&quot;]+)&quot;').Groups[1].Value)</Version>
+  </PropertyGroup>
+</Project>
