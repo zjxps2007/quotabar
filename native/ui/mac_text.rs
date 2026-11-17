@@ -645,14 +645,15 @@ pub fn system_label(
     draw_label(ui, text, size, Face::label(heavy), color, LineBox::System)
 }
 
+fn covers_text(font: &NSFont, text: &str) -> bool {
+    let covered = font.coveredCharacterSet();
+    text.chars().all(|ch| covered.longCharacterIsMember(ch as u32))
+}
+
 pub fn dashboard_heading(ui: &mut Ui, text: &str, color: Color32) -> Option<Response> {
-    let covered = NSFont::boldSystemFontOfSize(25.).coveredCharacterSet();
     // SwiftUI centers a system-face title on backing pixels. A substituted
     // face sits in the logical system line box, which preserves its baseline.
-    let line = if text
-        .chars()
-        .all(|ch| covered.longCharacterIsMember(ch as u32))
-    {
+    let line = if covers_text(&NSFont::boldSystemFontOfSize(25.), text) {
         LineBox::CenteredSystem
     } else {
         LineBox::System
@@ -671,21 +672,26 @@ pub fn stat_value(ui: &mut Ui, text: &str, color: Color32) -> Option<Response> {
     )
 }
 
-pub fn centered_stack_label(
-    ui: &mut Ui,
-    text: &str,
-    size: f32,
-    heavy: bool,
-    color: Color32,
-) -> Option<Response> {
+pub fn section_heading(ui: &mut Ui, text: &str, color: Color32) -> Option<Response> {
     draw_label(
         ui,
         text,
-        size,
-        Face::label(heavy),
+        15.,
+        Face::Emphasized,
         color,
         LineBox::CenteredStack,
     )
+}
+
+pub fn stat_caption(ui: &mut Ui, text: &str, size: f32, color: Color32) -> Option<Response> {
+    // A system-face-only caption sits on its normal baseline. When a fallback
+    // face supplies glyphs, SwiftUI centers the bitmap inside the stack line.
+    let line = if covers_text(&NSFont::systemFontOfSize(f64::from(size)), text) {
+        LineBox::Stack
+    } else {
+        LineBox::CenteredStack
+    };
+    draw_label(ui, text, size, Face::Regular, color, line)
 }
 
 pub fn stacked_label(
