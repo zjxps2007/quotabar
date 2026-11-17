@@ -938,12 +938,15 @@ impl Dashboard {
         let name = a.control_label(tray_label);
         #[cfg(target_os = "macos")]
         let switch = {
-            ui.allocate_ui_with_layout(
-                vec2(mini_toggle_width(ui, tray_label), 15.),
-                Layout::left_to_right(Align::Center),
-                |ui| named_toggle(ui, tray_label, &name, a.tray, p.tint(a.provider), p),
-            )
-            .inner
+            let (_, slot) = ui.allocate_space(vec2(mini_toggle_width(ui, tray_label), 15.));
+            // SwiftUI's mini switch extends one point above its layout slot.
+            // Its caption, mouse target and accessibility frame share that origin.
+            let mut row = ui.new_child(
+                UiBuilder::new()
+                    .max_rect(slot.translate(vec2(0., -1.)))
+                    .layout(Layout::left_to_right(Align::Center)),
+            );
+            named_toggle(&mut row, tray_label, &name, a.tray, p.tint(a.provider), p)
         };
         #[cfg(target_os = "macos")]
         let switch = tooltip_text(
