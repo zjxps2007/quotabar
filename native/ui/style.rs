@@ -1214,11 +1214,15 @@ pub fn link(ui: &mut Ui, s: &str, p: Palette, backdrop: Color32) -> Response {
     button_feedback(ui, backdrop, p.ink, vec2(-3., 1.), |ui| {
         #[cfg(windows)]
         {
-            let text = crate::windows_text::natural_size(ui, s, 12., false).unwrap_or_else(|| {
-                ui.painter()
-                    .layout_no_wrap(s.to_owned(), FontId::proportional(12.), p.ink)
-                    .size()
-            });
+            let label = crate::windows_text::MeasuredLabel::natural(ui, s, 12., false);
+            let text = label.as_ref().map_or_else(
+                || {
+                    ui.painter()
+                        .layout_no_wrap(s.to_owned(), FontId::proportional(12.), p.ink)
+                        .size()
+                },
+                |label| label.size,
+            );
             // A WPF link stretches across a vertical StackPanel. In a horizontal
             // section header it docks to the right at its natural width.
             let width = if ui.layout().is_vertical() {
@@ -1227,13 +1231,19 @@ pub fn link(ui: &mut Ui, s: &str, p: Palette, backdrop: Color32) -> Response {
                 text.x
             };
             let (rect, response) = ui.allocate_exact_size(vec2(width, text.y + 8.), Sense::click());
-            ui.painter().text(
-                rect.center(),
-                Align2::CENTER_CENTER,
-                s,
-                FontId::proportional(12.),
-                p.ink,
-            );
+            let top = rect.center() - text * 0.5;
+            if label
+                .and_then(|label| label.paint(ui.painter(), top, p.ink))
+                .is_none()
+            {
+                ui.painter().text(
+                    rect.center(),
+                    Align2::CENTER_CENTER,
+                    s,
+                    FontId::proportional(12.),
+                    p.ink,
+                );
+            }
             response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, ui.is_enabled(), s));
             response
         }

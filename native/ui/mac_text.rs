@@ -741,6 +741,141 @@ pub fn plan_label(ui: &mut Ui, text: &str, color: Color32) -> Option<Response> {
     medium_label(ui, text, 9., color)
 }
 
+struct CardLine {
+    run: Run,
+    size: Vec2,
+    ascent: f32,
+}
+
+impl CardLine {
+    fn measure(
+        ui: &Ui,
+        text: &str,
+        points: f32,
+        face: Face,
+        color: Color32,
+        truncation: Truncation,
+    ) -> Option<Self> {
+        if text.is_empty() || text.contains('\n') {
+            return None;
+        }
+        let handle = ui.ctx().plugin_opt::<Renderer>()?;
+        let run = handle
+            .lock()
+            .tracked_run(ui.ctx(), text, points, face, color, 0., truncation)?
+            .clone();
+        let scale = ui.pixels_per_point();
+        let font = NSFont::systemFontOfSize(f64::from(points));
+        // SwiftUI reserves both sides of the system baseline even when the
+        // label is drawn entirely with a shorter fallback face.
+        let ascent = font.ascender().ceil() as f32;
+        let descent = (font.leading() - font.descender()).ceil() as f32;
+        let size = vec2(
+            (run.size.x * scale).ceil() / scale,
+            (ascent + descent).max(run.metrics.height),
+        );
+        Some(Self { run, size, ascent })
+    }
+
+    fn paint(&self, ui: &Ui, response: &Response, text: &str, color: Color32) {
+        ui.painter().add(self.run.preferred_shape(
+            response.rect.min,
+            self.ascent,
+            ui.pixels_per_point(),
+            color,
+        ));
+        response.widget_info(|| WidgetInfo::labeled(WidgetType::Label, ui.is_enabled(), text));
+    }
+}
+
+pub fn quota_card_titles(
+    ui: &mut Ui,
+    account: &crate::model::Account,
+    p: crate::style::Palette,
+) -> Option<()> {
+    let provider = CardLine::measure(
+        ui,
+        account.provider,
+        13.,
+        Face::Emphasized,
+        p.ink,
+        Truncation::None,
+    )?;
+    let plan = match account.snapshot["plan"].as_str() {
+        Some(text) => Some((
+            text,
+            CardLine::measure(ui, text, 9., Face::Medium, p.ink, Truncation::None)?,
+        )),
+        None => None,
+    };
+    let row = plan.as_ref().map_or(provider.size, |(_, line)| {
+        vec2(
+            provider.size.x + 8. + line.size.x + 12.,
+            provider.size.y.max(line.size.y + 6.),
+        )
+    });
+    // The trailing spacer and optional progress indicator also take part in
+    // the HStack's width proposal to the single-line account name.
+    let available = ui.available_width() - 12. - if account.loading { 23. } else { 0. };
+    if available < row.x {
+        return None;
+    }
+    let alias = CardLine::measure(
+        ui,
+        &account.name,
+        11.,
+        Face::Regular,
+        p.muted,
+        Truncation::End(available.to_bits()),
+    )?;
+    let size = vec2(row.x.max(alias.size.x), row.y + 3. + alias.size.y);
+    let (id, rect) = ui.allocate_space(size);
+    let widget = |key, offset: Vec2, size| {
+        ui.interact(
+            Rect::from_min_size(rect.min + offset, size),
+            id.with(key),
+            Sense::hover(),
+        )
+    };
+    let provider_box = widget(
+        "provider",
+        vec2(0., (row.y - provider.size.y) / 2.),
+        provider.size,
+    );
+    provider.paint(ui, &provider_box, account.provider, p.ink);
+    if let Some((text, line)) = plan {
+        let badge = Rect::from_min_size(
+            rect.min + vec2(provider.size.x + 8., (row.y - line.size.y - 6.) / 2.),
+            line.size + vec2(12., 6.),
+        );
+        crate::mac::rounded_rect(
+            ui,
+            badge,
+            badge.height() / 2.,
+            crate::style::surface_fill(p.card, p.ink, 0.05),
+            Stroke::NONE,
+            crate::mac::Curve::Circular,
+        );
+        let plan_box = widget("plan", badge.min - rect.min + vec2(6., 3.), line.size);
+        line.paint(ui, &plan_box, text, p.ink);
+    }
+    let alias_box = widget("alias", vec2(0., row.y + 3.), alias.size);
+    alias.paint(ui, &alias_box, &account.name, p.muted);
+    crate::style::tooltip_text(alias_box, &account.name);
+    Some(())
+}
+
+pub fn snapshot_label(ui: &mut Ui, text: &str, color: Color32) -> Response {
+    if let Some(line) = CardLine::measure(ui, text, 10., Face::Regular, color, Truncation::None)
+        && line.size.x <= ui.available_width()
+    {
+        let (_, response) = ui.allocate_exact_size(line.size, Sense::hover());
+        line.paint(ui, &response, text, color);
+        return response;
+    }
+    crate::style::system_label(ui, text, 10., false, color)
+}
+
 pub fn medium_label(ui: &mut Ui, text: &str, size: f32, color: Color32) -> Option<Response> {
     draw_label(ui, text, size, Face::Medium, color, LineBox::Stack)
 }

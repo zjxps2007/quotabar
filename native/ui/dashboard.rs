@@ -73,6 +73,50 @@ fn mac_message_banner(
         .inner
 }
 
+fn quota_card_titles(ui: &mut Ui, a: &Account, p: Palette) {
+    #[cfg(target_os = "macos")]
+    if crate::mac_text::quota_card_titles(ui, a, p).is_some() {
+        return;
+    }
+    ui.vertical(|ui| {
+        #[cfg(windows)]
+        if a.snapshot["plan"].is_string()
+            && let Some(plan_line) = crate::windows_text::line_height(9.)
+        {
+            // WPF measures the padded plan badge before centering the
+            // provider TextBlock in the shared row.
+            ui.spacing_mut().interact_size.y = plan_line + 6.;
+        }
+        ui.horizontal(|ui| {
+            #[cfg(target_os = "macos")]
+            {
+                // The title and plan use the inner HStack's default spacing.
+                ui.spacing_mut().item_spacing.x = 8.;
+            }
+            label(ui, a.provider, 13., true, p.ink);
+            if let Some(plan) = a.snapshot["plan"].as_str() {
+                #[cfg(target_os = "macos")]
+                let fill = surface_fill(p.card, p.ink, 0.05);
+                #[cfg(windows)]
+                let fill = p.track;
+                Frame::new()
+                    .fill(fill)
+                    .corner_radius(if MAC { u8::MAX } else { 8 })
+                    .inner_margin(Margin::symmetric(6, 3))
+                    .show(ui, |ui| {
+                        #[cfg(target_os = "macos")]
+                        if crate::mac_text::plan_label(ui, plan, p.ink).is_some() {
+                            return;
+                        }
+                        label(ui, plan, 9., false, p.ink);
+                    });
+            }
+        });
+        ui.add_space(3.);
+        ellipsis_label(ui, &a.name, 11., p.muted);
+    });
+}
+
 impl Dashboard {
     pub fn workspace(&mut self, ctx: &Context, p: Palette, titlebar: i8) {
         if !MAC {
@@ -593,8 +637,8 @@ impl Dashboard {
             });
             return;
         }
-        ui.horizontal(|ui| {
-            ui.vertical(|ui| {
+        let _section = ui.horizontal(|ui| {
+            let titles = ui.vertical(|ui| {
                 section_title(
                     ui,
                     "구독 현황",
@@ -604,7 +648,7 @@ impl Dashboard {
                         "계정별 잔여량 · 트레이에 표시할 계정을 선택하세요"
                     },
                     p,
-                );
+                )
             });
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 #[cfg(target_os = "macos")]
@@ -615,8 +659,11 @@ impl Dashboard {
                     self.navigate(ui.ctx(), "accounts", true);
                 }
             });
+            titles.inner
         });
         ui.add_space(if MAC { 24. } else { 16. });
+        #[cfg(windows)]
+        let grid_offset = _section.inner + 16. - ui.next_widget_position().y;
         let columns = columns(ui.available_width(), 290., 14.);
         let w = cell_width(ui.available_width(), columns, 14.);
         let accounts = self.state.accounts.clone();
@@ -631,7 +678,13 @@ impl Dashboard {
                     let content = |ui: &mut Ui| {
                         ui.vertical(|ui| {
                             ui.set_width(content_width);
-                            self.quota_card(ui, p, a);
+                            self.quota_card(
+                                ui,
+                                p,
+                                a,
+                                #[cfg(windows)]
+                                grid_offset,
+                            );
                         })
                     };
                     #[cfg(windows)]
@@ -659,7 +712,13 @@ impl Dashboard {
         }
         self.activity(ui, p, viewport_top);
     }
-    fn quota_card(&mut self, ui: &mut Ui, p: Palette, a: &Account) {
+    fn quota_card(
+        &mut self,
+        ui: &mut Ui,
+        p: Palette,
+        a: &Account,
+        #[cfg(windows)] grid_offset: f32,
+    ) {
         ui.spacing_mut().interact_size.y = 0.;
         #[cfg(windows)]
         if !a.enabled {
@@ -668,43 +727,7 @@ impl Dashboard {
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 10.;
             self.assets.logo(ui, a.provider, 36.);
-            ui.vertical(|ui| {
-                #[cfg(windows)]
-                if a.snapshot["plan"].is_string()
-                    && let Some(plan_line) = crate::windows_text::line_height(9.)
-                {
-                    // WPF measures the padded plan badge before centering the
-                    // provider TextBlock in the shared row.
-                    ui.spacing_mut().interact_size.y = plan_line + 6.;
-                }
-                ui.horizontal(|ui| {
-                    #[cfg(target_os = "macos")]
-                    {
-                        // The title and plan use the inner HStack's default spacing.
-                        ui.spacing_mut().item_spacing.x = 8.;
-                    }
-                    label(ui, a.provider, 13., true, p.ink);
-                    if let Some(plan) = a.snapshot["plan"].as_str() {
-                        #[cfg(target_os = "macos")]
-                        let fill = surface_fill(p.card, p.ink, 0.05);
-                        #[cfg(windows)]
-                        let fill = p.track;
-                        Frame::new()
-                            .fill(fill)
-                            .corner_radius(if MAC { u8::MAX } else { 8 })
-                            .inner_margin(Margin::symmetric(6, 3))
-                            .show(ui, |ui| {
-                                #[cfg(target_os = "macos")]
-                                if crate::mac_text::plan_label(ui, plan, p.ink).is_some() {
-                                    return;
-                                }
-                                label(ui, plan, 9., false, p.ink);
-                            });
-                    }
-                });
-                ui.add_space(3.);
-                ellipsis_label(ui, &a.name, 11., p.muted);
-            });
+            quota_card_titles(ui, a, p);
             if MAC && a.loading {
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     ui.add(Spinner::new().size(13.))
@@ -773,19 +796,28 @@ impl Dashboard {
                         format!("{} 잔여량 {spoken} 퍼센트", text(w, "title", "")),
                     )
                 });
-                ui.painter().rect_filled(r, 2, p.track);
+                // Preserve the section's fractional StackPanel origin when
+                // rasterizing WPF's 5-DIP pill on its 8-by-8 sample grid.
+                #[cfg(windows)]
+                let r = r.translate(vec2(0., grid_offset));
+                let paint_bar = |rect: Rect, color| {
+                    #[cfg(windows)]
+                    crate::windows_border::rounded_rectangle(ui, rect, 2.5, color, Stroke::NONE);
+                    #[cfg(target_os = "macos")]
+                    ui.painter().rect_filled(rect, 2, color);
+                };
+                paint_bar(r, p.track);
                 if n > 0. {
                     let color = if a.error.is_some() || a.snapshot["state"] == "stale" {
                         tint.gamma_multiply(0.45)
                     } else {
                         tint
                     };
-                    ui.painter().rect_filled(
+                    paint_bar(
                         Rect::from_min_size(
                             r.min,
                             vec2(r.width() * (n.clamp(0., 100.) / 100.) as f32, 5.),
                         ),
-                        2,
                         color,
                     );
                 }
@@ -850,19 +882,25 @@ impl Dashboard {
                     || "스냅샷 대기 중".into(),
                     |date| format!("마지막 데이터 {}", crate::platform::quota_time(date, false)),
                 );
-                let caption = system_label(ui, &observed, 10., false, p.tertiary);
-                ui.painter().circle_filled(
-                    pos2(dot.center().x, caption.rect.center().y),
+                let caption = crate::mac_text::snapshot_label(ui, &observed, p.tertiary);
+                crate::mac::rounded_rect(
+                    ui,
+                    Rect::from_center_size(
+                        pos2(dot.center().x, caption.rect.center().y),
+                        Vec2::splat(4.),
+                    ),
                     2.,
                     if a.error.is_some() {
                         p.warning
                     } else {
                         p.tint(a.provider)
                     },
+                    Stroke::NONE,
+                    crate::mac::Curve::Circular,
                 );
                 if a.error.is_some() {
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        label(ui, "이전 값", 10., false, p.tertiary)
+                        crate::mac_text::snapshot_label(ui, "이전 값", p.tertiary)
                     });
                 }
             });
@@ -935,7 +973,7 @@ impl Dashboard {
         }
     }
 }
-pub fn section_title(ui: &mut Ui, title: &str, subtitle: &str, p: Palette) {
+pub fn section_title(ui: &mut Ui, title: &str, subtitle: &str, p: Palette) -> f32 {
     #[cfg(target_os = "macos")]
     {
         if crate::mac_text::section_heading(ui, title, p.ink).is_none() {
@@ -943,6 +981,7 @@ pub fn section_title(ui: &mut Ui, title: &str, subtitle: &str, p: Palette) {
         }
         ui.add_space(4.);
         preferred_label(ui, subtitle, PreferredFont::Caption, p.muted);
+        ui.min_rect().bottom()
     }
     #[cfg(windows)]
     {
@@ -953,7 +992,9 @@ pub fn section_title(ui: &mut Ui, title: &str, subtitle: &str, p: Palette) {
         stack.label(ui, subtitle, 11., false, p.muted);
         // The parent measures the entire WPF StackPanel in one pass. Individual
         // label allocations can otherwise shorten it before the next card.
-        ui.expand_to_include_y(stack.top(ui.min_rect().bottom()));
+        let bottom = stack.top(ui.min_rect().bottom());
+        ui.expand_to_include_y(bottom);
+        bottom
     }
 }
 pub fn columns(width: f32, min: f32, gap: f32) -> usize {
