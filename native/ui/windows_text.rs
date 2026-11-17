@@ -865,11 +865,12 @@ impl Surface {
         if !surface.interior.contains_rect(area) {
             return None;
         }
-        let middle_x = surface.interior.shrink2(vec2(surface.radius, 0.));
-        let middle_y = surface.interior.shrink2(vec2(0., surface.radius));
-        (middle_x.contains_rect(area) || middle_y.contains_rect(area))
-            .then_some(surface.color)
-            .flatten()
+        // Chords through each corner's 45-degree point lie inside the opaque
+        // fill. Padded text can span both center strips without touching an arc.
+        let inset = (area.min - surface.interior.min).min(surface.interior.max - area.max);
+        let corner = (Vec2::splat(surface.radius) - inset).max(Vec2::ZERO);
+        let edge = corner.max_elem() + (std::f32::consts::SQRT_2 - 1.) * corner.min_elem();
+        (edge <= surface.radius).then_some(surface.color).flatten()
     }
 
     fn unknown(bounds: Rect) -> Self {
@@ -1203,6 +1204,23 @@ mod tests {
             Surface::record(&mut surfaces, &text("Claude"), clip);
             assert_eq!(Surface::behind(&surfaces, area), None);
         });
+    }
+
+    #[test]
+    fn padded_badge_text_uses_cleartype_inside_the_rounded_fill() {
+        let badge = Rect::from_min_size(Pos2::ZERO, vec2(30., 18.));
+        let mut surfaces = Vec::new();
+        Surface::record(
+            &mut surfaces,
+            &Shape::rect_filled(badge, 8, Color32::GRAY),
+            badge,
+        );
+        let ink = badge.shrink2(vec2(3., 4.));
+        assert_eq!(Surface::behind(&surfaces, ink), Some(Color32::GRAY));
+        assert_eq!(
+            Surface::behind(&surfaces, ink.translate(vec2(-2., 0.))),
+            None
+        );
     }
 
     #[test]
