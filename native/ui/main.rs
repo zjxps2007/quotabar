@@ -346,6 +346,10 @@ impl eframe::App for Dashboard {
         if let Some(renderer) = ctx.plugin_opt::<windows_text::TextRenderer>() {
             renderer.lock().bitmap_target = self.capture.is_some();
         }
+        #[cfg(windows)]
+        if let Some(renderer) = ctx.plugin_opt::<windows_border::BorderRenderer>() {
+            renderer.lock().window_target = self.capture.is_none();
+        }
         let (minimized, focused, closing) = ctx.input(|i| {
             (
                 i.viewport().minimized,

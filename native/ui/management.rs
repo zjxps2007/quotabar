@@ -632,7 +632,7 @@ impl Dashboard {
                 self.preference("appearance","appearance",json!(v));}
             section_divider(ui);let dock=self.state.flag("showTaskbarIcon","showDockIcon");
             #[cfg(target_os = "macos")]
-            let dock_toggle = mac_setting_toggle(ui,"Dock에 앱 아이콘 표시",Some("끄면 상단바에서 Dashboard와 설정을 열 수 있습니다."),dock,p.accent,p);
+            let dock_toggle = mac_setting_toggle(ui,"Dock에 앱 아이콘 표시",Some("끄면 상단바에서 Dashboard와 설정을 열 수 있습니다."),true,dock,p.accent,p);
             #[cfg(windows)]
             let dock_toggle = toggle(ui,"작업 표시줄에 앱 아이콘 표시",dock,p.accent,p);
             if dock_toggle.clicked(){
@@ -680,7 +680,7 @@ impl Dashboard {
             section_divider(ui);let scan=self.state.flag("scanLocalLogs","scanLocalLogs");
             let scan_detail="Dashboard가 열려 있을 때만 로그를 확인합니다. 대화 본문은 저장하지 않습니다.";
             #[cfg(target_os = "macos")]
-            let scan_toggle=mac_setting_toggle(ui,"로컬 토큰 통계",Some(scan_detail),scan,p.accent,p);
+            let scan_toggle=mac_setting_toggle(ui,"로컬 토큰 통계",Some(scan_detail),false,scan,p.accent,p);
             #[cfg(windows)]
             let scan_toggle=toggle(ui,"로컬 토큰 통계",scan,p.accent,p);
             if scan_toggle.clicked(){self.preference("scanLocalLogs","scanLogs",json!(!scan));}

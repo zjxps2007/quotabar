@@ -526,6 +526,7 @@ def capture_windows(dashboard, program, folder, library, fixture, output, theme,
                 positions.append(controls.request("scrollerPosition", expected={"position": "middle"})["position"])
                 time.sleep(0.3)
                 controls.request("snapshot", "dashboard")
+                shutil.copyfile(folder / "frame.png", output / f"settings-paged-{theme}.png")
                 crops = [folder / "top.png", folder / "paged.png"]
                 for source, crop in zip((output / f"settings-{theme}.png", folder / "frame.png"), crops):
                     subprocess.run(["sips", "--cropToHeightWidth", "320", "560", source, "--out", crop],
@@ -756,7 +757,7 @@ def compare_windows(dashboard, work, original, library):
                                                   library, fixture, output, theme, original)
     for theme in dashboard.THEMES:
         for route in (*dashboard.ROUTES, "remove", "message", "message-selected", "message-wrapped", "account-name-selected", "account-email-selected", "popover-sample", "popover-empty", "popover-overflow",
-                      "source-path-selected", "settings-path-selected", "settings-bottom", "licenses-notice",
+                      "source-path-selected", "settings-path-selected", "settings-paged", "settings-bottom", "licenses-notice",
                       "licenses-apache", "empty", "quota-status", "activity-empty", "activity", "activity-detail",
                       "activity-escape", "activity-return", "activity-long-model",
                       *(f"switch-{provider}-{state}" for provider in PROVIDERS for state in ("on", "off"))):

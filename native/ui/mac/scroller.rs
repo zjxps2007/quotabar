@@ -7,7 +7,8 @@ use objc2::{
     DefinedClass, MainThreadMarker, MainThreadOnly, define_class, msg_send, rc::Retained, sel,
 };
 use objc2_app_kit::{
-    NSAppearanceCustomization, NSControlSize, NSScroller, NSScrollerPart, NSScrollerStyle, NSView,
+    NSAppearanceCustomization, NSControlSize, NSScrollView, NSScroller, NSScrollerPart,
+    NSScrollerStyle, NSView,
 };
 use objc2_foundation::{NSObject, NSObjectProtocol, NSPoint, NSRect, NSSize};
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
@@ -53,6 +54,7 @@ define_class!(
 pub struct NativeScroller {
     bar: Retained<NSScroller>,
     target: Retained<Target>,
+    page_overlap: f32,
     capture: RefCell<Option<(Id, TextureHandle)>>,
 }
 
@@ -87,6 +89,7 @@ impl NativeScroller {
         Some(Rc::new(Self {
             bar,
             target,
+            page_overlap: NSScrollView::new(main).verticalPageScroll() as f32,
             capture: RefCell::default(),
         }))
     }
@@ -189,7 +192,8 @@ impl NativeScroller {
         self.bar
             .setDoubleValue(f64::from((offset / range).clamp(0., 1.)));
         self.bar.setHidden(false);
-        binding.area.set(Some((id, view.height(), range)));
+        let page = (view.height() - self.page_overlap / zoom).max(0.);
+        binding.area.set(Some((id, page, range)));
     }
 }
 

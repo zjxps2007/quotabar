@@ -1270,7 +1270,7 @@ pub fn spaced_divider(ui: &mut Ui, color: Color32, above: f32, below: f32) {
 pub fn toggle(ui: &mut Ui, s: &str, value: bool, tint: Color32, p: Palette) -> Response {
     #[cfg(target_os = "macos")]
     {
-        mac_setting_toggle(ui, s, None, value, tint, p)
+        mac_setting_toggle(ui, s, None, false, value, tint, p)
     }
     #[cfg(windows)]
     {
@@ -1283,6 +1283,7 @@ pub fn mac_setting_toggle(
     ui: &mut Ui,
     title: &str,
     detail: Option<&str>,
+    stretch_label: bool,
     value: bool,
     tint: Color32,
     p: Palette,
@@ -1294,32 +1295,30 @@ pub fn mac_setting_toggle(
     } else {
         22.
     };
-    let (row, response) =
-        ui.allocate_exact_size(vec2(ui.available_width(), height), Sense::click());
+    let width = if stretch_label {
+        ui.available_width()
+    } else {
+        let title_width = PreferredFont::Body.text_width(ui, title);
+        let detail_width = detail.map_or(0., |text| PreferredFont::Caption.text_width(ui, text));
+        // SwiftUI leaves eight points between the label and the 38-point switch.
+        (title_width.max(detail_width).ceil() + 8. + 38.).min(ui.available_width())
+    };
+    let (row, response) = ui.allocate_exact_size(vec2(width, height), Sense::click());
     response
         .widget_info(|| WidgetInfo::selected(WidgetType::Checkbox, ui.is_enabled(), value, title));
     let painter = ui.painter();
+    let title_top = if detail.is_some() {
+        row.left_top()
+    } else {
+        row.left_center() - vec2(0., PreferredFont::Body.line_height(ui) / 2.)
+    };
+    PreferredFont::Body.paint_at(ui, title_top, title, p.ink);
     if let Some(detail) = detail {
-        painter.text(
-            row.left_top(),
-            Align2::LEFT_TOP,
-            title,
-            FontId::proportional(13.),
-            p.ink,
-        );
         PreferredFont::Caption.paint_at(
             ui,
             row.left_bottom() - vec2(0., caption_height),
             detail,
             p.muted,
-        );
-    } else {
-        painter.text(
-            row.left_center(),
-            Align2::LEFT_CENTER,
-            title,
-            FontId::proportional(13.),
-            p.ink,
         );
     }
     let track = Rect::from_center_size(row.right_center() - vec2(19., 0.), vec2(38., 22.));

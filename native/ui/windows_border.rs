@@ -7,6 +7,7 @@ use std::collections::HashMap;
 pub struct BorderRenderer {
     tiles: HashMap<Tile, (TextureHandle, u64)>,
     pass: u64,
+    pub window_target: bool,
 }
 
 // Stretch just the uniform center texel of each axis, retaining the edge
@@ -55,23 +56,47 @@ struct Tile {
     stroke: u32,
     pen: Color32,
     fill: Color32,
+    window_fill: bool,
 }
 
-// Each scan line contains the first included and first excluded sample on
-// the WPF software rasterizer's 8×8 grid.
-struct Coverage(Vec<[i32; 2]>);
+#[derive(Clone, Copy)]
+struct EdgeRamp {
+    center: f32,
+    width: f32,
+}
+
+struct Coverage {
+    // First included and first excluded sample on each 8×8 subscanline.
+    samples: Vec<[i32; 2]>,
+    // WPF can interpolate coverage when a pair of edges spans an entire device row.
+    ramps: Vec<[Option<EdgeRamp>; 2]>,
+}
 
 impl Coverage {
-    fn new(rect: Rect, radius: f32, height: usize) -> Self {
+    fn new(rect: Rect, radius: f32, height: usize, window_fill: bool) -> Self {
         let fixed = |p: Pos2| (p * 16. + Vec2::splat(0.5)).floor();
         let first = |x: f32| (x * 0.5).ceil() as i32;
         let min = fixed(rect.min);
         let max = fixed(rect.max);
-        let mut rows = vec![[0, 0]; height * 8];
-        let start = first(min.y).clamp(0, rows.len() as i32) as usize;
-        let end = first(max.y).clamp(start as i32, rows.len() as i32) as usize;
-        rows[start..end].fill([first(min.x), first(max.x)]);
+        let mut mask = Self {
+            samples: vec![[0, 0]; height * 8],
+            ramps: if window_fill {
+                vec![[None; 2]; height]
+            } else {
+                Vec::new()
+            },
+        };
+        let start = first(min.y).clamp(0, mask.samples.len() as i32) as usize;
+        let end = first(max.y).clamp(start as i32, mask.samples.len() as i32) as usize;
+        mask.samples[start..end].fill([first(min.x), first(max.x)]);
         let radius = radius.max(0.).min(rect.width().min(rect.height()) * 0.5);
+        for (side, x) in [rect.left(), rect.right()].into_iter().enumerate() {
+            mask.set_ramp(
+                side,
+                fixed(pos2(x, rect.top() + radius)),
+                fixed(pos2(x, rect.bottom() - radius)),
+            );
+        }
         if radius > 0. {
             // Border supplies cubic quarter arcs. Both their control points
             // and the vertices emitted by the flattener use 28.4 coordinates.
@@ -82,13 +107,13 @@ impl Coverage {
                         .map(|(u, v)| fixed(pos2(x + dx * u, y + dy * v)));
                     let mut previous = points[0];
                     Self::flatten(points, &mut |to| {
-                        Self::edge(&mut rows, side, previous, to);
+                        mask.edge(side, previous, to);
                         previous = to;
                     });
                 }
             }
         }
-        Self(rows)
+        mask
     }
 
     fn flatten([a, b, c, d]: [Pos2; 4], emit: &mut impl FnMut(Pos2)) {
@@ -109,8 +134,10 @@ impl Coverage {
         Self::flatten([middle, right, cd, d], emit);
     }
 
-    fn edge(rows: &mut [[i32; 2]], side: usize, a: Pos2, b: Pos2) {
+    fn edge(&mut self, side: usize, a: Pos2, b: Pos2) {
         let (lo, hi) = if a.y <= b.y { (a, b) } else { (b, a) };
+        self.set_ramp(side, lo, hi);
+        let rows = &mut self.samples;
         let first = (lo.y * 0.5).ceil().clamp(0., rows.len() as f32) as usize;
         let end = (hi.y * 0.5).ceil().clamp(0., rows.len() as f32) as usize;
         let dx = (hi.x - lo.x) as i64;
@@ -122,9 +149,39 @@ impl Coverage {
         }
     }
 
+    fn set_ramp(&mut self, side: usize, lo: Pos2, hi: Pos2) {
+        if self.ramps.is_empty() || hi.y <= lo.y {
+            return;
+        }
+        // Edge endpoints are in sixteenths of a pixel. The active edge changes
+        // on the first eighth-pixel sample at or after the endpoint.
+        let first = ((lo.y * 0.5).ceil() / 8.).ceil().max(0.) as usize;
+        let end = ((hi.y * 0.5).ceil() / 8.).floor().max(0.) as usize;
+        let slope = (hi.x - lo.x) / (hi.y - lo.y);
+        for y in first..end.min(self.ramps.len()) {
+            let center_y = (y as f32 + 0.5) * 16.;
+            self.ramps[y][side] = Some(EdgeRamp {
+                center: (lo.x + (center_y - lo.y) * slope) / 16.,
+                width: 1. + slope.abs(),
+            });
+        }
+    }
+
+    fn window_fraction(&self, x: usize, y: usize) -> f32 {
+        if let [Some(left), Some(right)] = self.ramps[y]
+            && left.center + left.width * 0.5 <= right.center - right.width * 0.5
+        {
+            let center = x as f32 + 0.5;
+            let from_left = 0.5 + (center - left.center) / left.width;
+            let from_right = 0.5 + (right.center - center) / right.width;
+            return from_left.min(from_right).clamp(0., 1.);
+        }
+        self.pixel(x, y) as f32 / 64.
+    }
+
     fn pixel(&self, x: usize, y: usize) -> u32 {
         let start = (x * 8) as i32;
-        self.0[y * 8..y * 8 + 8]
+        self.samples[y * 8..y * 8 + 8]
             .iter()
             .map(|&[left, right]| (right.min(start + 8) - left.max(start)).max(0) as u32)
             .sum()
@@ -142,12 +199,16 @@ impl Tile {
         let stroke = f32::from_bits(self.stroke);
         let inner = outer.shrink(stroke);
         let radius = f32::from_bits(self.radius);
-        let pen_coverage = Coverage::new(outer, radius + 0.5 * stroke, height);
+        let pen_coverage = Coverage::new(outer, radius + 0.5 * stroke, height, self.window_fill);
         let fill_coverage =
-            (stroke > 0.).then(|| Coverage::new(inner, radius - 0.5 * stroke, height));
+            (stroke > 0.).then(|| Coverage::new(inner, radius - 0.5 * stroke, height, false));
         let mut pixels = Vec::with_capacity(width * height);
         for y in 0..height {
             for x in 0..width {
+                if self.window_fill {
+                    pixels.push(self.fill.gamma_multiply(pen_coverage.window_fraction(x, y)));
+                    continue;
+                }
                 let outside = pen_coverage.pixel(x, y);
                 let fill = fill_coverage
                     .as_ref()
@@ -175,12 +236,28 @@ mod tests {
     use super::*;
 
     #[test]
+    fn window_and_bitmap_preserve_their_distinct_wpf_edge_coverage() {
+        // White calendar cells over black, captured on both WPF drawing targets.
+        let size = vec2(17. + 19. / 26., 16.);
+        for (origin, x, y, window, bitmap) in [
+            (pos2(1. / 32., 19. / 32.), 0, 3, 239, 223),
+            (pos2(1. / 32., 19. / 32.), 0, 1, 92, 92),
+            (Pos2::ZERO, 0, 14, 183, 199),
+            (Pos2::ZERO, 17, 14, 133, 155),
+        ] {
+            let mask = Coverage::new(Rect::from_min_size(origin, size), 2., 17, true);
+            assert_eq!((255. * mask.window_fraction(x, y)).round() as u32, window);
+            assert_eq!((255 * mask.pixel(x, y) + 32) / 64, bitmap);
+        }
+    }
+
+    #[test]
     fn fractional_switch_focus_border_covers_both_adjacent_rows() {
         let bounds = Rect::from_min_size(pos2(0., 1. / 16.), vec2(34., 22.));
         // In WPF's switch focus visual the straight edge covers 7/8 of one
         // physical pixel and 1/8 of the next on both sides of the track.
-        let outer = Coverage::new(bounds, 10.5, 23);
-        let inner = Coverage::new(bounds.shrink(1.), 9.5, 23);
+        let outer = Coverage::new(bounds, 10.5, 23, false);
+        let inner = Coverage::new(bounds.shrink(1.), 9.5, 23, false);
         let samples = [0, 1, 21, 22].map(|y| outer.pixel(16, y) - inner.pixel(16, y));
         assert_eq!(samples, [56, 8, 56, 8]);
     }
@@ -195,7 +272,7 @@ mod tests {
                     let y = origin + phase as f32 / 64.;
                     let rect = Rect::from_min_size(pos2(0., y / scale), vec2(80., 24.) / scale);
                     let relative = (rect * scale).translate(vec2(0., -origin));
-                    let mask = Coverage::new(relative, 7., 25);
+                    let mask = Coverage::new(relative, 7., 25, false);
                     let expected = 64 - ((phase + 6) / 8) * 8;
                     assert_eq!(mask.pixel(40, 0), expected);
                     assert_eq!(mask.pixel(40, 24), 64 - expected);
@@ -212,7 +289,7 @@ mod tests {
             (pos2(27. / 64., 1. / 64.), 16., 5, 3, [0, 21, 61]),
         ] {
             let rect = Rect::from_min_size(origin, vec2(64.6875, 48.25));
-            let coverage = Coverage::new(rect, radius, 50);
+            let coverage = Coverage::new(rect, radius, 50, false);
             assert_eq!([x, x + 1, x + 2].map(|i| coverage.pixel(i, y)), expected);
         }
     }
@@ -268,6 +345,7 @@ impl BorderRenderer {
             stroke: s.to_bits(),
             pen: stroke.color,
             fill,
+            window_fill: self.window_target && s == 0.,
         };
         let texture = match self.tiles.entry(tile) {
             std::collections::hash_map::Entry::Occupied(entry) => entry.into_mut(),
