@@ -857,23 +857,36 @@ pub fn activity_model_row(
     let title_y = baseline - title.metrics.ascent;
     let counts_y = title_y + title.size.y + 1.;
     let amount_y = baseline - amount.metrics.ascent;
-    let height = (counts_y + counts.size.y).max(amount_y + amount.size.y);
+    let height = (counts_y + counts.metrics.height).max(amount_y + amount.metrics.height);
     let (row, response) = ui.allocate_exact_size(vec2(width, height), Sense::hover());
+    // The model's texture includes separately rounded ascent and descent.
+    // Center it in its logical first line before aligning the circle and total.
+    let center = (row.top() + title_y + title.size.y * 0.5) * scale;
+    let title_top = (center - title.texture.size_vec2().y * 0.5).floor() / scale;
+    let ink_baseline = title_top + title.metrics.ascent;
     ui.painter()
-        .circle_filled(row.min + vec2(3., baseline - 3.), 3., tint);
-    for (key, run, text, x, y, color) in [
-        ("model", title, model, 12., title_y, palette.ink),
-        ("counts", counts, detail, 12., counts_y, palette.muted),
+        .circle_filled(pos2(row.left() + 3., ink_baseline - 3.), 3., tint);
+    let amount_top = ink_baseline - amount.metrics.ascent;
+    for (key, run, text, x, top, color) in [
+        ("model", title, model, 12., title_top, palette.ink),
+        (
+            "counts",
+            counts,
+            detail,
+            12.,
+            row.top() + counts_y,
+            palette.muted,
+        ),
         (
             "total",
             amount,
             total,
             width - amount_width,
-            amount_y,
+            amount_top,
             palette.ink,
         ),
     ] {
-        let pos = row.min + vec2(x, y);
+        let pos = pos2(row.left() + x, top);
         ui.painter().add(run.shape(pos, scale, color));
         let label = ui.interact(
             Rect::from_min_size(pos, run.size),

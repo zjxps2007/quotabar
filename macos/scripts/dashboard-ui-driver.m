@@ -373,6 +373,59 @@ static NSDictionary *settingsScroller(NSWindow *window, BOOL page) {
 
 // Read the actual composited sheet. Picker titles alone cannot prove that the
 // body changed, and SwiftUI's text-selection view does not always expose it to AX.
+static BOOL includesActivityModel(VNRecognizeTextRequest *request) {
+    for (VNRecognizedTextObservation *line in request.results) {
+        for (VNRecognizedText *candidate in [line topCandidates:3]) {
+            NSString *normalized = [[candidate.string.lowercaseString componentsSeparatedByCharactersInSet:
+                NSCharacterSet.alphanumericCharacterSet.invertedSet] componentsJoinedByString:@""];
+            if ([normalized containsString:@"claudeopus"]) return YES;
+        }
+    }
+    return NO;
+}
+
+static BOOL readModelAboveCounts(NSURL *frame, VNRecognizeTextRequest *full, NSMutableString *body) {
+    // At 1x Vision sometimes merges the 10.5pt model with the provider dot.
+    // Locate its input-count line, then read the model from a magnified crop of the same PNG.
+    NSBitmapImageRep *bitmap = [NSBitmapImageRep imageRepWithData:[NSData dataWithContentsOfURL:frame]];
+    CGImageRef image = bitmap.CGImage;
+    if (!image) return NO;
+    size_t width = CGImageGetWidth(image), height = CGImageGetHeight(image);
+    for (VNRecognizedTextObservation *line in full.results) {
+        if (![[line topCandidates:1].firstObject.string containsString:@"220"]) continue;
+        CGRect bounds = VNImageRectForNormalizedRect(line.boundingBox, width, height);
+        CGFloat h = MAX(8., bounds.size.height);
+        CGRect rect = CGRectMake(CGRectGetMinX(bounds) - h / 8., height - CGRectGetMaxY(bounds) - 3.5 * h,
+                                 MAX(bounds.size.width, 12. * h), 4. * h);
+        rect = CGRectIntersection(CGRectIntegral(rect), CGRectMake(0, 0, width, height));
+        if (CGRectIsEmpty(rect)) continue;
+        CGImageRef crop = CGImageCreateWithImageInRect(image, rect);
+        if (!crop) continue;
+        size_t w = 3 * CGImageGetWidth(crop), scaledHeight = 3 * CGImageGetHeight(crop);
+        CGColorSpaceRef space = CGColorSpaceCreateDeviceRGB();
+        CGContextRef context = CGBitmapContextCreate(NULL, w, scaledHeight, 8, w * 4, space, kCGImageAlphaPremultipliedLast);
+        CGColorSpaceRelease(space);
+        if (!context) { CGImageRelease(crop); continue; }
+        CGContextSetInterpolationQuality(context, kCGInterpolationHigh);
+        CGContextDrawImage(context, CGRectMake(0, 0, w, scaledHeight), crop);
+        CGImageRelease(crop);
+        CGImageRef enlarged = CGBitmapContextCreateImage(context);
+        CGContextRelease(context);
+        if (!enlarged) continue;
+        VNImageRequestHandler *reader = [[VNImageRequestHandler alloc] initWithCGImage:enlarged options:@{}];
+        CGImageRelease(enlarged);
+        VNRecognizeTextRequest *request = [VNRecognizeTextRequest new];
+        request.recognitionLanguages = @[@"en-US"];
+        request.recognitionLevel = VNRequestTextRecognitionLevelAccurate;
+        request.usesLanguageCorrection = NO;
+        if (![reader performRequests:@[request] error:NULL]) continue;
+        for (VNRecognizedTextObservation *text in request.results)
+            [body appendFormat:@" | %@", [text topCandidates:1].firstObject.string];
+        if (includesActivityModel(request)) return YES;
+    }
+    return NO;
+}
+
 static NSDictionary *visibleText(NSURL *frame, NSString *operation) {
     VNRecognizeTextRequest *request = [VNRecognizeTextRequest new];
     request.recognitionLanguages = @[@"en-US"];
@@ -392,14 +445,8 @@ static NSDictionary *visibleText(NSURL *frame, NSString *operation) {
     NSString *letters = [[body componentsSeparatedByCharactersInSet:NSCharacterSet.alphanumericCharacterSet.invertedSet]
                          componentsJoinedByString:@""];
     if ([operation isEqual:@"activityDetail"]) {
-        for (VNRecognizedTextObservation *line in request.results) {
-            for (VNRecognizedText *candidate in [line topCandidates:3]) {
-                NSString *normalized = [[candidate.string.lowercaseString componentsSeparatedByCharactersInSet:
-                    NSCharacterSet.alphanumericCharacterSet.invertedSet] componentsJoinedByString:@""];
-                if ([normalized containsString:@"claudeopus"]) return @{@"model": @YES, @"recognized": body};
-            }
-        }
-        return @{@"model": @NO, @"recognized": body};
+        BOOL model = includesActivityModel(request) || readModelAboveCounts(frame, request, body);
+        return @{@"model": @(model), @"recognized": body};
     }
     if ([operation isEqual:@"activityLongModel"]) {
         CGRect prefix = CGRectNull;
@@ -421,7 +468,7 @@ static NSDictionary *visibleText(NSURL *frame, NSString *operation) {
                 }
             }
         }
-        return @{@"modelEnds": @(suffix && !middle), @"rowTotal": @(total), @"recognized": body};
+        return @{@"modelEnds": suffix && !middle ? @YES : @NO, @"rowTotal": @(total), @"recognized": body};
     }
     if ([operation isEqual:@"activityTotals"]) {
         BOOL claude = [letters containsString:@"560tokens"], codex = [letters containsString:@"810tokens"];
